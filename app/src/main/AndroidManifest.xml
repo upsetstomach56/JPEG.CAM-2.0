@@ -4,15 +4,19 @@
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <uses-feature android:name="android.hardware.camera" />
+    <uses-feature android:name="android.hardware.camera.autofocus" />
  
-    <application android:label="@string/app_name" >
+    <application android:label="@string/app_name" android:icon="@drawable/icon">
+        
         <receiver android:name=".ExitCompletedReceiver" >
             <intent-filter>
                 <action android:name="com.android.server.DAConnectionManagerService.ExitCompleted" />
@@ -28,60 +32,27 @@
 
         <activity
             android:name=".MainActivity"
-            android:label="@string/title_activity_main" >
+            android:label="@string/app_name"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".KeyEventActivity"
-            android:label="@string/title_activity_key_event" >
-        </activity>
-        <activity
-            android:name=".PropertyActivity"
-            android:label="@string/title_activity_property" >
-        </activity>
-        <activity
-            android:name=".WifiActivity"
-            android:label="@string/title_activity_wifi" >
-        </activity>
-        <activity
-            android:name=".WifiSettingActivity"
-            android:label="@string/title_activity_wifi_setting" >
-        </activity>
-        <activity
-            android:name=".WifiDirectActivity"
-            android:label="@string/title_activity_wifi_direct" >
-        </activity>
-        <activity
-            android:name=".TimeActivity"
-            android:label="@string/title_activity_time" >
-        </activity>
-        <activity
-            android:name=".CameraActivity"
-            android:label="@string/title_activity_camera" >
-        </activity>
-        <activity
-            android:name=".DisplayActivity"
-            android:label="@string/title_activity_display" >
-        </activity>
-        <activity
-            android:name=".LedActivity"
-            android:label="@string/title_activity_led" >
-        </activity>
-        <activity
-            android:name=".PlaybackActivity"
-            android:label="@string/title_activity_playback" >
-        </activity>
-        <activity
-            android:name=".ImageActivity"
-            android:label="@string/title_activity_image" >
-        </activity>
-        <activity
-            android:name=".InstallActivity"
-            android:label="@string/title_activity_install" >
-        </activity>
-    </application>
 
+        <activity android:name=".KeyEventActivity" android:label="@string/title_activity_key_event" />
+        <activity android:name=".PropertyActivity" android:label="@string/title_activity_property" />
+        <activity android:name=".WifiActivity" android:label="@string/title_activity_wifi" />
+        <activity android:name=".WifiSettingActivity" android:label="@string/title_activity_wifi_setting" />
+        <activity android:name=".WifiDirectActivity" android:label="@string/title_activity_wifi_direct" />
+        <activity android:name=".TimeActivity" android:label="@string/title_activity_time" />
+        <activity android:name=".CameraActivity" android:label="@string/title_activity_camera" />
+        <activity android:name=".DisplayActivity" android:label="@string/title_activity_display" />
+        <activity android:name=".LedActivity" android:label="@string/title_activity_led" />
+        <activity android:name=".PlaybackActivity" android:label="@string/title_activity_playback" />
+        <activity android:name=".ImageActivity" android:label="@string/title_activity_image" />
+        <activity android:name=".InstallActivity" android:label="@string/title_activity_install" />
+        
+    </application>
 </manifest>
