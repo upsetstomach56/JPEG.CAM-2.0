@@ -9,7 +9,6 @@ import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.View;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -23,22 +22,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int curIso;
     private List<Integer> supportedIsos;
     
-    enum DialMode { shutter, aperture, iso, exposure }
+    enum DialMode { shutter, aperture, iso }
     private DialMode mDialMode = DialMode.shutter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+        setContentView(R.layout.activity_main); 
         
-        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
+        SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView); 
         mSurfaceHolder = surfaceView.getHolder();
         mSurfaceHolder.addCallback(this);
+        // SONY HANDSHAKE: Forces the a5100 to feed the sensor to the screen
         mSurfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         
-        tvShutter = (TextView) findViewById(R.id.tvShutter);
-        tvAperture = (TextView) findViewById(R.id.tvAperture);
-        tvISO = (TextView) findViewById(R.id.tvISO);
+        tvShutter = (TextView) findViewById(R.id.tvShutter); 
+        tvAperture = (TextView) findViewById(R.id.tvAperture); 
+        tvISO = (TextView) findViewById(R.id.tvISO); 
         tvExposure = (TextView) findViewById(R.id.tvExposure);
         
         setDialMode(DialMode.shutter);
@@ -52,18 +52,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mCameraEx.setShutterSpeedChangeListener(this);
         mCameraEx.startDirectShutter();
         
-        // Settings Sync
+        // Sync initial camera settings
         CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCameraEx.getNormalCamera().getParameters());
         supportedIsos = (List<Integer>) pm.getSupportedISOSensitivities();
         curIso = pm.getISOSensitivity();
         
-        sendSonyBroadcast(true);
+        // Fix the "Exit on Play" bug
+        notifySonyStatus(true);
         updateUI();
     }
 
-    private void sendSonyBroadcast(boolean active) {
+    private void notifySonyStatus(boolean active) {
         Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive");
         intent.putExtra("package_name", getPackageName());
+        intent.putExtra("class_name", getClass().getName());
         intent.putExtra("resume_key", active ? new String[]{"on"} : new String[]{});
         sendBroadcast(intent);
     }
@@ -71,26 +73,44 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
-        if (scanCode == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
+
+        // TRASH BUTTON: Clean Exit
+        if (scanCode == ScalarInput.ISV_KEY_DELETE) { 
+            notifySonyStatus(false);
+            finish(); 
+            return true; 
+        }
         
-        // Cycle through Shutter -> Aperture -> ISO using the DOWN key
+        // DOWN BUTTON: Cycle through Shutter -> Aperture -> ISO (Selected turns Green)
         if (scanCode == ScalarInput.ISV_KEY_DOWN) {
             if (mDialMode == DialMode.shutter) setDialMode(DialMode.aperture);
             else if (mDialMode == DialMode.aperture) setDialMode(DialMode.iso);
             else setDialMode(DialMode.shutter);
             return true;
         }
+
+        // CONTROL WHEEL: Adjust the selected value
+        if (scanCode == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleDialChange(1); return true; }
+        if (scanCode == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleDialChange(-1); return true; }
+
         return super.onKeyDown(keyCode, event);
     }
 
-    // BetterManual logic for the camera control dial
-    protected boolean onUpperDialChanged(int value) {
+    private void handleDialChange(int direction) {
         if (mDialMode == DialMode.shutter) {
-            if (value > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
+            if (direction > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
         } else if (mDialMode == DialMode.aperture) {
-            if (value > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture();
+            if (direction > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture();
+        } else if (mDialMode == DialMode.iso) {
+            // ISO cycle logic from BetterManual
+            int idx = supportedIsos.indexOf(curIso);
+            int nextIdx = Math.max(0, Math.min(supportedIsos.size() - 1, idx + direction));
+            curIso = supportedIsos.get(nextIdx);
+            Camera.Parameters p = mCameraEx.getNormalCamera().getParameters();
+            mCameraEx.createParametersModifier(p).setISOSensitivity(curIso);
+            mCameraEx.getNormalCamera().setParameters(p);
+            tvISO.setText("ISO " + curIso);
         }
-        return true;
     }
 
     private void setDialMode(DialMode mode) {
@@ -104,6 +124,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(mCameraEx.getNormalCamera().getParameters());
         Pair<Integer, Integer> speed = pm.getShutterSpeed();
         tvShutter.setText(speed.first + "/" + speed.second);
+        tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
         tvISO.setText("ISO " + curIso);
     }
 
@@ -114,10 +135,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override
     public void surfaceCreated(SurfaceHolder h) {
-        try { mCameraEx.getNormalCamera().setPreviewDisplay(h); mCameraEx.getNormalCamera().startPreview(); } catch (Exception e) {}
+        try { 
+            Camera cam = mCameraEx.getNormalCamera();
+            cam.setPreviewDisplay(h); 
+            cam.startPreview(); 
+        } catch (Exception e) {}
     }
     
     @Override public void onShutter(int i, CameraEx c) {}
+    @Override protected void onPause() { super.onPause(); if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; } }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
 }
