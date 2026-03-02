@@ -1,6 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R; // This links the logic to the identity
+import com.jpgcookbook.sony.R; // CRITICAL: The Bridge Import
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.*;
@@ -93,6 +93,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(mDialMode);
     }
 
+    // EXIF METADATA INJECTOR
     private void copyExif(String sourcePath, String destPath) {
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
@@ -236,6 +237,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 int targetW = b.outWidth / sample;
                 int targetH = b.outHeight / sample;
 
+                // FULL ARGB_8888 TRUE COLOR
                 Bitmap finalBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
                 Canvas canvas = new Canvas(finalBmp);
 
@@ -275,7 +277,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 fos.close();
                 finalBmp.recycle();
 
-                // Copy EXIF
+                // COPY METADATA
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
@@ -410,14 +412,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onResume() { 
         super.onResume(); 
         if (mCamera != null) syncUI(); 
-        // Force an initial scan to prime the "last photo" time
-        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
-        File sonyDir = new File(dcim, "100MSDCF");
-        if (sonyDir.exists() && sonyDir.listFiles() != null) {
-            for (File f : sonyDir.listFiles()) {
-                if (f.lastModified() > lastNewestFileTime) lastNewestFileTime = f.lastModified();
-            }
-        }
         startAutoProcessPolling(); 
     }
     
