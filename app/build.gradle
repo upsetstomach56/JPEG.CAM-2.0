@@ -1,9 +1,7 @@
 apply plugin: 'com.android.application'
-
 android {
     compileSdkVersion 25
     buildToolsVersion "26.0.2"
-
     defaultConfig {
         applicationId "com.jpgcookbook.sony"
         minSdkVersion 9
@@ -11,13 +9,10 @@ android {
         versionCode 1
         versionName "1.0"
     }
-
     sourceSets {
         main {
-            // This pulls the Sony hardware definitions from your stubs folder
             java.srcDirs = ['src/main/java', 'src/main/stubs']
         }
     }
 }
-
 dependencies {}
