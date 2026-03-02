@@ -22,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
+    // --- DECLARATIONS ---
     private CameraEx mCameraEx;
     private Camera mCamera;
     private SurfaceView mSurfaceView;
@@ -36,6 +37,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private HashSet<String> knownFiles = new HashSet<String>();
     private Handler m_handler = new Handler();
     private boolean isBaking = false;
+
+    // THE MISSING PIECES FIXED HERE:
+    enum DialMode { shutter, aperture, iso, exposure, recipe }
+    private DialMode mDialMode = DialMode.shutter;
+    
+    private List<Integer> supportedIsos;
+    private int curIso;
+    private int curExpComp;
+    private float expStep;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +64,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         initializeFileLibrary();
         scanRecipes();
+        setDialMode(DialMode.shutter);
     }
 
     private void initializeFileLibrary() {
@@ -88,6 +99,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }, 1500);
     }
 
+    // --- LUT ENGINE ---
     private class CubeLUT {
         int size = 0;
         float[] data;
@@ -113,7 +125,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } catch (Exception e) {}
         }
         int mapColor(int color) {
-            if (size == 0) return color;
+            if (size == 0 || data == null) return color;
             float r = (Color.red(color) / 255.0f) * (size - 1);
             float g = (Color.green(color) / 255.0f) * (size - 1);
             float b = (Color.blue(color) / 255.0f) * (size - 1);
@@ -123,6 +135,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    
+
     private class BakeTask extends AsyncTask<Void, Void, Boolean> {
         String fileName;
         BakeTask(String name) { this.fileName = name; }
@@ -131,7 +145,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             isBaking = true;
             tvRecipe.setText("FREEZING & BAKING...");
             tvRecipe.setTextColor(Color.RED);
-            // KILL PREVIEW to save RAM
             if (mCamera != null) {
                 mCamera.stopPreview();
                 mSurfaceView.setVisibility(View.INVISIBLE);
@@ -140,12 +153,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         @Override protected Boolean doInBackground(Void... voids) {
             try {
-                Thread.sleep(800); // Wait for hardware to finish writing
+                Thread.sleep(800); // Wait for hardware to finish its tasks
                 File lutFile = new File("/sdcard/LUTS/" + recipeList.get(recipeIndex));
                 CubeLUT lut = new CubeLUT(lutFile);
                 File original = new File(SONY_PATH, fileName);
                 
-                // ATTEMPT FULL RES (No inSampleSize)
                 BitmapFactory.Options opt = new BitmapFactory.Options();
                 opt.inMutable = true;
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
@@ -172,15 +184,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         @Override protected void onPostExecute(Boolean success) {
             isBaking = false;
-            // RESTORE PREVIEW
             if (mCamera != null) {
                 mSurfaceView.setVisibility(View.VISIBLE);
                 mCamera.startPreview();
             }
             updateRecipeDisplay();
-            tvShutter.setTextColor(Color.WHITE); // Reset UI colors
+            setDialMode(mDialMode);
         }
     }
+
+    
 
     @Override
     protected void onResume() {
@@ -189,10 +202,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
+            
             m_autoReviewControl = new CameraEx.AutoPictureReviewControl();
             mCameraEx.setAutoPictureReviewControl(m_autoReviewControl);
             m_pictureReviewTime = m_autoReviewControl.getPictureReviewTime();
             m_autoReviewControl.setPictureReviewTime(0);
+
+            Camera.Parameters p = mCamera.getParameters();
+            CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
+            supportedIsos = (List<Integer>) pm.getSupportedISOSensitivities();
+            curIso = pm.getISOSensitivity();
+            curExpComp = p.getExposureCompensation();
+            expStep = p.getExposureCompensationStep();
+
             mCameraEx.setShutterSpeedChangeListener(this);
             sendSonyBroadcast(true); 
             syncUI();
@@ -208,8 +230,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (speed.first == 1 && speed.second != 1) tvShutter.setText(speed.first + "/" + speed.second);
             else tvShutter.setText(speed.first + "\"");
             tvAperture.setText("f/" + (pm.getAperture() / 100.0f));
-            tvISO.setText("ISO " + pm.getISOSensitivity());
-            tvExposure.setText(String.format("%.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
+            tvISO.setText(curIso == 0 ? "ISO AUTO" : "ISO " + curIso);
+            tvExposure.setText(String.format("%.1f", curExpComp * expStep));
         } catch (Exception e) {}
     }
 
@@ -226,10 +248,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void handleInput(int delta) {
         if (mCameraEx == null || isBaking) return;
         try {
+            Camera.Parameters p = mCamera.getParameters();
+            CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             if (mDialMode == DialMode.shutter) {
                 if (delta > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed();
             } else if (mDialMode == DialMode.aperture) {
                 if (delta > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture();
+            } else if (mDialMode == DialMode.iso) {
+                int idx = supportedIsos.indexOf(curIso);
+                int next = Math.max(0, Math.min(supportedIsos.size() - 1, idx + delta));
+                curIso = supportedIsos.get(next);
+                pm.setISOSensitivity(curIso);
+                mCamera.setParameters(p);
+            } else if (mDialMode == DialMode.exposure) {
+                curExpComp = Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), curExpComp + delta));
+                p.setExposureCompensation(curExpComp);
+                mCamera.setParameters(p);
             } else if (mDialMode == DialMode.recipe) {
                 recipeIndex = (recipeIndex + delta + recipeList.size()) % recipeList.size();
                 updateRecipeDisplay();
@@ -299,6 +333,4 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onPause() { super.onPause(); m_handler.removeCallbacksAndMessages(null); if (mCameraEx != null) { m_autoReviewControl.setPictureReviewTime(m_pictureReviewTime); mCameraEx.release(); mCameraEx = null; } }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
-    
-    enum DialMode { shutter, aperture, iso, exposure, recipe }
 }
