@@ -1,6 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R; // CRITICAL: This matches your unique applicationId
+import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.*;
@@ -34,7 +34,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
-    private int qualityIndex = 0; // 0 = 1.5MP, 1 = 6.0MP
+    private int qualityIndex = 0; 
     
     private boolean isProcessing = false;
     private boolean isReady = false; 
@@ -65,7 +65,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
         
-        // STATUS UI (Top Left)
         tvStatus = new TextView(this);
         tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
@@ -75,7 +74,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         statusParams.setMargins(30, 80, 0, 0);
         contentRoot.addView(tvStatus, statusParams);
 
-        // QUALITY UI (Top Right)
         tvQuality = new TextView(this);
         tvQuality.setText("SIZE: PROXY (1.5MP)");
         tvQuality.setTextColor(Color.LTGRAY);
@@ -93,17 +91,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(mDialMode);
     }
 
-    // THE EXIF METADATA INJECTOR
     private void copyExif(String sourcePath, String destPath) {
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
             android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            
             String[] tags = new String[] {
                 "FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", 
                 "DateTime", "Make", "Model", "WhiteBalance", "Flash"
             };
-
             for (String tag : tags) {
                 String value = sourceExif.getAttribute(tag);
                 if (value != null) {
@@ -251,14 +246,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 for (int y = 0; y < b.outHeight; y += stripH) {
                     int h = Math.min(stripH, b.outHeight - y);
                     Bitmap strip = decoder.decodeRegion(new Rect(0, y, b.outWidth, y + h), s);
-                    Bitmap mStrip = strip.copy(Bitmap.Config.ARGB_8888, true);
+                    Bitmap mutableStrip = strip.copy(Bitmap.Config.ARGB_8888, true);
                     strip.recycle();
 
-                    mEngine.applyLutToBitmap(mStrip, null);
+                    mEngine.applyLutToBitmap(mutableStrip, null);
                     
-                    canvas.drawBitmap(mStrip, 0, dY, null);
-                    dY += mStrip.getHeight();
-                    mStrip.recycle();
+                    canvas.drawBitmap(mutableStrip, 0, dY, null);
+                    destY += mutableStrip.getHeight();
+                    mutableStrip.recycle();
 
                     publishProgress((int) (((float) (y + h) / b.outHeight) * 100));
                 }
@@ -276,7 +271,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 fos.close();
                 finalBmp.recycle();
 
-                // RUN EXIF INJECTOR
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
@@ -360,9 +354,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
     }
 
-    private void cycleMode() { 
-        setDialMode(DialMode.values()[(mDialMode.ordinal() + 1) % DialMode.values().length]); 
-    }
+    private void cycleMode() { setDialMode(DialMode.values()[(mDialMode.ordinal() + 1) % DialMode.values().length]); }
     
     private void setDialMode(DialMode m) { 
         mDialMode = m; 
