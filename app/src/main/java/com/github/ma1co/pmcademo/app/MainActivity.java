@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.util.Log;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -66,6 +67,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void initializeFileLibrary() {
         File dir = new File(SONY_PATH);
+        if (!dir.exists()) dir.mkdirs();
         File[] files = dir.listFiles();
         if (files != null) {
             for (File f : files) knownFiles.add(f.getName());
@@ -85,54 +87,69 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             String name = f.getName();
                             if (name.toUpperCase().endsWith(".JPG") && !name.startsWith("MIRROR_") && !knownFiles.contains(name)) {
                                 knownFiles.add(name);
-                                new DiagnosticTask(name).execute();
+                                new TrueMirrorTask(name).execute();
                                 break; 
                             }
                         }
                     }
                 }
-                m_handler.postDelayed(this, 2500); // Slower poll for safety
+                m_handler.postDelayed(this, 2000);
             }
-        }, 2500);
+        }, 2000);
     }
 
-    private class DiagnosticTask extends AsyncTask<Void, Void, Boolean> {
+    private class TrueMirrorTask extends AsyncTask<Void, String, Boolean> {
         String fileName;
-        DiagnosticTask(String name) { this.fileName = name; }
+        TrueMirrorTask(String name) { this.fileName = name; }
 
         @Override protected void onPreExecute() { 
             isBaking = true;
-            tvRecipe.setText("DIAGNOSTIC MIRROR TEST...");
+            tvRecipe.setText("FOUND: " + fileName + " - WAITING...");
             tvRecipe.setTextColor(Color.YELLOW);
-            System.gc();
         }
 
         @Override protected Boolean doInBackground(Void... voids) {
             try {
-                // WAIT LONGER: Let the Sony processor finish its secret work
-                Thread.sleep(2000); 
+                // Wait 5 seconds for Sony to finish writing and releasing the file lock
+                Thread.sleep(5000); 
                 File original = new File(SONY_PATH, fileName);
+                
+                if (!original.exists()) return false;
 
                 BitmapFactory.Options opt = new BitmapFactory.Options();
-                opt.inSampleSize = 8; // Tiny 1MP load
+                opt.inSampleSize = 4; // 4MP load is safe
                 Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
                 
                 if (bmp != null) {
                     File mirrorFile = new File(SONY_PATH, "MIRROR_" + fileName);
                     FileOutputStream fos = new FileOutputStream(mirrorFile);
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 70, fos);
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, fos);
+                    fos.flush();
                     fos.close();
                     bmp.recycle();
+                    
+                    // Force Android to "see" the new file
+                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(mirrorFile)));
                     return true;
                 }
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                return false;
+            }
             return false;
         }
 
         @Override protected void onPostExecute(Boolean success) {
             isBaking = false;
-            updateRecipeDisplay();
-            setDialMode(mDialMode);
+            if (success) {
+                tvRecipe.setText("MIRROR SAVED!");
+                tvRecipe.setTextColor(Color.GREEN);
+            } else {
+                tvRecipe.setText("MIRROR FAILED - FILE LOCKED?");
+                tvRecipe.setTextColor(Color.RED);
+            }
+            m_handler.postDelayed(new Runnable() {
+                @Override public void run() { updateRecipeDisplay(); setDialMode(mDialMode); }
+            }, 2000);
         }
     }
 
@@ -203,7 +220,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         } catch (Exception e) {}
     }
     private void cycleMode() { if (isBaking) return; DialMode[] modes = DialMode.values(); int next = (mDialMode.ordinal() + 1) % modes.length; setDialMode(modes[next]); }
-    private void setDialMode(DialMode mode) { mDialMode = mode; tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); updateRecipeDisplay(); }
+    private void setDialMode(DialMode mode) { mDialMode = mode; tvShutter.setTextColor(mode == DialMode.shutter ? Color.GREEN : Color.WHITE); tvAperture.setTextColor(mode == DialMode.aperture ? Color.GREEN : Color.WHITE); tvISO.setTextColor(mode == DialMode.iso ? Color.GREEN : Color.WHITE); tvExposure.setTextColor(mode == DialMode.exposure ? Color.GREEN : Color.WHITE); updateRecipeDisplay(); }
     private void scanRecipes() { recipeList.clear(); recipeList.add("NONE (DEFAULT)"); File lutDir = new File("/sdcard/LUTS"); if (lutDir.exists()) { File[] files = lutDir.listFiles(); if (files != null) { for (File f : files) { if (!f.getName().startsWith("_") && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName()); } } } updateRecipeDisplay(); }
     private void updateRecipeDisplay() { String name = recipeList.get(recipeIndex); String display = name.split("\\.")[0].toUpperCase(); tvRecipe.setText("<  " + display + "  >"); tvRecipe.setTextColor(mDialMode == DialMode.recipe ? Color.GREEN : Color.WHITE); }
     private void sendSonyBroadcast(boolean active) { Intent intent = new Intent("com.android.server.DAConnectionManagerService.AppInfoReceive"); intent.putExtra("package_name", getPackageName()); intent.putExtra("resume_key", active ? new String[]{"on"} : new String[]{}); sendBroadcast(intent); }
