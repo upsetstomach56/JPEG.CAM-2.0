@@ -7,7 +7,6 @@ import android.hardware.Camera;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Environment;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
@@ -17,13 +16,15 @@ import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
     private Camera mCamera;
     private SurfaceView mSurfaceView;
+    private CameraEx.AutoPictureReviewControl m_autoReviewControl;
     private TextView tvShutter, tvAperture, tvISO, tvExposure, tvRecipe;
-    
     private ArrayList<String> recipeList = new ArrayList<String>();
     private int recipeIndex = 0;
     private boolean isBaking = false;
@@ -32,7 +33,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        
         mSurfaceView = (SurfaceView) findViewById(R.id.surfaceView);
         mSurfaceView.getHolder().addCallback(this);
         mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
@@ -46,64 +46,69 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         scanRecipes();
     }
 
-    private class PathDetectiveTask extends AsyncTask<Void, String, String> {
+    private class SilentMirrorTask extends AsyncTask<Void, Void, String> {
         @Override protected void onPreExecute() { 
-            isBaking = true; 
-            tvRecipe.setText("DETECTING PATHS...");
+            isBaking = true;
+            tvRecipe.setText("COOKING...");
             tvRecipe.setTextColor(Color.YELLOW);
         }
 
         @Override protected String doInBackground(Void... voids) {
-            StringBuilder sb = new StringBuilder();
             try {
-                // Try to find where the SD card is actually mounted
-                File root = new File("/sdcard/DCIM");
-                if (!root.exists()) root = new File("/storage/sdcard0/DCIM");
-                if (!root.exists()) root = Environment.getExternalStorageDirectory();
+                File dir = new File("/sdcard/DCIM/100MSDCF");
+                File[] files = dir.listFiles();
+                if (files == null || files.length == 0) return "ERR: EMPTY";
 
-                sb.append("ROOT: ").append(root.getAbsolutePath()).append("\n");
-                
-                File[] list = root.listFiles();
-                if (list != null) {
-                    sb.append("FOUND: ");
-                    int count = 0;
-                    for (File f : list) {
-                        if (f.isDirectory() && count < 2) {
-                            sb.append(f.getName()).append(", ");
-                            count++;
-                        }
+                Arrays.sort(files, new Comparator<File>() {
+                    public int compare(File f1, File f2) {
+                        return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
                     }
-                } else {
-                    sb.append("LIST FILES RETURNED NULL");
+                });
+
+                File original = null;
+                for (File f : files) {
+                    if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("MIRROR_")) {
+                        original = f; break;
+                    }
                 }
+                if (original == null) return "ERR: NO JPG";
+
+                BitmapFactory.Options opt = new BitmapFactory.Options();
+                opt.inSampleSize = 4;
+                Bitmap bmp = BitmapFactory.decodeFile(original.getAbsolutePath(), opt);
+                if (bmp == null) return "ERR: BIONZ LOCKED";
+
+                File outDir = new File("/sdcard/DCIM/COOKED");
+                if (!outDir.exists()) outDir.mkdirs();
+                File outFile = new File(outDir, "MIRROR_" + original.getName());
+
+                FileOutputStream fos = new FileOutputStream(outFile);
+                bmp.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                fos.close();
+                bmp.recycle();
+
+                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
+                return "SUCCESS!";
             } catch (Exception e) {
                 return "ERR: " + e.getMessage();
             }
-            return sb.toString();
         }
 
         @Override protected void onPostExecute(String result) {
             isBaking = false;
             tvRecipe.setText(result);
-            tvRecipe.setTextColor(Color.CYAN);
-            tvRecipe.setTextSize(12); // Shrink text to fit the long path info
+            tvRecipe.setTextColor(result.equals("SUCCESS!") ? Color.GREEN : Color.RED);
         }
     }
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int scanCode = event.getScanCode();
+        if (scanCode == ScalarInput.ISV_KEY_UP) { new SilentMirrorTask().execute(); return true; }
         if (scanCode == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
-        
-        // PRESS UP TO DETECT REAL PATHS
-        if (scanCode == ScalarInput.ISV_KEY_UP) { 
-            new PathDetectiveTask().execute(); 
-            return true; 
-        }
         return super.onKeyDown(keyCode, event);
     }
 
-    // --- STANDARD UI METHODS ---
     private void syncUI() {
         if (mCamera == null) return;
         try {
@@ -128,6 +133,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             mCameraEx = CameraEx.open(0, null);
             mCamera = mCameraEx.getNormalCamera();
             mCameraEx.startDirectShutter();
+            
+            // SILENT PREVIEW CONTROL
+            m_autoReviewControl = new CameraEx.AutoPictureReviewControl();
+            mCameraEx.setAutoPictureReviewControl(m_autoReviewControl);
+            m_autoReviewControl.setPictureReviewTime(0);
+
             mCamera.setPreviewDisplay(h);
             mCamera.startPreview();
             syncUI();
