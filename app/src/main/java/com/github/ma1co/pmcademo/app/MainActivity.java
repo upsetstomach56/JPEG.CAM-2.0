@@ -1,6 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R; // CRITICAL: The Bridge Import
+import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.*;
@@ -65,7 +65,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         ViewGroup contentRoot = (ViewGroup) findViewById(android.R.id.content);
         
-        // STATUS UI (Top Left)
         tvStatus = new TextView(this);
         tvStatus.setText("STATUS: STANDBY");
         tvStatus.setTextColor(Color.LTGRAY);
@@ -75,7 +74,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         statusParams.setMargins(30, 80, 0, 0);
         contentRoot.addView(tvStatus, statusParams);
 
-        // QUALITY UI (Top Right)
         tvQuality = new TextView(this);
         tvQuality.setText("SIZE: PROXY (1.5MP)");
         tvQuality.setTextColor(Color.LTGRAY);
@@ -93,17 +91,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setDialMode(mDialMode);
     }
 
-    // EXIF METADATA INJECTOR
     private void copyExif(String sourcePath, String destPath) {
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
             android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            
             String[] tags = new String[] {
                 "FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", 
                 "DateTime", "Make", "Model", "WhiteBalance", "Flash"
             };
-
             for (String tag : tags) {
                 String value = sourceExif.getAttribute(tag);
                 if (value != null) {
@@ -237,7 +232,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 int targetW = b.outWidth / sample;
                 int targetH = b.outHeight / sample;
 
-                // FULL ARGB_8888 TRUE COLOR
                 Bitmap finalBmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
                 Canvas canvas = new Canvas(finalBmp);
 
@@ -277,7 +271,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 fos.close();
                 finalBmp.recycle();
 
-                // COPY METADATA
                 copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
 
                 sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
