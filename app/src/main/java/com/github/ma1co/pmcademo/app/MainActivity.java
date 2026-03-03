@@ -38,8 +38,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isReady = false; 
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
-
-    // THE SPEED UP: Hardware listener for zero-lag detection
     private SonyFileObserver mFileObserver;
 
     public enum DialMode { shutter, aperture, iso, exposure, recipe, quality }
@@ -53,7 +51,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public void onEvent(int event, final String path) {
             if (path == null || isProcessing || !isReady || recipeIndex == 0) return;
             if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
-                Log.e("COOKBOOK_LOG", "JAVA: File detected instantly via kernel!");
+                Log.e("COOKBOOK_LOG", "JAVA: File closed! Starting C++ instantly.");
                 final String fullPath = Environment.getExternalStorageDirectory() + "/DCIM/100MSDCF/" + path;
                 runOnUiThread(new Runnable() {
                     @Override public void run() { new ProcessTask().execute(fullPath); }
@@ -100,7 +98,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         scanRecipes();
         setDialMode(mDialMode);
 
-        // Initialize the instant listener
         File sonyDir = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
         if (!sonyDir.exists()) sonyDir.mkdirs();
         mFileObserver = new SonyFileObserver(sonyDir.getAbsolutePath());
@@ -141,9 +138,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 if (!outDir.exists()) outDir.mkdirs();
                 File outFile = new File(outDir, original.getName());
 
-                // Perform the high-speed C++ tetrahedral math
+                // Perform the high-speed C++ tetrahedral math (EXIF is handled automatically in C++)
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale)) {
-                    copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SUCCESS: SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
                 }
@@ -178,17 +174,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             else if (mDialMode == DialMode.iso) {
                 List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
                 int idx = isos.indexOf(pm.getISOSensitivity());
-                if (idx != -1) { pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx+d)))); mCamera.setParameters(p); }
+                if (idx != -1) { pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); mCamera.setParameters(p); }
             }
-            else if (mDialMode == DialMode.exposure) { p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), p.getExposureCompensation()+d))); mCamera.setParameters(p); }
+            else if (mDialMode == DialMode.exposure) { p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), p.getExposureCompensation() + d))); mCamera.setParameters(p); }
             else if (mDialMode == DialMode.recipe) {
-                recipeIndex = (recipeIndex+d+recipeList.size())%recipeList.size(); updateRecipeDisplay();
+                recipeIndex = (recipeIndex + d + recipeList.size()) % recipeList.size(); updateRecipeDisplay();
                 if (currentPreloadTask != null) currentPreloadTask.cancel(true);
                 if (recipeIndex > 0) { currentPreloadTask = new PreloadLutTask(); currentPreloadTask.execute(recipeIndex); }
                 else { isReady = false; tvStatus.setText("STATUS: RAW"); tvStatus.setTextColor(Color.LTGRAY); }
             }
             else if (mDialMode == DialMode.quality) {
-                qualityIndex = (qualityIndex+d+3)%3;
+                qualityIndex = (qualityIndex + d + 3) % 3;
                 tvQuality.setText("SIZE: " + (qualityIndex==0?"PROXY (1.5MP)":(qualityIndex==2?"ULTRA (24MP)":"HIGH (6MP)")));
             }
             syncUI();
@@ -242,17 +238,4 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { syncUI(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
     @Override public void surfaceDestroyed(SurfaceHolder h) {}
-
-    private void copyExif(String sourcePath, String destPath) {
-        try {
-            android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
-            android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            String[] tags = {"FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", "DateTime", "Make", "Model", "WhiteBalance", "Flash"};
-            for (String tag : tags) {
-                String value = sourceExif.getAttribute(tag);
-                if (value != null) destExif.setAttribute(tag, value);
-            }
-            destExif.saveAttributes();
-        } catch (IOException e) {}
-    }
 }

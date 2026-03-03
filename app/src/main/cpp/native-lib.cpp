@@ -84,6 +84,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     }
     
     jpeg_create_decompress(cinfo_d);
+
+    // --- OPTIMIZATION: SAVE EXIF MARKERS ---
+    jpeg_save_markers(cinfo_d, JPEG_APP0 + 1, 0xFFFF); 
+
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->scale_num = 1;
@@ -109,6 +113,14 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     cinfo_c->in_color_space = JCS_RGB;
     jpeg_set_defaults(cinfo_c);
     jpeg_set_quality(cinfo_c, 95, TRUE);
+
+    // --- OPTIMIZATION: WRITE EXIF MARKERS BEFORE COMPRESSING PIXELS ---
+    jpeg_saved_marker_ptr marker = cinfo_d->marker_list;
+    while (marker != NULL) {
+        jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
+        marker = marker->next;
+    }
+
     jpeg_start_compress(cinfo_c, TRUE);
 
     int lutMax = nativeLutSize - 1;
@@ -133,23 +145,22 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             int i000 = r0 + g0 * nativeLutSize + b0 * lutSize2;
             int oR, oG, oB;
 
-            // --- SPEED UP: TETRAHEDRAL INTERPOLATION ---
             if (dr > dg) {
-                if (dg > db) { // Case 1: r > g > b
+                if (dg > db) { 
                     int i100 = (r0+1) + g0 * nativeLutSize + b0 * lutSize2;
                     int i110 = (r0+1) + (g0+1) * nativeLutSize + b0 * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     oR = pR[i000] + dr*(pR[i100]-pR[i000]) + dg*(pR[i110]-pR[i100]) + db*(pR[i111]-pR[i110]);
-                    oG = pG[i000] + dr*(pG[i100]-pG[i000]) + dg*(pG[i110]-pG[i100]) + db*(pG[i111]-pG[i110]);
-                    oB = pB[i000] + dr*(pB[i100]-pB[i000]) + dg*(pB[i110]-pB[i100]) + db*(pB[i111]-pB[i110]);
-                } else if (dr > db) { // Case 2: r > b > g
+                    oG = pG[i000] + dr*(pG[i100]-pG[i000]) + dg*(pG[i110]-pG[i000]) + db*(pG[i111]-pG[i110]);
+                    oB = pB[i000] + dr*(pB[i100]-pB[i000]) + dg*(pB[i110]-pB[i000]) + db*(pB[i111]-pB[i110]);
+                } else if (dr > db) {
                     int i100 = (r0+1) + g0 * nativeLutSize + b0 * lutSize2;
                     int i101 = (r0+1) + g0 * nativeLutSize + (b0+1) * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     oR = pR[i000] + dr*(pR[i100]-pR[i000]) + db*(pR[i101]-pR[i100]) + dg*(pR[i111]-pR[i101]);
                     oG = pG[i000] + dr*(pG[i100]-pG[i000]) + db*(pG[i101]-pG[i100]) + dg*(pG[i111]-pG[i101]);
                     oB = pB[i000] + dr*(pB[i100]-pB[i000]) + db*(pB[i101]-pB[i100]) + dg*(pB[i111]-pB[i101]);
-                } else { // Case 3: b > r > g
+                } else {
                     int i001 = r0 + g0 * nativeLutSize + (b0+1) * lutSize2;
                     int i101 = (r0+1) + g0 * nativeLutSize + (b0+1) * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
@@ -158,21 +169,21 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                     oB = pB[i000] + db*(pB[i001]-pB[i000]) + dr*(pB[i101]-pB[i001]) + dg*(pB[i111]-pB[i101]);
                 }
             } else {
-                if (db > dg) { // Case 4: b > g > r
+                if (db > dg) {
                     int i001 = r0 + g0 * nativeLutSize + (b0+1) * lutSize2;
                     int i011 = r0 + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     oR = pR[i000] + db*(pR[i001]-pR[i000]) + dg*(pR[i011]-pR[i001]) + dr*(pR[i111]-pR[i011]);
                     oG = pG[i000] + db*(pG[i001]-pG[i000]) + dg*(pG[i011]-pG[i001]) + dr*(pG[i111]-pG[i011]);
                     oB = pB[i000] + db*(pB[i001]-pB[i000]) + dg*(pB[i011]-pB[i001]) + dr*(pB[i111]-pB[i011]);
-                } else if (db > dr) { // Case 5: g > b > r
+                } else if (db > dr) {
                     int i010 = r0 + (g0+1) * nativeLutSize + b0 * lutSize2;
                     int i011 = r0 + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
                     oR = pR[i000] + dg*(pR[i010]-pR[i000]) + db*(pR[i011]-pR[i010]) + dr*(pR[i111]-pR[i011]);
                     oG = pG[i000] + dg*(pG[i010]-pG[i000]) + db*(pG[i011]-pG[i010]) + dr*(pG[i111]-pG[i011]);
                     oB = pB[i000] + dg*(pB[i010]-pB[i000]) + db*(pB[i011]-pB[i010]) + dr*(pB[i111]-pB[i011]);
-                } else { // Case 6: g > r > b
+                } else {
                     int i010 = r0 + (g0+1) * nativeLutSize + b0 * lutSize2;
                     int i110 = (r0+1) + (g0+1) * nativeLutSize + b0 * lutSize2;
                     int i111 = (r0+1) + (g0+1) * nativeLutSize + (b0+1) * lutSize2;
@@ -191,7 +202,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     jpeg_finish_compress(cinfo_c); jpeg_destroy_compress(cinfo_c);
     jpeg_finish_decompress(cinfo_d); jpeg_destroy_decompress(cinfo_d);
-    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
+    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c);
     fclose(infile); fclose(outfile);
     env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
     return JNI_TRUE;
