@@ -11,6 +11,12 @@ android {
     compileSdkVersion 25
     buildToolsVersion "26.0.2"
 
+    // This makes Java 17 act like Java 8
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
     defaultConfig {
         applicationId "com.jpgcookbook.sony"
         minSdkVersion 10
@@ -18,16 +24,15 @@ android {
         versionCode 1
         versionName "1.0-NDK"
 
-        // Tells the old compiler to focus on the camera CPU
         externalNativeBuild {
             cmake {
                 cppFlags "-O3 -mfpu=neon"
+                arguments "-DANDROID_STL=c++_static"
                 abiFilters "armeabi-v7a"
             }
         }
     }
 
-    // Points to our C++ blueprints
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"

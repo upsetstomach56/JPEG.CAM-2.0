@@ -6,8 +6,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # STEP A: Use Java 17 briefly to install the NDK
-    - name: Set up Java 17 (For NDK Install)
+    - name: Set up Java 17
       uses: actions/setup-java@v3
       with:
         java-version: '17'
@@ -16,18 +15,6 @@ jobs:
     - name: Install Vintage NDK
       run: |
         echo "y" | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;21.4.7075529" --sdk_root=${ANDROID_SDK_ROOT}
-
-    # STEP B: Switch back to Java 8 for the actual Camera App build
-    - name: Set up Java 8 (For Camera App Build)
-      uses: actions/setup-java@v3
-      with:
-        java-version: '8'
-        distribution: 'temurin'
-
-    - name: Purge Modern SDKs
-      run: |
-        rm -rf $ANDROID_SDK_ROOT/platforms/android-3*
-        rm -rf $ANDROID_SDK_ROOT/build-tools/3*
 
     - name: Setup Gradle 4.10.3
       uses: gradle/actions/setup-gradle@v3
@@ -38,10 +25,10 @@ jobs:
       run: |
         gradle wrapper --gradle-version 4.10.3
         chmod +x gradlew
-        ./gradlew assembleDebug --stacktrace
+        ./gradlew assembleDebug -Pandroid.ndkPath=${ANDROID_SDK_ROOT}/ndk/21.4.7075529 --stacktrace
 
     - name: Upload Result
       uses: actions/upload-artifact@v4
       with:
-        name: Sony-JPGCookbook-APK
+        name: Sony-JPGCookbook-NDK
         path: app/build/outputs/apk/debug/*.apk
