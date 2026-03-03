@@ -36,6 +36,9 @@ Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulati
 **4. Shoot!**
 - Take a picture normally. The app will automatically see the new photo and begin `PROCESSING`. Once it says `SUCCESS`, your photo is in the `GRADED` folder!
 
+**5. How to I Exit?**
+- To return to your standard camera controls, just press the Trash/? button.
+
 ## 📷 Supported Cameras
 Compatible with PMCA cameras (Android 2.3.7 / API 10) including: **a5100, a6000, a6300, a6500, a7S II, a7R II, RX100 III/IV/V.**
 
