@@ -91,22 +91,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             public void run() {
                 while (isPolling) {
                     try {
-                        Thread.sleep(500); // TURBO: 500ms poll
+                        Thread.sleep(500); // Higher frequency check
                         if (!isProcessing && isReady && recipeIndex > 0) {
-                            File sonyDir = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
-                            if (sonyDir.exists()) {
-                                File[] files = sonyDir.listFiles();
+                            File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
+                            if (dcim.exists()) {
+                                File[] files = dcim.listFiles();
                                 if (files != null && files.length > 0) {
-                                    File newest = null; long maxModified = 0;
+                                    File newest = null; long maxMod = 0;
                                     for (File f : files) {
                                         if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("PRCS")) {
-                                            if (f.lastModified() > maxModified) { maxModified = f.lastModified(); newest = f; }
+                                            if (f.lastModified() > maxMod) { maxMod = f.lastModified(); newest = f; }
                                         }
                                     }
                                     if (newest != null) {
-                                        if (lastNewestFileTime == 0) lastNewestFileTime = maxModified;
-                                        else if (maxModified > lastNewestFileTime) {
-                                            lastNewestFileTime = maxModified;
+                                        if (lastNewestFileTime == 0) lastNewestFileTime = maxMod;
+                                        else if (maxMod > lastNewestFileTime) {
+                                            lastNewestFileTime = maxMod;
                                             final String path = newest.getAbsolutePath();
                                             runOnUiThread(new Runnable() { @Override public void run() { if (!isProcessing) new ProcessTask().execute(path); } });
                                         }
@@ -146,13 +146,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             try {
                 File original = new File(params[0]);
                 int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);
-                File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                File rootDir = Environment.getExternalStorageDirectory();
+                File outDir = new File(rootDir, "GRADED");
                 if (!outDir.exists()) outDir.mkdirs();
                 File outFile = new File(outDir, original.getName());
 
-                // No spin-lock needed anymore; C++ will wait if necessary or we can handle file locking there
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale)) {
-                    // EXIF is already copied by C++ layer!
+                    copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SUCCESS: SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
                 }
@@ -164,6 +164,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             tvStatus.setText(result);
             tvStatus.setTextColor(result.startsWith("SUCCESS") ? Color.GREEN : Color.RED);
         }
+    }
+
+    private void copyExif(String sourcePath, String destPath) {
+        try {
+            android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
+            android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
+            String[] tags = {"FNumber", "ExposureTime", "ISOSpeedRatings", "FocalLength", "DateTime", "Make", "Model", "WhiteBalance", "Flash"};
+            for (String tag : tags) {
+                String value = sourceExif.getAttribute(tag);
+                if (value != null) destExif.setAttribute(tag, value);
+            }
+            destExif.saveAttributes();
+        } catch (IOException e) {}
     }
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
