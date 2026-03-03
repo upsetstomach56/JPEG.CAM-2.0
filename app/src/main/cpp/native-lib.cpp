@@ -90,8 +90,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_create_decompress(cinfo_d);
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
-    
-    // Fractional Scaling Support
     cinfo_d->scale_num = 1;
     cinfo_d->scale_denom = scaleDenom;
     cinfo_d->out_color_space = JCS_RGB; 
@@ -124,42 +122,78 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     int row_stride = cinfo_d->output_width * cinfo_d->output_components;
     JSAMPARRAY buffer = (*cinfo_d->mem->alloc_sarray)((j_common_ptr) cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
-    const int* pR = &nativeLutR[0]; const int* pG = &nativeLutG[0]; const int* pB = &nativeLutB[0];
+    // CACHED MEMORY POINTERS
+    const int* pR = &nativeLutR[0]; 
+    const int* pG = &nativeLutG[0]; 
+    const int* pB = &nativeLutB[0];
 
-    // PROVEN TRILINEAR MATH
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
 
         for (int x = 0; x < row_stride; x += 3) {
-            int r = row[x]; int g = row[x+1]; int b = row[x+2];
+            // FIXED-POINT MATH (0 to 128 integer scale, no decimals)
+            int fX = map[row[x]]; 
+            int fY = map[row[x+1]]; 
+            int fZ = map[row[x+2]];
 
-            int fX = map[r]; int fY = map[g]; int fZ = map[b];
-
-            int x0 = fX >> 7; int y0 = fY >> 7; int z0 = fZ >> 7;
+            int x0 = fX >> 7; 
+            int y0 = fY >> 7; 
+            int z0 = fZ >> 7;
+            
+            // THE CRASH PREVENTER: Strict Bounds Capping
             int x1 = x0 + 1; if (x1 > lutMax) x1 = lutMax;
             int y1 = y0 + 1; if (y1 > lutMax) y1 = lutMax;
             int z1 = z0 + 1; if (z1 > lutMax) z1 = lutMax;
 
-            int dx = fX & 0x7F; int dy = fY & 0x7F; int dz = fZ & 0x7F;
-            int idx_x = 128 - dx; int idy = 128 - dy; int idz = 128 - dz;
-
-            int w000 = idx_x * idy * idz; int w100 = dx * idy * idz;
-            int w010 = idx_x * dy * idz;  int w110 = dx * dy * idz;
-            int w001 = idx_x * idy * dz;  int w101 = dx * idy * dz;
-            int w011 = idx_x * dy * dz;   int w111 = dx * dy * dz;
+            int dx = fX & 0x7F; 
+            int dy = fY & 0x7F; 
+            int dz = fZ & 0x7F;
 
             int y0_idx = y0 * nativeLutSize; int y1_idx = y1 * nativeLutSize;
             int z0_idx = z0 * lutSize2;      int z1_idx = z1 * lutSize2;
 
-            int i000 = x0 + y0_idx + z0_idx; int i100 = x1 + y0_idx + z0_idx;
-            int i010 = x0 + y1_idx + z0_idx; int i110 = x1 + y1_idx + z0_idx;
-            int i001 = x0 + y0_idx + z1_idx; int i101 = x1 + y0_idx + z1_idx;
-            int i011 = x0 + y1_idx + z1_idx; int i111 = x1 + y1_idx + z1_idx;
+            int i000 = x0 + y0_idx + z0_idx;
+            int i100 = x1 + y0_idx + z0_idx;
+            int i010 = x0 + y1_idx + z0_idx;
+            int i110 = x1 + y1_idx + z0_idx;
+            int i001 = x0 + y0_idx + z1_idx;
+            int i101 = x1 + y0_idx + z1_idx;
+            int i011 = x0 + y1_idx + z1_idx;
+            int i111 = x1 + y1_idx + z1_idx;
 
-            int outR = (pR[i000]*w000 + pR[i100]*w100 + pR[i010]*w010 + pR[i110]*w110 + pR[i001]*w001 + pR[i101]*w101 + pR[i011]*w011 + pR[i111]*w111) >> 21;
-            int outG = (pG[i000]*w000 + pG[i100]*w100 + pG[i010]*w010 + pG[i110]*w110 + pG[i001]*w001 + pG[i101]*w101 + pG[i011]*w011 + pG[i111]*w111) >> 21;
-            int outB = (pB[i000]*w000 + pB[i100]*w100 + pB[i010]*w010 + pB[i110]*w110 + pB[i001]*w001 + pB[i101]*w101 + pB[i011]*w011 + pB[i111]*w111) >> 21;
+            int v0, v1, v2, v3;
+            int w0, w1, w2, w3;
+
+            // TETRAHEDRAL PYRAMID LOGIC (Selects 4 vertices instead of 8)
+            if (dx >= dy) {
+                if (dy >= dz) {
+                    v0 = i000; v1 = i100; v2 = i110; v3 = i111;
+                    w0 = 128 - dx; w1 = dx - dy; w2 = dy - dz; w3 = dz;
+                } else if (dx >= dz) {
+                    v0 = i000; v1 = i100; v2 = i101; v3 = i111;
+                    w0 = 128 - dx; w1 = dx - dz; w2 = dz - dy; w3 = dy;
+                } else {
+                    v0 = i000; v1 = i001; v2 = i101; v3 = i111;
+                    w0 = 128 - dz; w1 = dz - dx; w2 = dx - dy; w3 = dy;
+                }
+            } else {
+                if (dz >= dy) {
+                    v0 = i000; v1 = i001; v2 = i011; v3 = i111;
+                    w0 = 128 - dz; w1 = dz - dy; w2 = dy - dx; w3 = dx;
+                } else if (dz >= dx) {
+                    v0 = i000; v1 = i010; v2 = i011; v3 = i111;
+                    w0 = 128 - dy; w1 = dy - dz; w2 = dz - dx; w3 = dx;
+                } else {
+                    v0 = i000; v1 = i010; v2 = i110; v3 = i111;
+                    w0 = 128 - dy; w1 = dy - dx; w2 = dx - dz; w3 = dz;
+                }
+            }
+
+            // >> 7 divides by 128. Blazing fast pure integer math.
+            int outR = (pR[v0]*w0 + pR[v1]*w1 + pR[v2]*w2 + pR[v3]*w3) >> 7;
+            int outG = (pG[v0]*w0 + pG[v1]*w1 + pG[v2]*w2 + pG[v3]*w3) >> 7;
+            int outB = (pB[v0]*w0 + pB[v1]*w1 + pB[v2]*w2 + pB[v3]*w3) >> 7;
 
             row[x]   = outR > 255 ? 255 : (outR < 0 ? 0 : outR);
             row[x+1] = outG > 255 ? 255 : (outG < 0 ? 0 : outG);
