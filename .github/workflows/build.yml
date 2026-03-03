@@ -23,6 +23,10 @@ jobs:
         find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjzero_/cook_jzero_/g' {} +
         find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjdiv_/cook_jdiv_/g' {} +
         find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/\bjround_/cook_jround_/g' {} +
+        
+        echo "Healing broken include paths..."
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/#include "cook_/#include "/g' {} +
+        find app/src/main/cpp -type f \( -name "*.[ch]" -o -name "*.cpp" \) -exec sed -i 's/#include <cook_/#include </g' {} +
 
     - name: Create Clean Room SDK & NDK
       run: |
