@@ -9,7 +9,8 @@
     <application
         android:icon="@android:drawable/ic_menu_camera"
         android:label="JPG Cookbook"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:largeHeap="true">
 
         <activity
             android:name="com.github.ma1co.pmcademo.app.MainActivity"
