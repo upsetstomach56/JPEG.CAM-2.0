@@ -11,12 +11,6 @@ android {
     compileSdkVersion 25
     buildToolsVersion "26.0.2"
 
-    // This makes Java 17 act like Java 8
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-
     defaultConfig {
         applicationId "com.jpgcookbook.sony"
         minSdkVersion 10
@@ -27,7 +21,6 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags "-O3 -mfpu=neon"
-                arguments "-DANDROID_STL=c++_static"
                 abiFilters "armeabi-v7a"
             }
         }
