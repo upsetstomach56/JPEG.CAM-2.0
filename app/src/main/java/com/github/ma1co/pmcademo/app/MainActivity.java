@@ -15,14 +15,12 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.FileObserver;
 import android.text.Html;
-import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -31,11 +29,13 @@ import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
 import java.io.*;
 import java.util.ArrayList;
+import java.util.List; // RESTORED IMPORT - Fixes the compilation error!
 
 public class MainActivity extends Activity implements SurfaceHolder.Callback, CameraEx.ShutterSpeedChangeListener {
     private CameraEx mCameraEx;
     private Camera mCamera;
     private SurfaceView mSurfaceView;
+    private boolean hasSurface = false; // Tracks hardware state for Sleep/Wake
     
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
@@ -66,9 +66,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     class RTLProfile {
         int lutIndex = 0;
-        int opacity = 100; 
+        int opacity = 100; // 0-100%
         int grain = 0;    
-        int grainSize = 1; 
+        int grainSize = 1; // 0=SM, 1=MED, 2=LG
         int rollOff = 0;  
         int vignette = 0; 
         String whiteBalance = "AUTO";
@@ -176,7 +176,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    // --- THE NATIVE SONY/ANDROID GALLERY LAUNCHER ---
     private void launchNativeGallery() {
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
         if (outDir.exists() && outDir.listFiles() != null) {
@@ -184,8 +183,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             long maxMod = 0;
             for (File f : outDir.listFiles()) {
                 if (f.getName().toUpperCase().endsWith(".JPG") && f.lastModified() > maxMod) {
-                    maxMod = f.lastModified();
-                    newest = f;
+                    maxMod = f.lastModified(); newest = f;
                 }
             }
             if (newest != null) {
@@ -193,11 +191,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 intent.setDataAndType(Uri.fromFile(newest), "image/jpeg");
                 try {
                     startActivity(intent);
-                    return; // Successfully opened native hardware viewer
+                    return; 
                 } catch (Exception e) {}
             }
         }
-        // If we get here, no photos exist
         tvTopStatus.setText("NO GRADED PHOTOS");
         tvTopStatus.setTextColor(Color.RED);
     }
@@ -302,7 +299,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-        if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
+        
+        if (sc == ScalarInput.ISV_KEY_DELETE) { 
+            finish(); 
+            return true; 
+        }
 
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
@@ -317,9 +318,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
-                if (mDialMode == DialMode.review) {
-                    launchNativeGallery(); 
-                } else {
+                if (mDialMode == DialMode.review) { launchNativeGallery(); } 
+                else {
                     displayState = (displayState == 0) ? 1 : 0; 
                     mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 }
@@ -567,47 +567,60 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- EXIF ASPECT RATIO SQUISH FIX ---
     private void copyExif(String sourcePath, String destPath) {
         try {
             android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
             android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            
-            // Explicit array of tags we WANT to copy (excludes dimensions to prevent squishing)
             String[] tags = {
-                ExifInterface.TAG_ORIENTATION, 
-                "FNumber", "ExposureTime", "ISOSpeedRatings", 
-                "FocalLength", "DateTime", "Make", "Model", 
-                "WhiteBalance", "Flash"
+                ExifInterface.TAG_ORIENTATION, "FNumber", "ExposureTime", "ISOSpeedRatings", 
+                "FocalLength", "DateTime", "Make", "Model", "WhiteBalance", "Flash"
             };
-            for (String tag : tags) { 
-                String value = sourceExif.getAttribute(tag); 
-                if (value != null) destExif.setAttribute(tag, value); 
-            }
+            for (String tag : tags) { String value = sourceExif.getAttribute(tag); if (value != null) destExif.setAttribute(tag, value); }
             
-            // Calculate ACTUAL dimensions of new scaled JPEG and explicitly overwrite EXIF claims
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(destPath, opts);
             destExif.setAttribute("ImageWidth", String.valueOf(opts.outWidth));
             destExif.setAttribute("ImageLength", String.valueOf(opts.outHeight));
-            
             destExif.saveAttributes();
         } catch (IOException e) {}
     }
 
-    @Override public void surfaceCreated(SurfaceHolder h) { 
-        try { 
-            mCameraEx = CameraEx.open(0, null); mCamera = mCameraEx.getNormalCamera();
-            mCameraEx.startDirectShutter();
-            CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
-            mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
-            mCamera.setPreviewDisplay(h); mCamera.startPreview(); updateMainHUD();
-        } catch (Exception e) {} 
+    // --- HARDWARE LIFECYCLE MANAGEMENT FOR AUTO-RESUME ---
+    private void openCamera() {
+        if (mCameraEx == null && hasSurface) {
+            try { 
+                mCameraEx = CameraEx.open(0, null); mCamera = mCameraEx.getNormalCamera();
+                mCameraEx.startDirectShutter();
+                CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
+                mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
+                mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
+                updateMainHUD();
+            } catch (Exception e) {} 
+        }
     }
-    @Override protected void onResume() { super.onResume(); if (mCamera != null) updateMainHUD(); startAutoProcessPolling(); }
-    @Override protected void onPause() { super.onPause(); if (mCameraEx != null) mCameraEx.release(); isPolling = false; savePreferences(); }
+
+    private void closeCamera() {
+        if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; mCamera = null; }
+    }
+
+    @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
+    @Override public void surfaceDestroyed(SurfaceHolder h) { hasSurface = false; closeCamera(); }
+    
+    @Override protected void onResume() { 
+        super.onResume(); 
+        openCamera();
+        if (mCamera != null) updateMainHUD(); 
+        startAutoProcessPolling(); 
+    }
+    
+    @Override protected void onPause() { 
+        super.onPause(); 
+        closeCamera(); 
+        isPolling = false; 
+        savePreferences(); 
+    }
+    
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { updateMainHUD(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
-    @Override public void surfaceDestroyed(SurfaceHolder h) {}
 }
