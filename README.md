@@ -5,6 +5,8 @@
 
 Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulation powerhouse. By bypassing the standard Sony JPEG engine, this app applies professional 3D LUTs (`.cube` files) and organic film grain directly to your photos the moment you press the shutter. 
 
+> **🤝 Companion App Notice:** This dashboard is designed to work hand-in-hand with [**Alpha OS Dashboard (Sony PMCA File Server)**](https://github.com/jbuch84/AlphaOS-Dashboard), a modern, lightning-fast web dashboard and file server for Sony Alpha cameras.
+
 ## ✨ Features
 
 * **10 Programmable Banks:** Build and save 10 unique "Real Time Looks" (RTL). Toggle between them instantly using the camera's control dials.
