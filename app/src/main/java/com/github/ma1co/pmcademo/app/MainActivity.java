@@ -41,16 +41,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private Camera mCamera;
     private SurfaceView mSurfaceView;
     
-    // UI Elements
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
     private LinearLayout menuContainer;
-    private LinearLayout[] menuRows = new LinearLayout[10];
-    private TextView[] menuLabels = new TextView[10];
-    private TextView[] menuValues = new TextView[10];
+    private LinearLayout[] menuRows = new LinearLayout[11];
+    private TextView[] menuLabels = new TextView[11];
+    private TextView[] menuValues = new TextView[11];
     private TextView tvBottomBar, tvTopStatus; 
     
-    // Playback Elements
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
     private TextView tvPlaybackInfo;
@@ -58,7 +56,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int playbackIndex = 0;
     private Bitmap currentPlaybackBitmap = null;
     
-    // State & Engine
     private boolean isProcessing = false;
     private boolean isReady = false; 
     private boolean isMenuOpen = false;
@@ -73,14 +70,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
     
-    // THE METADATA ARRAYS (Solves 8.3 FAT32 Name Issue)
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
+    // FRIENDLY UI LABELS
+    private final String[] intensityLabels = {"OFF", "LOW", "LOW+", "MID", "MID+", "HIGH"};
+    private final String[] grainSizeLabels = {"SM", "MED", "LG"};
+
     class RTLProfile {
         int lutIndex = 0;
-        int opacity = 5;  
+        int opacity = 100; // Native 0-100%
         int grain = 0;    
+        int grainSize = 1; // 0=SM, 1=MED, 2=LG
         int rollOff = 0;  
         int vignette = 0; 
         String whiteBalance = "AUTO";
@@ -110,19 +111,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
         mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(-1, -1));
-
         setContentView(rootLayout);
 
         scanRecipes();
         for(int i=0; i<10; i++) profiles[i] = new RTLProfile();
         loadPreferences();
-
         buildUI(rootLayout);
 
         String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
@@ -131,7 +129,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (f.exists()) { sonyDCIMPath = f.getAbsolutePath(); break; }
         }
         if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
-        
         triggerLutPreload();
     }
 
@@ -154,7 +151,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // TRUE SONY BLOCK-STYLE MENU
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(230, 15, 15, 15));
         FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(650, 350, Gravity.CENTER);
@@ -164,7 +160,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer.setPadding(20, 40, 20, 40);
         menuScrollView.addView(menuContainer);
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 11; i++) {
             menuRows[i] = new LinearLayout(this);
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
             menuRows[i].setPadding(20, 15, 20, 15);
@@ -212,46 +208,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void refreshPlaybackFiles() {
         playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
-        if (outDir.exists()) {
-            File[] files = outDir.listFiles();
-            if (files != null) {
-                for (File f : files) {
-                    if (f.getName().toUpperCase().endsWith(".JPG")) playbackFiles.add(f);
-                }
-            }
+        if (outDir.exists() && outDir.listFiles() != null) {
+            for (File f : outDir.listFiles()) if (f.getName().toUpperCase().endsWith(".JPG")) playbackFiles.add(f);
         }
         java.util.Collections.sort(playbackFiles, new java.util.Comparator<File>() {
-            public int compare(File f1, File f2) {
-                return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
-            }
+            public int compare(File f1, File f2) { return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified()); }
         });
     }
 
     private void showPlaybackImage(int index) {
-        if (playbackFiles.isEmpty()) {
-            tvPlaybackInfo.setText("NO GRADED PHOTOS");
-            return;
-        }
+        if (playbackFiles.isEmpty()) { tvPlaybackInfo.setText("NO GRADED PHOTOS"); return; }
         if (index < 0) index = 0;
         if (index >= playbackFiles.size()) index = playbackFiles.size() - 1;
         playbackIndex = index;
-        
         File imgFile = playbackFiles.get(playbackIndex);
-        
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null);
-            currentPlaybackBitmap.recycle();
-            currentPlaybackBitmap = null;
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
         }
-        
         BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
-        
-        int scale = 1;
-        while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) { scale *= 2; }
+        options.inJustDecodeBounds = true; BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+        int scale = 1; while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) scale *= 2;
         options.inJustDecodeBounds = false; options.inSampleSize = scale;
-        
         try {
             Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
             ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
@@ -260,16 +237,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (orientation == ExifInterface.ORIENTATION_ROTATE_90) rotationAngle = 90;
             else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) rotationAngle = 180;
             else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) rotationAngle = 270;
-
             if (rotationAngle != 0) {
-                Matrix matrix = new Matrix();
-                matrix.postRotate(rotationAngle);
+                Matrix matrix = new Matrix(); matrix.postRotate(rotationAngle);
                 currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
                 if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
-            } else {
-                currentPlaybackBitmap = rawBitmap;
-            }
-
+            } else currentPlaybackBitmap = rawBitmap;
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
             tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
         } catch (Exception e) { tvPlaybackInfo.setText("DECODE ERROR"); }
@@ -280,9 +252,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
         isPlaybackMode = false;
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null);
-            currentPlaybackBitmap.recycle();
-            currentPlaybackBitmap = null;
+            playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
         }
     }
 
@@ -299,10 +269,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         editor.putInt("qualityIndex", qualityIndex);
         editor.putInt("currentSlot", currentSlot);
         for(int i=0; i<10; i++) {
-            // Save absolute PATH so missing files don't crash
             editor.putString("slot_" + i + "_lutPath", recipePaths.get(profiles[i].lutIndex));
             editor.putInt("slot_" + i + "_opac", profiles[i].opacity);
             editor.putInt("slot_" + i + "_grain", profiles[i].grain);
+            editor.putInt("slot_" + i + "_gSize", profiles[i].grainSize);
             editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
         }
@@ -311,10 +281,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             File lutDir = getLutDir();
             if (!lutDir.exists()) lutDir.mkdirs(); 
-            
             File backupFile = new File(lutDir, "RTLBAK.TXT");
             if (!backupFile.exists()) backupFile.createNewFile();
-
             FileOutputStream fos = new FileOutputStream(backupFile);
             StringBuilder sb = new StringBuilder();
             sb.append("quality=").append(qualityIndex).append("\n");
@@ -324,15 +292,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                   .append(recipePaths.get(profiles[i].lutIndex)).append(",")
                   .append(profiles[i].opacity).append(",")
                   .append(profiles[i].grain).append(",")
+                  .append(profiles[i].grainSize).append(",")
                   .append(profiles[i].rollOff).append(",")
                   .append(profiles[i].vignette).append("\n");
             }
-            
             fos.write(sb.toString().getBytes());
-            fos.flush();
-            fos.getFD().sync(); // THE FIX: Forces data through OS buffer onto silicon
-            fos.close();
-            
+            fos.flush(); fos.getFD().sync(); fos.close();
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
         } catch (Exception e) {}
     }
@@ -351,20 +316,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
                     else {
                         String[] parts = line.split(",");
-                        if (parts.length == 6) {
+                        // BACKWARDS COMPATIBILITY: Handles both old backups (6 args) and new backups (7 args)
+                        if (parts.length >= 6) {
                             int idx = Integer.parseInt(parts[0]);
                             int foundIndex = recipePaths.indexOf(parts[1]);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
-                            profiles[idx].opacity = Math.min(5, Integer.parseInt(parts[2]));
+                            profiles[idx].opacity = Integer.parseInt(parts[2]);
+                            if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100; // Old version fixer
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
-                            profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4]));
-                            profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
+                            
+                            if (parts.length == 7) {
+                                profiles[idx].grainSize = Math.min(2, Integer.parseInt(parts[4]));
+                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5]));
+                                profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
+                            } else {
+                                profiles[idx].grainSize = 1;
+                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4]));
+                                profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
+                            }
                         }
                     }
                 }
-                br.close();
-                savePreferences(); 
-                return;
+                br.close(); savePreferences(); return;
             } catch (Exception e) {}
         }
 
@@ -374,8 +347,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String savedPath = prefs.getString("slot_" + i + "_lutPath", "NONE");
             int foundIndex = recipePaths.indexOf(savedPath);
             profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
-            profiles[i].opacity = Math.min(5, prefs.getInt("slot_" + i + "_opac", 5));
+            profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100);
+            if (profiles[i].opacity <= 5) profiles[i].opacity = 100; 
             profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0));
+            profiles[i].grainSize = Math.min(2, prefs.getInt("slot_" + i + "_gSize", 1));
             profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0));
             profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
         }
@@ -400,15 +375,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                menuScrollView.setVisibility(View.VISIBLE);
-                mainUIContainer.setVisibility(View.GONE);
-                renderMenu();
+                menuScrollView.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
             } else {
-                menuScrollView.setVisibility(View.GONE);
-                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
-                savePreferences();
-                triggerLutPreload();
-                updateMainHUD();
+                menuScrollView.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                savePreferences(); triggerLutPreload(); updateMainHUD();
             }
             return true;
         }
@@ -416,15 +386,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
-                    isPlaybackMode = true;
-                    refreshPlaybackFiles();
-                    playbackContainer.setVisibility(View.VISIBLE);
-                    mainUIContainer.setVisibility(View.GONE);
-                    menuScrollView.setVisibility(View.GONE);
+                    isPlaybackMode = true; refreshPlaybackFiles();
+                    playbackContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); menuScrollView.setVisibility(View.GONE);
                     showPlaybackImage(0); 
                 } else {
-                    displayState = (displayState == 0) ? 1 : 0;
-                    mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                    displayState = (displayState == 0) ? 1 : 0; mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 }
             }
             return true;
@@ -432,8 +398,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (!isProcessing) {
             if (isMenuOpen) {
-                if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 10) % 10; renderMenu(); return true; }
-                if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 10; renderMenu(); return true; }
+                if (sc == ScalarInput.ISV_KEY_UP) { menuSelection = (menuSelection - 1 + 11) % 11; renderMenu(); return true; }
+                if (sc == ScalarInput.ISV_KEY_DOWN) { menuSelection = (menuSelection + 1) % 11; renderMenu(); return true; }
                 if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { handleMenuChange(-1); return true; }
                 if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { handleMenuChange(1); return true; }
             } else {
@@ -453,10 +419,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case 0: qualityIndex = (qualityIndex + dir + 3) % 3; break;
                 case 1: currentSlot = (currentSlot + dir + 10) % 10; break; 
                 case 2: p.lutIndex = (p.lutIndex + dir + recipePaths.size()) % recipePaths.size(); break;
-                case 3: p.opacity = Math.max(0, Math.min(5, p.opacity + dir)); break;
+                case 3: p.opacity = Math.max(0, Math.min(100, p.opacity + (dir * 10))); break;
                 case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
-                case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
-                case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
+                case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
+                case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                // 8, 9, 10 are Placeholders
             }
         } catch (Exception e) {}
         renderMenu();
@@ -466,25 +434,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         RTLProfile p = profiles[currentSlot];
         String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
         
-        // PULLS THE CLEAN BEAUTY NAME INSTEAD OF TRUNCATED FILENAME
-        String uiLutName = recipeNames.get(p.lutIndex);
-
         menuLabels[0].setText("Global Quality");   menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
         menuLabels[1].setText("RTL Slot");         menuValues[1].setText("< " + (currentSlot + 1) + " >");
-        menuLabels[2].setText("LUT");              menuValues[2].setText("< " + uiLutName + " >");
-        menuLabels[3].setText("Opacity");          menuValues[3].setText("< " + p.opacity + " >");
-        menuLabels[4].setText("Grain");            menuValues[4].setText("< " + p.grain + " >");
-        menuLabels[5].setText("Highlight Roll");   menuValues[5].setText("< " + p.rollOff + " >");
-        menuLabels[6].setText("Vignette");         menuValues[6].setText("< " + p.vignette + " >");
-        menuLabels[7].setText("[LOCKED] W.Bal");   menuValues[7].setText("< " + p.whiteBalance + " >");
-        menuLabels[8].setText("[LOCKED] WB Shift");menuValues[8].setText("< " + p.wbShift + " >");
-        menuLabels[9].setText("[LOCKED] DRO");     menuValues[9].setText("< " + p.dro + " >");
+        menuLabels[2].setText("LUT");              menuValues[2].setText("< " + recipeNames.get(p.lutIndex) + " >");
+        menuLabels[3].setText("Opacity");          menuValues[3].setText("< " + p.opacity + "% >");
+        menuLabels[4].setText("Grain Amount");     menuValues[4].setText("< " + intensityLabels[p.grain] + " >");
+        menuLabels[5].setText("Grain Size");       menuValues[5].setText("< " + grainSizeLabels[p.grainSize] + " >");
+        menuLabels[6].setText("Highlight Roll");   menuValues[6].setText("< " + intensityLabels[p.rollOff] + " >");
+        menuLabels[7].setText("Vignette");         menuValues[7].setText("< " + intensityLabels[p.vignette] + " >");
+        menuLabels[8].setText("[LOCKED] W.Bal");   menuValues[8].setText("< " + p.whiteBalance + " >");
+        menuLabels[9].setText("[LOCKED] WB Shift");menuValues[9].setText("< " + p.wbShift + " >");
+        menuLabels[10].setText("[LOCKED] DRO");    menuValues[10].setText("< " + p.dro + " >");
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 11; i++) {
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.WHITE : Color.TRANSPARENT);
-            menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 6 ? Color.DKGRAY : Color.WHITE));
-            menuValues[i].setTextColor(sel ? Color.BLACK : (i > 6 ? Color.DKGRAY : Color.CYAN));
+            menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.WHITE));
+            menuValues[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.CYAN));
         }
 
         menuScrollView.post(new Runnable() {
@@ -512,16 +478,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             
-            if (mDialMode == DialMode.rtl) { 
-                currentSlot = (currentSlot + d + 10) % 10; 
-                triggerLutPreload(); 
-            }
-            else if (mDialMode == DialMode.shutter) { 
-                if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); 
-            }
-            else if (mDialMode == DialMode.aperture) { 
-                if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); 
-            }
+            if (mDialMode == DialMode.rtl) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
+            else if (mDialMode == DialMode.shutter) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
+            else if (mDialMode == DialMode.aperture) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
             else if (mDialMode == DialMode.iso) {
                 List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
                 int idx = isos.indexOf(pm.getISOSensitivity());
@@ -550,16 +509,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String iso = pm.getISOSensitivity() == 0 ? "AUTO" : String.valueOf(pm.getISOSensitivity());
             String exp = String.format("%.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
 
-            String g = "<font color='#00FF00'>";
-            String w = "<font color='#FFFFFF'>";
-            
+            String g = "<font color='#00FF00'>"; String w = "<font color='#FFFFFF'>";
             String html = (mDialMode == DialMode.rtl ? g : w) + "[RTL " + (currentSlot+1) + "]</font>   " +
                           (mDialMode == DialMode.shutter ? g : w) + "S: " + ss + "</font>   " + 
                           (mDialMode == DialMode.aperture ? g : w) + "A: " + ap + "</font>   " + 
                           (mDialMode == DialMode.iso ? g : w) + "ISO: " + iso + "</font>   " + 
                           (mDialMode == DialMode.exposure ? g : w) + "EV: " + exp + "</font>   " +
                           (mDialMode == DialMode.review ? g : w) + "[REVIEW]</font>";
-                          
             tvBottomBar.setText(Html.fromHtml(html));
         } catch (Exception e) {}
     }
@@ -574,8 +530,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 String u = f.getName().toUpperCase();
                 if (f.length() > 10240 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
                     recipePaths.add(f.getAbsolutePath());
-                    
-                    // FILE METADATA CRACKER (Finds internal title)
                     String prettyName = u.replace(".CUB", "").replace(".CUBE", "");
                     try {
                         BufferedReader br = new BufferedReader(new FileReader(f));
@@ -601,8 +555,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             currentPreloadTask = new PreloadLutTask(); 
             currentPreloadTask.execute(profiles[currentSlot].lutIndex);
         } else {
-            isReady = true; 
-            updateMainHUD();
+            isReady = true; updateMainHUD();
         }
     }
 
@@ -625,9 +578,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                     }
                                 }
                                 if (newest != null) {
-                                    if (lastNewestFileTime == 0) {
-                                        lastNewestFileTime = maxModified;
-                                    } else if (maxModified > lastNewestFileTime) {
+                                    if (lastNewestFileTime == 0) { lastNewestFileTime = maxModified; } 
+                                    else if (maxModified > lastNewestFileTime) {
                                         lastNewestFileTime = maxModified;
                                         if (!isProcessing && (isReady || profiles[currentSlot].lutIndex == 0)) {
                                             final String path = newest.getAbsolutePath();
@@ -644,28 +596,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
-        @Override protected void onPreExecute() {
-            isReady = false; updateMainHUD();
-        }
+        @Override protected void onPreExecute() { isReady = false; updateMainHUD(); }
         @Override protected Boolean doInBackground(Integer... params) {
             return mEngine.loadLut(new File(recipePaths.get(params[0])), recipeNames.get(params[0]));
         }
-        @Override protected void onPostExecute(Boolean success) {
-            if (isCancelled()) return; 
-            isReady = true; updateMainHUD();
-        }
+        @Override protected void onPostExecute(Boolean success) { if (isCancelled()) return; isReady = true; updateMainHUD(); }
     }
 
     private class ProcessTask extends AsyncTask<String, Void, String> {
         @Override protected void onPreExecute() { 
-            isProcessing = true;
-            tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW);
+            isProcessing = true; tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW);
         }
         @Override protected String doInBackground(String... params) {
             try {
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
-
                 long lastSize = -1; int timeout = 0;
                 while (timeout < 100) {
                     long currentSize = original.length();
@@ -679,7 +624,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File outFile = new File(outDir, original.getName());
 
                 RTLProfile p = profiles[currentSlot];
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity * 20, p.grain * 20, p.vignette * 20, p.rollOff * 20)) {
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
                     copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
@@ -688,9 +633,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } catch (Throwable t) { return "ERR"; }
         }
         @Override protected void onPostExecute(String result) {
-            isProcessing = false;
-            tvTopStatus.setTextColor(Color.WHITE);
-            updateMainHUD(); 
+            isProcessing = false; tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); 
         }
     }
 

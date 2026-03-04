@@ -25,7 +25,7 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// SPATIAL HASH: Generates organic film grain
+// SPATIAL HASH: Generates organic film grain with ZERO repeating patterns.
 inline int spatial_noise(int x, int y, uint32_t seed) {
     uint32_t h = seed + (uint32_t)x * 374761393 + (uint32_t)y * 668265263;
     h = (h ^ (h >> 13)) * 1274126177;
@@ -61,7 +61,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject,
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath, jint scaleDenom, jint opacity, jint grain, jint vignette, jint rolloff) {
+Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, jobject, jstring inPath, jstring outPath, jint scaleDenom, jint opacity, jint grain, jint grainSize, jint vignette, jint rolloff) {
     bool hasLut = (nativeLutSize > 0);
 
     const char *in_file = env->GetStringUTFChars(inPath, NULL);
@@ -79,7 +79,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     struct jpeg_compress_struct* cinfo_c = (struct jpeg_compress_struct*) malloc(sizeof(struct jpeg_compress_struct));
     struct my_error_mgr* jerr_c = (struct my_error_mgr*) malloc(sizeof(struct my_error_mgr));
     int* map = (int*) malloc(256 * sizeof(int));
-    int* rollMap = (int*) malloc(256 * sizeof(int)); // PRE-CALCULATED ROLL-OFF LUT
+    int* rollMap = (int*) malloc(256 * sizeof(int)); 
 
     if (!cinfo_d || !jerr_d || !cinfo_c || !jerr_c || !map || !rollMap) {
         if (infile) fclose(infile); if (outfile) fclose(outfile);
@@ -91,80 +91,62 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     cinfo_d->err = jpeg_std_error(&jerr_d->pub);
     jerr_d->pub.error_exit = my_error_exit;
-    jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
-    
     if (setjmp(jerr_d->setjmp_buffer)) {
         jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map); free(rollMap);
-        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
-        return JNI_FALSE;
+        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file); return JNI_FALSE;
     }
     
     jpeg_create_decompress(cinfo_d);
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
-    cinfo_d->scale_num = 1;
-    cinfo_d->scale_denom = scaleDenom;
-    cinfo_d->out_color_space = JCS_RGB; 
+    cinfo_d->scale_num = 1; cinfo_d->scale_denom = scaleDenom; cinfo_d->out_color_space = JCS_RGB; 
     jpeg_start_decompress(cinfo_d);
 
     cinfo_c->err = jpeg_std_error(&jerr_c->pub);
     jerr_c->pub.error_exit = my_error_exit;
-    jerr_c->pub.emit_message = my_emit_message; jerr_c->pub.output_message = my_output_message;
-    
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map); free(rollMap);
-        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
-        return JNI_FALSE;
+        fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file); return JNI_FALSE;
     }
     
     jpeg_create_compress(cinfo_c);
     jpeg_stdio_dest(cinfo_c, outfile);
-    cinfo_c->image_width = cinfo_d->output_width;
-    cinfo_c->image_height = cinfo_d->output_height;
-    cinfo_c->input_components = 3;
-    cinfo_c->in_color_space = JCS_RGB;
-    jpeg_set_defaults(cinfo_c);
-    jpeg_set_quality(cinfo_c, 95, TRUE);
-    jpeg_start_compress(cinfo_c, TRUE);
+    cinfo_c->image_width = cinfo_d->output_width; cinfo_c->image_height = cinfo_d->output_height;
+    cinfo_c->input_components = 3; cinfo_c->in_color_space = JCS_RGB;
+    jpeg_set_defaults(cinfo_c); jpeg_set_quality(cinfo_c, 95, TRUE); jpeg_start_compress(cinfo_c, TRUE);
 
-    // PRE-CALCULATE ALL MATH TO AVOID DIVISIONS IN THE PIXEL LOOP
+    // PRE-CALCULATE MATH TO AVOID DIVISIONS
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0;
     int lutSize2 = nativeLutSize * nativeLutSize;
     for (int i = 0; i < 256; i++) { 
         map[i] = (i * lutMax * 128) / 255; 
-        
-        // HIGHLIGHT ROLL-OFF LUT
         if (i > 200 && rolloff > 0) {
             rollMap[i] = i - ((i - 200) * (i - 200) * rolloff) / 11000;
             if (rollMap[i] < 0) rollMap[i] = 0;
-        } else {
-            rollMap[i] = i;
-        }
+        } else { rollMap[i] = i; }
     }
     
     int row_stride = cinfo_d->output_width * cinfo_d->output_components;
     JSAMPARRAY buffer = (*cinfo_d->mem->alloc_sarray)((j_common_ptr) cinfo_d, JPOOL_IMAGE, row_stride, 1);
 
-    const int* pR = hasLut ? &nativeLutR[0] : NULL; 
-    const int* pG = hasLut ? &nativeLutG[0] : NULL; 
-    const int* pB = hasLut ? &nativeLutB[0] : NULL;
+    const int* pR = hasLut ? &nativeLutR[0] : NULL; const int* pG = hasLut ? &nativeLutG[0] : NULL; const int* pB = hasLut ? &nativeLutB[0] : NULL;
 
-    long long cx = cinfo_d->output_width / 2;
-    long long cy = cinfo_d->output_height / 2;
-    long long max_dist_sq = cx*cx + cy*cy;
-    if (max_dist_sq == 0) max_dist_sq = 1;
+    long long cx = cinfo_d->output_width / 2; long long cy = cinfo_d->output_height / 2;
+    long long max_dist_sq = cx*cx + cy*cy; if (max_dist_sq == 0) max_dist_sq = 1;
 
     int vig_mapped = (vignette * 256) / 100;
-    // VIGNETTE PRE-CALCULATED COEFFICIENT (Removes 64-bit division)
     long long vig_coef = ((long long)vig_mapped << 24) / max_dist_sq; 
     
     int opac_mapped = (opacity * 256) / 100;
     uint32_t master_seed = 98765;
 
-    // SCALED GRAIN (Ensures grain looks identical on 1.5MP and 24MP)
-    int grain_div = 4 / scaleDenom;
-    if (grain_div < 1) grain_div = 1;
+    // SCALED GRAIN LOGIC: Adapts to Resolution AND User Setting
+    int base_div = 8 / scaleDenom; 
+    if (base_div < 1) base_div = 1;
+    // grainSize is 0(SM), 1(MED), 2(LG)
+    int active_grain_div = base_div * (grainSize + 1) / 2; 
+    if (active_grain_div < 1) active_grain_div = 1;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
@@ -173,7 +155,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         
         long long dy = current_y - cy;
         long long dy_sq = dy * dy;
-        int noise_y = current_y / grain_div;
+        int noise_y = current_y / active_grain_div;
 
         for (int x = 0; x < row_stride; x += 3) {
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
@@ -214,32 +196,21 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                     outR = origR + (((lutR - origR) * opac_mapped) >> 8);
                     outG = origG + (((lutG - origG) * opac_mapped) >> 8);
                     outB = origB + (((lutB - origB) * opac_mapped) >> 8);
-                } else {
-                    outR = lutR; outG = lutG; outB = lutB;
-                }
+                } else { outR = lutR; outG = lutG; outB = lutB; }
             }
 
-            // TURBO ROLL-OFF (Uses Memory LUT instead of math division)
-            if (rolloff > 0) {
-                outR = rollMap[outR];
-                outG = rollMap[outG];
-                outB = rollMap[outB];
-            }
+            if (rolloff > 0) { outR = rollMap[outR]; outG = rollMap[outG]; outB = rollMap[outB]; }
 
-            // TURBO VIGNETTE (Uses Bit-Shift instead of math division)
             if (vignette > 0) {
                 long long cur_dx = (x / 3) - cx;
                 long long dist_sq = cur_dx*cur_dx + dy_sq;
                 int vig_mult = 256 - (int)((dist_sq * vig_coef) >> 24);
                 if (vig_mult < 0) vig_mult = 0;
-                outR = (outR * vig_mult) >> 8;
-                outG = (outG * vig_mult) >> 8;
-                outB = (outB * vig_mult) >> 8;
+                outR = (outR * vig_mult) >> 8; outG = (outG * vig_mult) >> 8; outB = (outB * vig_mult) >> 8;
             }
 
-            // SCALED GAUSSIAN GRAIN
             if (grain > 0) {
-                int noise_x = (x / 3) / grain_div;
+                int noise_x = (x / 3) / active_grain_div;
                 int n1 = spatial_noise(noise_x, noise_y, master_seed);
                 int n2 = spatial_noise(noise_x, noise_y, master_seed + 1);
                 int noise = (n1 + n2) / 2; 
@@ -248,9 +219,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 int mask = 128 - abs(lum - 128); 
                 
                 int grain_val = (noise * mask * grain) >> 14; 
-                outR += grain_val;
-                outG += grain_val;
-                outB += grain_val;
+                outR += grain_val; outG += grain_val; outB += grain_val;
             }
 
             row[x]   = (unsigned char)(outR < 0 ? 0 : (outR > 255 ? 255 : outR));
