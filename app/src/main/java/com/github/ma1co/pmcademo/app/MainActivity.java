@@ -1,5 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
+// NO R IMPORT - Completely Clean!
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -39,7 +40,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean hasSurface = false; 
     
     private FrameLayout mainUIContainer;
-    private LinearLayout menuContainer; // NO SCROLLVIEW. Pure static grid.
+    private LinearLayout menuContainer; // Pure static grid.
     private LinearLayout[] menuRows = new LinearLayout[11];
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
@@ -179,7 +180,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer.setVisibility(View.GONE);
         rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // CUSTOM SMOOTH PLAYBACK CONTAINER
         playbackContainer = new FrameLayout(this);
         playbackContainer.setBackgroundColor(Color.BLACK);
         playbackContainer.setVisibility(View.GONE);
@@ -248,10 +248,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Matrix matrix = new Matrix(); 
             if (rotationAngle != 0) matrix.postRotate(rotationAngle);
             
-            // THE HARDWARE BILINEAR FILTER (Prevents jagged rough pixels during playback)
+            // THE SONY LCD STRETCH FIX:
+            // Android forces 4:3 OS output, but Sony physically stretches the screen to 3:2.
+            // We counter this by squeezing the X-axis mathematically.
             float targetWidth = (rotationAngle == 90 || rotationAngle == 270) ? 480.0f : 640.0f;
             float ratio = targetWidth / rawBitmap.getWidth();
-            if (ratio < 1.0f) matrix.postScale(ratio, ratio);
+            
+            if (ratio < 1.0f) {
+                // Applies the squeeze AND the downscale for memory
+                matrix.postScale(ratio * 0.8888f, ratio);
+            } else {
+                // Just applies the squeeze
+                matrix.postScale(0.8888f, 1.0f);
+            }
 
             currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true); 
             if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
@@ -570,7 +579,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             @Override public void run() {
                 while (isPolling) {
                     try {
-                        Thread.sleep(300); 
+                        // Sped up polling cycle
+                        Thread.sleep(150); 
                         File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
                         File sonyDir = new File(dcim, "100MSDCF");
                         if (sonyDir.exists()) {
@@ -617,10 +627,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 File original = new File(params[0]);
                 if (!original.exists()) return "ERR";
                 long lastSize = -1; int timeout = 0;
+                // Sped up timeout cycle logic
                 while (timeout < 100) {
                     long currentSize = original.length();
                     if (currentSize > 0 && currentSize == lastSize) break;
-                    lastSize = currentSize; Thread.sleep(100); timeout++;
+                    lastSize = currentSize; Thread.sleep(50); timeout++;
                 }
 
                 int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);

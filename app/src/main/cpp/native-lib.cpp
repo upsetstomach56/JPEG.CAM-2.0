@@ -107,7 +107,15 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_create_decompress(cinfo_d);
     jpeg_stdio_src(cinfo_d, infile);
     jpeg_read_header(cinfo_d, TRUE);
-    cinfo_d->scale_num = 1; cinfo_d->scale_denom = scaleDenom; cinfo_d->out_color_space = JCS_RGB; 
+    cinfo_d->scale_num = 1; 
+    cinfo_d->scale_denom = scaleDenom; 
+    cinfo_d->out_color_space = JCS_RGB; 
+    
+    // --- TURBO SPEED OPTIMIZATIONS (Bypasses ARM Floating Point Math) ---
+    cinfo_d->dct_method = JDCT_IFAST; 
+    cinfo_d->do_fancy_upsampling = FALSE; 
+    // --------------------------------------------------------------------
+
     jpeg_start_decompress(cinfo_d);
 
     cinfo_c->err = jpeg_std_error(&jerr_c->pub);
@@ -120,9 +128,18 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     jpeg_create_compress(cinfo_c);
     jpeg_stdio_dest(cinfo_c, outfile);
-    cinfo_c->image_width = cinfo_d->output_width; cinfo_c->image_height = cinfo_d->output_height;
-    cinfo_c->input_components = 3; cinfo_c->in_color_space = JCS_RGB;
-    jpeg_set_defaults(cinfo_c); jpeg_set_quality(cinfo_c, 95, TRUE); jpeg_start_compress(cinfo_c, TRUE);
+    cinfo_c->image_width = cinfo_d->output_width; 
+    cinfo_c->image_height = cinfo_d->output_height;
+    cinfo_c->input_components = 3; 
+    cinfo_c->in_color_space = JCS_RGB;
+    jpeg_set_defaults(cinfo_c); 
+    jpeg_set_quality(cinfo_c, 95, TRUE); 
+
+    // --- TURBO SPEED OPTIMIZATIONS (Bypasses ARM Floating Point Math) ---
+    cinfo_c->dct_method = JDCT_IFAST; 
+    // --------------------------------------------------------------------
+
+    jpeg_start_compress(cinfo_c, TRUE);
 
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0;
     int lutSize2 = nativeLutSize * nativeLutSize;
@@ -160,7 +177,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         long long dy_sq = dy * dy;
         int noise_y = current_y / active_grain_div;
 
-        // Seed continuous generator per scanline
         uint32_t seed = master_seed + (current_y * 1337);
 
         for (int x = 0; x < row_stride; x += 3) {
@@ -215,32 +231,26 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outR = (outR * vig_mult) >> 8; outG = (outG * vig_mult) >> 8; outB = (outB * vig_mult) >> 8;
             }
 
-            // ORGANIC FILM GRAIN: Shadow-suppressed, dithered clumping
             if (grain > 0) {
                 int pixel_noise = (fast_rand(&seed) & 0xFF) - 128; 
                 int noise;
                 
                 if (grainSize == 0) {
-                    noise = pixel_noise; // SM: Sharp pixel grain
+                    noise = pixel_noise; 
                 } else {
                     int noise_x = (x / 3) / active_grain_div;
                     int block_noise = spatial_noise(noise_x, noise_y, master_seed);
-                    // Dither the structural block with pixel noise so it doesn't look like a square
                     if (grainSize == 1) noise = (block_noise * 2 + pixel_noise) / 3;
                     else noise = (block_noise * 3 + pixel_noise) / 4;
                 }
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                
-                // Film-like mask: Peak noise at mid-tones, dropping to 0 at white and black
                 int mask = lum < 128 ? lum : 255 - lum; 
                 
-                // Aggressive shadow suppression: Darks get almost no noise
                 if (lum < 64) {
                     mask = (mask * lum) >> 6; 
                 }
                 
-                // Halved overall strength to keep it subtle (Shifted by 15 instead of 14)
                 int grain_val = (noise * mask * grain) >> 15; 
                 
                 outR += grain_val; outG += grain_val; outB += grain_val;
