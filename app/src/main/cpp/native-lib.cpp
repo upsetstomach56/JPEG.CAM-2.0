@@ -10,7 +10,6 @@
 #define LOG_TAG "COOKBOOK_LOG"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Interleaved RGB array fits inside L2 Cache to eliminate Memory Thrashing
 std::vector<uint8_t> nativeLut; 
 int nativeLutSize = 0;
 
@@ -26,7 +25,6 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// PURE FAST XOR-SHIFT: For continuous, organic, non-pixelated noise
 inline uint32_t fast_rand(uint32_t* state) {
     uint32_t x = *state;
     x ^= x << 13; x ^= x >> 17; x ^= x << 5;
@@ -102,16 +100,19 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_stdio_src(cinfo_d, infile);
 
     // =========================================================================
-    // EXIF PRESERVATION: Catch the APP1 block before reading the header
+    // EXIF PRESERVATION: Save ALL APP markers (0xE0 to 0xEF) and COM marker
+    // This ensures Sony's Exif, XMP, and color profiles are all caught
     // =========================================================================
-    jpeg_save_markers(cinfo_d, JPEG_APP0 + 1, 0xFFFF); 
+    for (int m = 0; m < 16; m++) {
+        jpeg_save_markers(cinfo_d, JPEG_APP0 + m, 0xFFFF);
+    }
+    jpeg_save_markers(cinfo_d, JPEG_COM, 0xFFFF);
     
     jpeg_read_header(cinfo_d, TRUE);
     cinfo_d->scale_num = 1; 
     cinfo_d->scale_denom = scaleDenom; 
     cinfo_d->out_color_space = JCS_RGB; 
     
-    // QUALITY OVER SPEED: Forced High-Quality Upsampling
     cinfo_d->dct_method = JDCT_ISLOW; 
     cinfo_d->do_fancy_upsampling = TRUE; 
 
@@ -133,18 +134,16 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     cinfo_c->in_color_space = JCS_RGB;
     jpeg_set_defaults(cinfo_c); 
     jpeg_set_quality(cinfo_c, 95, TRUE); 
-    cinfo_c->dct_method = JDCT_ISLOW; // Maximum compression quality
+    cinfo_c->dct_method = JDCT_ISLOW; 
     
     jpeg_start_compress(cinfo_c, TRUE);
 
     // =========================================================================
-    // EXIF INJECTION: Write the caught APP1 block into the new file stream
+    // EXIF INJECTION: Write all saved markers into the new graded file
     // =========================================================================
     jpeg_saved_marker_ptr marker;
     for (marker = cinfo_d->marker_list; marker != NULL; marker = marker->next) {
-        if (marker->marker == JPEG_APP0 + 1) { // APP1 Marker (0xE1)
-            jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
-        }
+        jpeg_write_marker(cinfo_c, marker->marker, marker->data, marker->data_length);
     }
 
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0;
