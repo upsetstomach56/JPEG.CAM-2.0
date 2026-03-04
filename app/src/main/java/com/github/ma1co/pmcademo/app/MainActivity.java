@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
 import android.net.Uri;
@@ -26,8 +27,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.TableLayout;
-import android.widget.TableRow;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
@@ -44,10 +44,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     // UI Elements
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
-    private TableLayout menuTable;
+    private LinearLayout menuContainer;
+    private LinearLayout[] menuRows = new LinearLayout[10];
+    private TextView[] menuLabels = new TextView[10];
+    private TextView[] menuValues = new TextView[10];
     private TextView tvBottomBar, tvTopStatus; 
-    private TextView[] menuLabels = new TextView[10]; // Left Column
-    private TextView[] menuValues = new TextView[10]; // Right Column
     
     // Playback Elements
     private FrameLayout playbackContainer;
@@ -71,17 +72,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
-    private ArrayList<String> recipeList = new ArrayList<String>();
+    
+    // THE METADATA ARRAYS (Solves 8.3 FAT32 Name Issue)
+    private ArrayList<String> recipePaths = new ArrayList<String>();
+    private ArrayList<String> recipeNames = new ArrayList<String>();
 
-    // --- RTL Profile with 0-5 Scales ---
     class RTLProfile {
         int lutIndex = 0;
         int opacity = 5;  
         int grain = 0;    
         int rollOff = 0;  
         int vignette = 0; 
-        
-        // SONY PLACEHOLDERS
         String whiteBalance = "AUTO";
         int wbShift = 0;
         String dro = "OFF";
@@ -153,31 +154,35 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        // THE TABULAR MENU
+        // TRUE SONY BLOCK-STYLE MENU
         menuScrollView = new ScrollView(this);
         menuScrollView.setBackgroundColor(Color.argb(230, 15, 15, 15));
-        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(700, 350, Gravity.CENTER);
+        FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(650, 350, Gravity.CENTER);
         
-        menuTable = new TableLayout(this);
-        menuTable.setColumnStretchable(1, true); // Pushes values to the far right edge
-        menuTable.setPadding(40, 40, 40, 40);
-        menuScrollView.addView(menuTable);
+        menuContainer = new LinearLayout(this);
+        menuContainer.setOrientation(LinearLayout.VERTICAL);
+        menuContainer.setPadding(20, 40, 20, 40);
+        menuScrollView.addView(menuContainer);
 
         for (int i = 0; i < 10; i++) {
-            TableRow row = new TableRow(this);
-            row.setPadding(0, 10, 0, 10);
+            menuRows[i] = new LinearLayout(this);
+            menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
+            menuRows[i].setPadding(20, 15, 20, 15);
             
             menuLabels[i] = new TextView(this);
             menuLabels[i].setTextSize(20);
-            menuLabels[i].setPadding(0, 0, 40, 0); 
+            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             
             menuValues[i] = new TextView(this);
             menuValues[i].setTextSize(20);
             menuValues[i].setGravity(Gravity.RIGHT);
             
-            row.addView(menuLabels[i]);
-            row.addView(menuValues[i]);
-            menuTable.addView(row);
+            LinearLayout.LayoutParams lpLabel = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            LinearLayout.LayoutParams lpVal = new LinearLayout.LayoutParams(-2, -2);
+            
+            menuRows[i].addView(menuLabels[i], lpLabel);
+            menuRows[i].addView(menuValues[i], lpVal);
+            menuContainer.addView(menuRows[i]);
         }
         menuScrollView.setVisibility(View.GONE);
         rootLayout.addView(menuScrollView, scrollParams);
@@ -244,16 +249,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
         int scale = 1;
-        while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) {
-            scale *= 2;
-        }
-        
-        options.inJustDecodeBounds = false;
-        options.inSampleSize = scale;
+        while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) { scale *= 2; }
+        options.inJustDecodeBounds = false; options.inSampleSize = scale;
         
         try {
             Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
-            
             ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
             int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rotationAngle = 0;
@@ -265,27 +265,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 Matrix matrix = new Matrix();
                 matrix.postRotate(rotationAngle);
                 currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
-                if (currentPlaybackBitmap != rawBitmap) {
-                    rawBitmap.recycle();
-                }
+                if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
             } else {
                 currentPlaybackBitmap = rawBitmap;
             }
 
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
             tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
-        } catch (Exception e) {
-            tvPlaybackInfo.setText("DECODE ERROR");
-        } catch (OutOfMemoryError e) {
-            tvPlaybackInfo.setText("MEMORY ERROR");
-        }
+        } catch (Exception e) { tvPlaybackInfo.setText("DECODE ERROR"); }
     }
 
     private void exitPlayback() {
         playbackContainer.setVisibility(View.GONE);
         mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
         isPlaybackMode = false;
-        
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
             playbackImageView.setImageBitmap(null);
             currentPlaybackBitmap.recycle();
@@ -301,13 +294,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void savePreferences() {
-        // Internal App Memory
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
         editor.putBoolean("has_saved", true);
         editor.putInt("qualityIndex", qualityIndex);
         editor.putInt("currentSlot", currentSlot);
         for(int i=0; i<10; i++) {
-            editor.putString("slot_" + i + "_lutName", recipeList.get(profiles[i].lutIndex));
+            // Save absolute PATH so missing files don't crash
+            editor.putString("slot_" + i + "_lutPath", recipePaths.get(profiles[i].lutIndex));
             editor.putInt("slot_" + i + "_opac", profiles[i].opacity);
             editor.putInt("slot_" + i + "_grain", profiles[i].grain);
             editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
@@ -315,7 +308,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
         editor.commit(); 
 
-        // FAT32 8.3 FILENAME FIX applied here!
         try {
             File lutDir = getLutDir();
             if (!lutDir.exists()) lutDir.mkdirs(); 
@@ -329,7 +321,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             sb.append("slot=").append(currentSlot).append("\n");
             for(int i=0; i<10; i++) {
                 sb.append(i).append(",")
-                  .append(recipeList.get(profiles[i].lutIndex)).append(",")
+                  .append(recipePaths.get(profiles[i].lutIndex)).append(",")
                   .append(profiles[i].opacity).append(",")
                   .append(profiles[i].grain).append(",")
                   .append(profiles[i].rollOff).append(",")
@@ -338,22 +330,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             fos.write(sb.toString().getBytes());
             fos.flush();
-            fos.getFD().sync(); // Force physical write to SD Card
+            fos.getFD().sync(); // THE FIX: Forces data through OS buffer onto silicon
             fos.close();
             
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
-        } catch (Exception e) {
-            Log.e("COOKBOOK", "Failed to save TXT: " + e.getMessage());
-        }
+        } catch (Exception e) {}
     }
 
     private void loadPreferences() {
         SharedPreferences prefs = getSharedPreferences("RTL_PREFS", MODE_PRIVATE);
         boolean hasSaved = prefs.getBoolean("has_saved", false);
-        
-        File lutDir = getLutDir();
-        // FAT32 8.3 FILENAME FIX applied here!
-        File backupFile = new File(lutDir, "RTLBAK.TXT");
+        File backupFile = new File(getLutDir(), "RTLBAK.TXT");
 
         if (!hasSaved && backupFile.exists()) {
             try {
@@ -366,8 +353,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         String[] parts = line.split(",");
                         if (parts.length == 6) {
                             int idx = Integer.parseInt(parts[0]);
-                            String lutName = parts[1];
-                            int foundIndex = recipeList.indexOf(lutName);
+                            int foundIndex = recipePaths.indexOf(parts[1]);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
                             profiles[idx].opacity = Math.min(5, Integer.parseInt(parts[2]));
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
@@ -385,8 +371,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         qualityIndex = prefs.getInt("qualityIndex", 1);
         currentSlot = prefs.getInt("currentSlot", 0);
         for(int i=0; i<10; i++) {
-            String savedLutName = prefs.getString("slot_" + i + "_lutName", "NONE");
-            int foundIndex = recipeList.indexOf(savedLutName);
+            String savedPath = prefs.getString("slot_" + i + "_lutPath", "NONE");
+            int foundIndex = recipePaths.indexOf(savedPath);
             profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
             profiles[i].opacity = Math.min(5, prefs.getInt("slot_" + i + "_opac", 5));
             profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0));
@@ -420,7 +406,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } else {
                 menuScrollView.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
-                savePreferences(); // Pushes data to RTLBAK.TXT here
+                savePreferences();
                 triggerLutPreload();
                 updateMainHUD();
             }
@@ -466,12 +452,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             switch(menuSelection) {
                 case 0: qualityIndex = (qualityIndex + dir + 3) % 3; break;
                 case 1: currentSlot = (currentSlot + dir + 10) % 10; break; 
-                case 2: p.lutIndex = (p.lutIndex + dir + recipeList.size()) % recipeList.size(); break;
+                case 2: p.lutIndex = (p.lutIndex + dir + recipePaths.size()) % recipePaths.size(); break;
                 case 3: p.opacity = Math.max(0, Math.min(5, p.opacity + dir)); break;
                 case 4: p.grain = Math.max(0, Math.min(5, p.grain + dir)); break;
                 case 5: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
                 case 6: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
-                // 7, 8, 9 are Placeholders
             }
         } catch (Exception e) {}
         renderMenu();
@@ -480,34 +465,35 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void renderMenu() {
         RTLProfile p = profiles[currentSlot];
         String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
-        String lutName = recipeList.get(p.lutIndex).split("\\.")[0].toUpperCase();
+        
+        // PULLS THE CLEAN BEAUTY NAME INSTEAD OF TRUNCATED FILENAME
+        String uiLutName = recipeNames.get(p.lutIndex);
 
-        // TABULAR BINDING
-        menuLabels[0].setText("Global Quality");  menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
-        menuLabels[1].setText("RTL Slot");        menuValues[1].setText("< " + (currentSlot + 1) + " >");
-        menuLabels[2].setText("LUT");             menuValues[2].setText("< " + lutName + " >");
-        menuLabels[3].setText("Opacity");         menuValues[3].setText("< " + p.opacity + " >");
-        menuLabels[4].setText("Grain");           menuValues[4].setText("< " + p.grain + " >");
-        menuLabels[5].setText("Highlight Roll");  menuValues[5].setText("< " + p.rollOff + " >");
-        menuLabels[6].setText("Vignette");        menuValues[6].setText("< " + p.vignette + " >");
-        menuLabels[7].setText("[LOCKED] W.Bal");  menuValues[7].setText("< " + p.whiteBalance + " >");
+        menuLabels[0].setText("Global Quality");   menuValues[0].setText("< " + qLabels[qualityIndex] + " >");
+        menuLabels[1].setText("RTL Slot");         menuValues[1].setText("< " + (currentSlot + 1) + " >");
+        menuLabels[2].setText("LUT");              menuValues[2].setText("< " + uiLutName + " >");
+        menuLabels[3].setText("Opacity");          menuValues[3].setText("< " + p.opacity + " >");
+        menuLabels[4].setText("Grain");            menuValues[4].setText("< " + p.grain + " >");
+        menuLabels[5].setText("Highlight Roll");   menuValues[5].setText("< " + p.rollOff + " >");
+        menuLabels[6].setText("Vignette");         menuValues[6].setText("< " + p.vignette + " >");
+        menuLabels[7].setText("[LOCKED] W.Bal");   menuValues[7].setText("< " + p.whiteBalance + " >");
         menuLabels[8].setText("[LOCKED] WB Shift");menuValues[8].setText("< " + p.wbShift + " >");
-        menuLabels[9].setText("[LOCKED] DRO");    menuValues[9].setText("< " + p.dro + " >");
+        menuLabels[9].setText("[LOCKED] DRO");     menuValues[9].setText("< " + p.dro + " >");
 
         for (int i = 0; i < 10; i++) {
-            menuLabels[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
-            menuValues[i].setTextColor(i == menuSelection ? Color.GREEN : (i > 6 ? Color.DKGRAY : Color.WHITE));
+            boolean sel = (i == menuSelection);
+            menuRows[i].setBackgroundColor(sel ? Color.WHITE : Color.TRANSPARENT);
+            menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 6 ? Color.DKGRAY : Color.WHITE));
+            menuValues[i].setTextColor(sel ? Color.BLACK : (i > 6 ? Color.DKGRAY : Color.CYAN));
         }
 
         menuScrollView.post(new Runnable() {
-            @Override
-            public void run() {
-                if (menuLabels[menuSelection] != null) {
-                    int targetTop = ((View)menuLabels[menuSelection].getParent()).getTop();
-                    int itemHeight = ((View)menuLabels[menuSelection].getParent()).getHeight();
+            @Override public void run() {
+                if (menuRows[menuSelection] != null) {
+                    int targetTop = menuRows[menuSelection].getTop();
+                    int itemHeight = menuRows[menuSelection].getHeight();
                     int scrollHeight = menuScrollView.getHeight();
-                    int scrollY = targetTop - (scrollHeight / 2) + (itemHeight / 2);
-                    menuScrollView.smoothScrollTo(0, Math.max(0, scrollY));
+                    menuScrollView.smoothScrollTo(0, Math.max(0, targetTop - (scrollHeight / 2) + (itemHeight / 2)));
                 }
             }
         });
@@ -552,8 +538,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void updateMainHUD() {
         if(mCamera == null) return;
         RTLProfile p = profiles[currentSlot];
-        String lutName = recipeList.get(p.lutIndex).split("\\.")[0].toUpperCase();
-        tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + lutName + "]\n" + (isReady ? "READY" : "LOADING..."));
+        String uiLutName = recipeNames.get(p.lutIndex);
+        tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + uiLutName + "]\n" + (isReady ? "READY" : "LOADING..."));
         
         try {
             Camera.Parameters params = mCamera.getParameters();
@@ -579,10 +565,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void scanRecipes() { 
-        recipeList.clear(); recipeList.add("NONE"); 
+        recipePaths.clear(); recipeNames.clear();
+        recipePaths.add("NONE"); recipeNames.add("NONE");
+        
         File lutDir = getLutDir();
         if (lutDir.exists() && lutDir.listFiles() != null) {
-            for (File f : lutDir.listFiles()) if (f.length() > 10240 && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName());
+            for (File f : lutDir.listFiles()) {
+                String u = f.getName().toUpperCase();
+                if (f.length() > 10240 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
+                    recipePaths.add(f.getAbsolutePath());
+                    
+                    // FILE METADATA CRACKER (Finds internal title)
+                    String prettyName = u.replace(".CUB", "").replace(".CUBE", "");
+                    try {
+                        BufferedReader br = new BufferedReader(new FileReader(f));
+                        String line;
+                        for(int j=0; j<15; j++) {
+                            line = br.readLine();
+                            if (line != null && line.startsWith("TITLE")) {
+                                prettyName = line.replace("TITLE", "").replace("\"", "").trim().toUpperCase();
+                                break;
+                            }
+                        }
+                        br.close();
+                    } catch (Exception e) {}
+                    recipeNames.add(prettyName);
+                }
+            }
         }
     }
 
@@ -639,8 +648,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             isReady = false; updateMainHUD();
         }
         @Override protected Boolean doInBackground(Integer... params) {
-            File lutDir = getLutDir();
-            return mEngine.loadLut(new File(lutDir, recipeList.get(params[0])), recipeList.get(params[0]));
+            return mEngine.loadLut(new File(recipePaths.get(params[0])), recipeNames.get(params[0]));
         }
         @Override protected void onPostExecute(Boolean success) {
             if (isCancelled()) return; 

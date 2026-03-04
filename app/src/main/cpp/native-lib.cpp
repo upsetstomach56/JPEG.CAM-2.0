@@ -25,13 +25,7 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// Fast Highlight Roll-Off
-inline int rollOff(int v) {
-    if (v > 200) return 200 + ((v - 200) * (310 - v)) / 110;
-    return v;
-}
-
-// SPATIAL HASH: Generates organic film grain with ZERO repeating patterns.
+// SPATIAL HASH: Generates organic film grain
 inline int spatial_noise(int x, int y, uint32_t seed) {
     uint32_t h = seed + (uint32_t)x * 374761393 + (uint32_t)y * 668265263;
     h = (h ^ (h >> 13)) * 1274126177;
@@ -85,8 +79,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     struct jpeg_compress_struct* cinfo_c = (struct jpeg_compress_struct*) malloc(sizeof(struct jpeg_compress_struct));
     struct my_error_mgr* jerr_c = (struct my_error_mgr*) malloc(sizeof(struct my_error_mgr));
     int* map = (int*) malloc(256 * sizeof(int));
+    int* rollMap = (int*) malloc(256 * sizeof(int)); // PRE-CALCULATED ROLL-OFF LUT
 
-    if (!cinfo_d || !jerr_d || !cinfo_c || !jerr_c || !map) {
+    if (!cinfo_d || !jerr_d || !cinfo_c || !jerr_c || !map || !rollMap) {
         if (infile) fclose(infile); if (outfile) fclose(outfile);
         return JNI_FALSE;
     }
@@ -99,7 +94,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
-        jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
+        jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map); free(rollMap);
         fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
@@ -118,7 +113,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
-        free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
+        free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map); free(rollMap);
         fclose(infile); fclose(outfile); env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
         return JNI_FALSE;
     }
@@ -133,9 +128,20 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     jpeg_set_quality(cinfo_c, 95, TRUE);
     jpeg_start_compress(cinfo_c, TRUE);
 
+    // PRE-CALCULATE ALL MATH TO AVOID DIVISIONS IN THE PIXEL LOOP
     int lutMax = nativeLutSize > 0 ? nativeLutSize - 1 : 0;
     int lutSize2 = nativeLutSize * nativeLutSize;
-    for (int i = 0; i < 256; i++) { map[i] = (i * lutMax * 128) / 255; }
+    for (int i = 0; i < 256; i++) { 
+        map[i] = (i * lutMax * 128) / 255; 
+        
+        // HIGHLIGHT ROLL-OFF LUT
+        if (i > 200 && rolloff > 0) {
+            rollMap[i] = i - ((i - 200) * (i - 200) * rolloff) / 11000;
+            if (rollMap[i] < 0) rollMap[i] = 0;
+        } else {
+            rollMap[i] = i;
+        }
+    }
     
     int row_stride = cinfo_d->output_width * cinfo_d->output_components;
     JSAMPARRAY buffer = (*cinfo_d->mem->alloc_sarray)((j_common_ptr) cinfo_d, JPOOL_IMAGE, row_stride, 1);
@@ -150,15 +156,24 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     if (max_dist_sq == 0) max_dist_sq = 1;
 
     int vig_mapped = (vignette * 256) / 100;
+    // VIGNETTE PRE-CALCULATED COEFFICIENT (Removes 64-bit division)
+    long long vig_coef = ((long long)vig_mapped << 24) / max_dist_sq; 
+    
     int opac_mapped = (opacity * 256) / 100;
     uint32_t master_seed = 98765;
+
+    // SCALED GRAIN (Ensures grain looks identical on 1.5MP and 24MP)
+    int grain_div = 4 / scaleDenom;
+    if (grain_div < 1) grain_div = 1;
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
+        
         long long dy = current_y - cy;
         long long dy_sq = dy * dy;
+        int noise_y = current_y / grain_div;
 
         for (int x = 0; x < row_stride; x += 3) {
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
@@ -204,27 +219,30 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 }
             }
 
+            // TURBO ROLL-OFF (Uses Memory LUT instead of math division)
             if (rolloff > 0) {
-                if (outR > 200) outR -= ((outR - 200) * (outR - 200) * rolloff) / 11000;
-                if (outG > 200) outG -= ((outG - 200) * (outG - 200) * rolloff) / 11000;
-                if (outB > 200) outB -= ((outB - 200) * (outB - 200) * rolloff) / 11000;
+                outR = rollMap[outR];
+                outG = rollMap[outG];
+                outB = rollMap[outB];
             }
 
+            // TURBO VIGNETTE (Uses Bit-Shift instead of math division)
             if (vignette > 0) {
                 long long cur_dx = (x / 3) - cx;
                 long long dist_sq = cur_dx*cur_dx + dy_sq;
-                int vig_mult = 256 - (int)((dist_sq * (long long)vig_mapped) / max_dist_sq);
+                int vig_mult = 256 - (int)((dist_sq * vig_coef) >> 24);
                 if (vig_mult < 0) vig_mult = 0;
                 outR = (outR * vig_mult) >> 8;
                 outG = (outG * vig_mult) >> 8;
                 outB = (outB * vig_mult) >> 8;
             }
 
-            // AUTHENTIC GAUSSIAN GRAIN (Triangle Distribution via 2 spatial hashes)
+            // SCALED GAUSSIAN GRAIN
             if (grain > 0) {
-                int n1 = spatial_noise(x, current_y, master_seed);
-                int n2 = spatial_noise(x, current_y, master_seed + 1);
-                int noise = (n1 + n2) / 2; // Combines randoms to form a Bell Curve
+                int noise_x = (x / 3) / grain_div;
+                int n1 = spatial_noise(noise_x, noise_y, master_seed);
+                int n2 = spatial_noise(noise_x, noise_y, master_seed + 1);
+                int noise = (n1 + n2) / 2; 
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
                 int mask = 128 - abs(lum - 128); 
@@ -244,7 +262,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     jpeg_finish_compress(cinfo_c); jpeg_destroy_compress(cinfo_c);
     jpeg_finish_decompress(cinfo_d); jpeg_destroy_decompress(cinfo_d);
-    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
+    free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map); free(rollMap);
     fclose(infile); fclose(outfile);
     env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
     return JNI_TRUE;
