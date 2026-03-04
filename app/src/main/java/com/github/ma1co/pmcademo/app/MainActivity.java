@@ -1,6 +1,5 @@
 package com.github.ma1co.pmcademo.app;
 
-import com.jpgcookbook.sony.R;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -26,7 +25,6 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -41,14 +39,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean hasSurface = false; 
     
     private FrameLayout mainUIContainer;
-    private ScrollView menuScrollView;
-    private LinearLayout menuContainer;
+    private LinearLayout menuContainer; // NO SCROLLVIEW. Pure static grid.
     private LinearLayout[] menuRows = new LinearLayout[11];
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
     private TextView tvBottomBar, tvTopStatus; 
     
-    // RESTORED: Playback UI Elements
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
     private TextView tvPlaybackInfo;
@@ -150,11 +146,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        menuScrollView = new ScrollView(this);
-        menuScrollView.setBackgroundColor(Color.argb(245, 10, 10, 10)); 
-        
+        // STATIC FULL-SCREEN TABLE MENU
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
+        menuContainer.setBackgroundColor(Color.argb(245, 10, 10, 10)); 
         menuContainer.setPadding(30, 30, 30, 30);
         
         for (int i = 0; i < 11; i++) {
@@ -162,6 +157,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
             menuRows[i].setGravity(Gravity.CENTER_VERTICAL);
             
+            // Layout Weight stretches rows to fit exactly on the screen
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);
             menuContainer.addView(menuRows[i], rowParams);
             
@@ -180,11 +176,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuRows[i].addView(menuValues[i], lpVal);
         }
         
-        menuScrollView.addView(menuContainer);
-        menuScrollView.setVisibility(View.GONE);
-        rootLayout.addView(menuScrollView, new FrameLayout.LayoutParams(-1, -1));
+        menuContainer.setVisibility(View.GONE);
+        rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // RESTORED: Custom Playback Container UI
+        // CUSTOM SMOOTH PLAYBACK CONTAINER
         playbackContainer = new FrameLayout(this);
         playbackContainer.setBackgroundColor(Color.BLACK);
         playbackContainer.setVisibility(View.GONE);
@@ -207,7 +202,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    // --- RESTORED & UPGRADED: Buttery Smooth Playback Engine ---
     private void refreshPlaybackFiles() {
         playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
@@ -237,7 +231,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         options.inJustDecodeBounds = true; 
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
-        // 1. Safe Ram Extraction (We keep the image slightly larger than the screen to preserve detail)
         int scale = 1; 
         while ((options.outWidth / scale) > 1600 || (options.outHeight / scale) > 1600) { scale *= 2; }
         options.inJustDecodeBounds = false; 
@@ -255,14 +248,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Matrix matrix = new Matrix(); 
             if (rotationAngle != 0) matrix.postRotate(rotationAngle);
             
-            // 2. THE MAGIC SMOOTHING FIX: Hardware Bilinear Filter
-            // This mathematically scales the safety-buffer image down to exactly fit your camera LCD
-            // without dropping pixels, eliminating the "rough/jagged" look entirely.
+            // THE HARDWARE BILINEAR FILTER (Prevents jagged rough pixels during playback)
             float targetWidth = (rotationAngle == 90 || rotationAngle == 270) ? 480.0f : 640.0f;
             float ratio = targetWidth / rawBitmap.getWidth();
             if (ratio < 1.0f) matrix.postScale(ratio, ratio);
 
-            // The 'true' at the end triggers the Bilinear Anti-Aliasing!
             currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true); 
             if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
             
@@ -387,7 +377,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true; 
         }
 
-        // RESTORED: D-Pad scrubbing for Custom Playback Mode
         if (isPlaybackMode) {
             if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
             if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
@@ -398,9 +387,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
-                menuScrollView.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
+                menuContainer.setVisibility(View.VISIBLE); mainUIContainer.setVisibility(View.GONE); renderMenu();
             } else {
-                menuScrollView.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                menuContainer.setVisibility(View.GONE); mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 savePreferences(); triggerLutPreload(); updateMainHUD();
             }
             return true;
@@ -409,12 +398,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
-                    // RESTORED: Fire the custom smooth viewer
                     isPlaybackMode = true; 
                     refreshPlaybackFiles();
                     playbackContainer.setVisibility(View.VISIBLE); 
                     mainUIContainer.setVisibility(View.GONE); 
-                    menuScrollView.setVisibility(View.GONE);
+                    menuContainer.setVisibility(View.GONE);
                     showPlaybackImage(0); 
                 } 
                 else {
@@ -480,17 +468,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             menuLabels[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.WHITE));
             menuValues[i].setTextColor(sel ? Color.BLACK : (i > 7 ? Color.DKGRAY : Color.CYAN));
         }
-
-        menuScrollView.post(new Runnable() {
-            @Override public void run() {
-                if (menuRows[menuSelection] != null) {
-                    int targetTop = menuRows[menuSelection].getTop();
-                    int itemHeight = menuRows[menuSelection].getHeight();
-                    int scrollHeight = menuScrollView.getHeight();
-                    menuScrollView.smoothScrollTo(0, Math.max(0, targetTop - (scrollHeight / 2) + (itemHeight / 2)));
-                }
-            }
-        });
     }
 
     private void cycleMode(int dir) {

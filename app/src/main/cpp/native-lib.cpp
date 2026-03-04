@@ -25,7 +25,14 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// FAST XOR-SHIFT PRNG: Generates smooth, continuous noise without square blocks
+// SPATIAL HASH: For structural clumping
+inline int spatial_noise(int x, int y, uint32_t seed) {
+    uint32_t h = seed + (uint32_t)x * 374761393 + (uint32_t)y * 668265263;
+    h = (h ^ (h >> 13)) * 1274126177;
+    return ((h ^ (h >> 16)) & 0xFF) - 128; 
+}
+
+// FAST XOR-SHIFT: For continuous dithering
 inline uint32_t fast_rand(uint32_t* state) {
     uint32_t x = *state;
     x ^= x << 13; x ^= x >> 17; x ^= x << 5;
@@ -139,6 +146,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     long long vig_coef = ((long long)vig_mapped << 24) / max_dist_sq; 
     int opac_mapped = (opacity * 256) / 100;
 
+    int base_div = 4 / scaleDenom; 
+    if (base_div < 1) base_div = 1;
+    int active_grain_div = base_div * (grainSize + 1); 
+    uint32_t master_seed = 98765;
+
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
         jpeg_read_scanlines(cinfo_d, buffer, 1);
@@ -146,10 +158,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
         
         long long dy = current_y - cy;
         long long dy_sq = dy * dy;
+        int noise_y = current_y / active_grain_div;
 
-        // Seed generator per scanline
-        uint32_t seed = 123456789 + (current_y * 1337);
-        int prev_noise = 0;
+        // Seed continuous generator per scanline
+        uint32_t seed = master_seed + (current_y * 1337);
 
         for (int x = 0; x < row_stride; x += 3) {
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
@@ -203,20 +215,33 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outR = (outR * vig_mult) >> 8; outG = (outG * vig_mult) >> 8; outB = (outB * vig_mult) >> 8;
             }
 
-            // ORGANIC FILM GRAIN: Uses continuous low-pass filtering to clump naturally without digital squares
+            // ORGANIC FILM GRAIN: Shadow-suppressed, dithered clumping
             if (grain > 0) {
-                int raw_noise = (fast_rand(&seed) & 0xFF) - 128; // Blazing fast bitwise PRNG (-128 to +127)
+                int pixel_noise = (fast_rand(&seed) & 0xFF) - 128; 
                 int noise;
                 
-                if (grainSize == 0) noise = raw_noise; // SM: Sharp pixel-level grain
-                else if (grainSize == 1) noise = (raw_noise + prev_noise) / 2; // MED: Soft 2-pixel clumping
-                else noise = (raw_noise + (prev_noise * 2)) / 3; // LG: Heavy organic silver halite clumping
-                
-                prev_noise = raw_noise;
+                if (grainSize == 0) {
+                    noise = pixel_noise; // SM: Sharp pixel grain
+                } else {
+                    int noise_x = (x / 3) / active_grain_div;
+                    int block_noise = spatial_noise(noise_x, noise_y, master_seed);
+                    // Dither the structural block with pixel noise so it doesn't look like a square
+                    if (grainSize == 1) noise = (block_noise * 2 + pixel_noise) / 3;
+                    else noise = (block_noise * 3 + pixel_noise) / 4;
+                }
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                int mask = 128 - abs(lum - 128); 
-                int grain_val = (noise * mask * grain) >> 14; 
+                
+                // Film-like mask: Peak noise at mid-tones, dropping to 0 at white and black
+                int mask = lum < 128 ? lum : 255 - lum; 
+                
+                // Aggressive shadow suppression: Darks get almost no noise
+                if (lum < 64) {
+                    mask = (mask * lum) >> 6; 
+                }
+                
+                // Halved overall strength to keep it subtle (Shifted by 15 instead of 14)
+                int grain_val = (noise * mask * grain) >> 15; 
                 
                 outR += grain_val; outG += grain_val; outB += grain_val;
             }
