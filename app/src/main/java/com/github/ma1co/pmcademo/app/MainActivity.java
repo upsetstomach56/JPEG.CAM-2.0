@@ -212,8 +212,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         });
     }
 
+    // =========================================================================
+    // EXIF & THUMBNAIL FIX: Correctly extracts the injected C++ metadata
+    // and dynamically downscales the graded photo for the review screen.
+    // =========================================================================
     private void showPlaybackImage(int index) {
-        if (playbackFiles.isEmpty()) { tvTopStatus.setText("NO GRADED PHOTOS"); return; }
+        if (playbackFiles.isEmpty()) { tvPlaybackInfo.setText("NO GRADED PHOTOS"); return; }
         
         if (index < 0) index = 0;
         if (index >= playbackFiles.size()) index = playbackFiles.size() - 1;
@@ -224,18 +228,37 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             playbackImageView.setImageBitmap(null); currentPlaybackBitmap.recycle(); currentPlaybackBitmap = null;
         }
         
-        BitmapFactory.Options options = new BitmapFactory.Options();
-        options.inJustDecodeBounds = true; 
-        BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
-        
-        int scale = 1; 
-        while ((options.outWidth / scale) > 1600 || (options.outHeight / scale) > 1600) { scale *= 2; }
-        options.inJustDecodeBounds = false; 
-        options.inSampleSize = scale;
-        
         try {
-            Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            // 1. EXTRACT EXIF METADATA
             ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
+            String fnum = exif.getAttribute("FNumber");
+            String speed = exif.getAttribute("ExposureTime");
+            String iso = exif.getAttribute("ISOSpeedRatings");
+            
+            // Format Shutter Speed (e.g. 0.008 -> 1/125s)
+            String speedStr = "--s";
+            if (speed != null) {
+                try {
+                    double s = Double.parseDouble(speed);
+                    if (s < 1.0) speedStr = "1/" + Math.round(1.0 / s) + "s";
+                    else speedStr = Math.round(s) + "s";
+                } catch (Exception e) {}
+            }
+            
+            // Format Aperture (e.g. 1.8)
+            String apStr = fnum != null ? "f/" + fnum : "f/--";
+            String isoStr = iso != null ? "ISO " + iso : "ISO --";
+
+            String metaText = (playbackIndex + 1) + " / " + playbackFiles.size() + "\n" 
+                              + imgFile.getName() + "\n" 
+                              + apStr + " | " + speedStr + " | " + isoStr;
+            tvPlaybackInfo.setText(metaText);
+
+            // 2. DYNAMICALLY DOWNSCALE THE GRADED THUMBNAIL (Saves RAM!)
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = 8; // Shrink to 1/8th size for rapid LCD review
+            Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            
             int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
             int rotationAngle = 0;
             if (orientation == ExifInterface.ORIENTATION_ROTATE_90) rotationAngle = 90;
@@ -244,16 +267,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             Matrix matrix = new Matrix(); 
             if (rotationAngle != 0) matrix.postRotate(rotationAngle);
-            
-            // PURE ANAMORPHIC FIX: Let ImageView FIT_CENTER do the bounds scaling. 
-            // We just pre-squish the final X axis output to perfectly counter the Sony LCD stretch.
-            matrix.postScale(0.8888f, 1.0f);
+            matrix.postScale(0.8888f, 1.0f); // SONY LCD ANAMORPHIC FIX
 
             currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true); 
             if (currentPlaybackBitmap != rawBitmap) rawBitmap.recycle();
             
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
-            tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
             
         } catch (Exception e) { tvPlaybackInfo.setText("DECODE ERROR"); }
     }
@@ -626,7 +645,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
                 RTLProfile p = profiles[currentSlot];
                 if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
-                    copyExif(original.getAbsolutePath(), outFile.getAbsolutePath());
+                    // No longer calling Java EXIF copy here! The C++ engine handles it natively now.
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
                     return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
                 }
@@ -636,25 +655,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(String result) {
             isProcessing = false; tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); 
         }
-    }
-
-    private void copyExif(String sourcePath, String destPath) {
-        try {
-            android.media.ExifInterface sourceExif = new android.media.ExifInterface(sourcePath);
-            android.media.ExifInterface destExif = new android.media.ExifInterface(destPath);
-            String[] tags = {
-                ExifInterface.TAG_ORIENTATION, "FNumber", "ExposureTime", "ISOSpeedRatings", 
-                "FocalLength", "DateTime", "Make", "Model", "WhiteBalance", "Flash"
-            };
-            for (String tag : tags) { String value = sourceExif.getAttribute(tag); if (value != null) destExif.setAttribute(tag, value); }
-            
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(destPath, opts);
-            destExif.setAttribute("ImageWidth", String.valueOf(opts.outWidth));
-            destExif.setAttribute("ImageLength", String.valueOf(opts.outHeight));
-            destExif.saveAttributes();
-        } catch (IOException e) {}
     }
 
     private void openCamera() {
