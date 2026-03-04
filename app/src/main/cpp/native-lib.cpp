@@ -12,7 +12,6 @@
 
 std::vector<int> nativeLutR, nativeLutG, nativeLutB;
 int nativeLutSize = 0;
-uint32_t random_seed = 12345;
 
 struct my_error_mgr {
     struct jpeg_error_mgr pub;
@@ -26,10 +25,12 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// Extremely fast pseudo-random number generator
-inline int fast_rand() {
-    random_seed = (214013 * random_seed + 2531011);
-    return (random_seed >> 16) & 0xFF;
+// SPATIAL HASH FUNCTION: Eliminates geometric banding and creates pure, organic randomness
+inline int spatial_noise(int x, int y, int seed) {
+    unsigned int n = x + y * 57 + seed * 131;
+    n = (n << 13) ^ n;
+    unsigned int res = (n * (n * n * 15731 + 789221) + 1376312589);
+    return (res & 0xFF); // Returns 0 to 255
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -146,7 +147,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
     long long max_dist_sq = cx*cx + cy*cy;
     if (max_dist_sq == 0) max_dist_sq = 1;
 
-    // Convert 0-100 UI sliders to optimal math ranges
     int vig_mapped = (vignette * 256) / 100;
     int opac_mapped = (opacity * 256) / 100;
 
@@ -161,7 +161,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
             int origR = row[x]; int origG = row[x+1]; int origB = row[x+2];
             int outR = origR, outG = origG, outB = origB;
 
-            // 1. LUT INTERPOLATION & OPACITY (Bypassed if "NONE" is selected)
+            // 1. LUT INTERPOLATION & OPACITY
             if (hasLut) {
                 int fX = map[origR]; int fY = map[origG]; int fZ = map[origB];
                 int x0 = fX >> 7; int y0 = fY >> 7; int z0 = fZ >> 7;
@@ -202,7 +202,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 }
             }
 
-            // 2. HIGHLIGHT ROLL-OFF (Soft Shoulder applied to over-bright pixels)
+            // 2. HIGHLIGHT ROLL-OFF
             if (rolloff > 0) {
                 if (outR > 200) outR -= ((outR - 200) * (outR - 200) * rolloff) / 11000;
                 if (outG > 200) outG -= ((outG - 200) * (outG - 200) * rolloff) / 11000;
@@ -220,23 +220,31 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outB = (outB * vig_mult) >> 8;
             }
 
-            // 4. AUTHENTIC 35MM GAUSSIAN GRAIN
+            // 4. ORGANIC SPATIAL FILM GRAIN
             if (grain > 0) {
-                // Summing 3 random values approximates a Gaussian Bell Curve (Smooth texture)
-                int n1 = fast_rand(); int n2 = fast_rand(); int n3 = fast_rand();
-                int noise = ((n1 + n2 + n3) / 3) - 128; // -128 to +127 
+                int actual_x = x / 3;
+                
+                // Divide coordinates by 2 to clump grain into soft 2x2 "Silver Halide" crystals
+                int px = actual_x / 2;
+                int py = current_y / 2;
+
+                // Generate 3 unique Spatial Hashes to perfectly mimic a Gaussian bell curve
+                int n1 = spatial_noise(px, py, 0);
+                int n2 = spatial_noise(px, py, 12345);
+                int n3 = spatial_noise(px, py, 54321);
+                
+                int noise = ((n1 + n2 + n3) / 3) - 128; // Beautiful, pattern-free Gaussian noise (-128 to +127)
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                int mask = 128 - abs(lum - 128); // 0 at pure black/white, 128 at mid-gray
+                int mask = 128 - abs(lum - 128); // Apply heaviest to midtones, zero at pure black/white
                 
-                // Monochromatic noise addition (preserves color hues perfectly)
                 int grain_val = (noise * mask * grain) >> 15; 
                 outR += grain_val;
                 outG += grain_val;
                 outB += grain_val;
             }
 
-            // 5. HARD CLAMP (Safety Net)
+            // 5. HARD CLAMP
             row[x]   = (unsigned char)(outR < 0 ? 0 : (outR > 255 ? 255 : outR));
             row[x+1] = (unsigned char)(outG < 0 ? 0 : (outG > 255 ? 255 : outG));
             row[x+2] = (unsigned char)(outB < 0 ? 0 : (outB > 255 ? 255 : outB));

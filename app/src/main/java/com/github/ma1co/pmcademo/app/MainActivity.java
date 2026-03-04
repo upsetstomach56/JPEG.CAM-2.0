@@ -82,7 +82,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int qualityIndex = 1; 
     private int menuSelection = 0; 
 
-    public enum DialMode { rtl, shutter, aperture, iso, exposure }
+    // ADDED 'review' TO THE DIAL MODES
+    public enum DialMode { rtl, shutter, aperture, iso, exposure, review }
     private DialMode mDialMode = DialMode.rtl;
 
     private class SonyFileObserver extends FileObserver {
@@ -167,6 +168,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         playbackImageView = new ImageView(this);
         playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        playbackImageView.setAdjustViewBounds(true); // FIXES SQUISHED PROPORTIONS
         playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
         
         tvPlaybackInfo = new TextView(this);
@@ -183,7 +185,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    // --- IN-APP PLAYBACK LOGIC ---
+    // --- HIGH-QUALITY IN-APP PLAYBACK LOGIC ---
     private void refreshPlaybackFiles() {
         playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
@@ -223,13 +225,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
+        // FIX: High-Quality decode. Loads up to ~1600px wide, smooths it down
         int scale = 1;
-        while (options.outWidth / scale / 2 >= 640 && options.outHeight / scale / 2 >= 480) {
+        while (options.outWidth / scale > 1600 || options.outHeight / scale > 1600) {
             scale *= 2;
         }
         
         options.inJustDecodeBounds = false;
         options.inSampleSize = scale;
+        options.inDither = true; // Enables smooth color rendering
         
         try {
             currentPlaybackBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
@@ -252,7 +256,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    // --- PORTABLE SD CARD MEMORY SYNC ---
     private void savePreferences() {
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
         editor.putBoolean("has_saved", true);
@@ -265,9 +268,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
         }
-        editor.commit(); // Writes to non-volatile internal flash memory
+        editor.commit(); 
 
-        // MASTER BACKUP TO SD CARD (Silently writes backup file)
         try {
             File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
             if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
@@ -294,7 +296,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
         File backupFile = new File(lutDir, "rtl_backup.txt");
 
-        // RESTORE FROM SD CARD ON FRESH INSTALL
         if (!hasSaved && backupFile.exists()) {
             try {
                 BufferedReader br = new BufferedReader(new FileReader(backupFile));
@@ -317,12 +318,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     }
                 }
                 br.close();
-                savePreferences(); // Lock the imported SD card settings into the camera permanently
+                savePreferences(); 
                 return;
             } catch (Exception e) {}
         }
 
-        // NORMAL LOAD FROM CAMERA MEMORY
         qualityIndex = prefs.getInt("qualityIndex", 1);
         currentSlot = prefs.getInt("currentSlot", 0);
         for(int i=0; i<10; i++) {
@@ -336,36 +336,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true;
-        return super.onKeyUp(keyCode, event);
-    }
-
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
-        
-        if (sc == ScalarInput.ISV_KEY_PLAY) {
-            if (!isPlaybackMode) {
-                isPlaybackMode = true;
-                refreshPlaybackFiles();
-                playbackContainer.setVisibility(View.VISIBLE);
-                mainUIContainer.setVisibility(View.GONE);
-                menuScrollView.setVisibility(View.GONE);
-                showPlaybackImage(0); 
-            } else {
-                exitPlayback();
-            }
-            return true;
-        }
 
         if (isPlaybackMode) {
+            // PLAYBACK NAVIGATION
             if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
             if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
             if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU) { exitPlayback(); return true; }
             return true; 
         }
 
+        // OPEN/CLOSE MENU
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
@@ -382,10 +365,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
+        // CENTER BUTTON LOGIC
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
-                displayState = (displayState == 0) ? 1 : 0;
-                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                if (mDialMode == DialMode.review) {
+                    // Launch Custom Gallery!
+                    isPlaybackMode = true;
+                    refreshPlaybackFiles();
+                    playbackContainer.setVisibility(View.VISIBLE);
+                    mainUIContainer.setVisibility(View.GONE);
+                    menuScrollView.setVisibility(View.GONE);
+                    showPlaybackImage(0); 
+                } else {
+                    // Toggle Clean Screen
+                    displayState = (displayState == 0) ? 1 : 0;
+                    mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                }
             }
             return true;
         }
@@ -512,7 +507,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                           (mDialMode == DialMode.shutter ? g : w) + "S: " + ss + "</font>   " + 
                           (mDialMode == DialMode.aperture ? g : w) + "A: " + ap + "</font>   " + 
                           (mDialMode == DialMode.iso ? g : w) + "ISO: " + iso + "</font>   " + 
-                          (mDialMode == DialMode.exposure ? g : w) + "EV: " + exp + "</font>";
+                          (mDialMode == DialMode.exposure ? g : w) + "EV: " + exp + "</font>   " +
+                          (mDialMode == DialMode.review ? g : w) + "[REVIEW]</font>";
                           
             tvBottomBar.setText(Html.fromHtml(html));
         } catch (Exception e) {}
