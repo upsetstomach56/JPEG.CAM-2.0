@@ -1,7 +1,7 @@
 # Sony JPG Cookbook: Film OS for Alpha Cameras (v2.0)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jbuch84)
 
-**⚠️ BETA STATUS:** This project is currently in early beta. While it is stable and produces high-quality results, it is a "proof of concept" running on legacy hardware. 
+**⚠️ EXPERIMENTAL STATUS:** This project is currently in early development. While it is stable and produces high-quality results, it is a "proof of concept" running on legacy hardware. 
 
 Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulation powerhouse. By bypassing the standard Sony JPEG engine, this app applies professional 3D LUTs (`.cube` files) and organic film grain directly to your photos the moment you press the shutter. 
 
@@ -17,7 +17,7 @@ Sony JPG Cookbook turns your older Sony Alpha camera into a modern film-simulati
 * **Companion App Web Dashboard:** WiFi server to browse, review detailed binary EXIF data (Aperture, Shutter, ISO), and download your "Recipes" or "Originals" from any browser.
 
 
-## 🚧 Known Limitations (The "Beta" Reality)
+## 🚧 Known Limitations (The "Legacy" Reality)
 * **Processing Speed:** Because the camera uses a legacy processor, the "High" quality mode takes time to process a single image. The app prioritizes pixel quality over speed.
 * **JPEG Only:** This version is optimized for JPEGs. RAW files are ignored by the processor.
 * **Battery Drain:** Heavy background processing will impact battery life more than standard shooting.
