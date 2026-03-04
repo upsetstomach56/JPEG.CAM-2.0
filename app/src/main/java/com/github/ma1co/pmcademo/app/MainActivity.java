@@ -5,10 +5,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
-import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -16,9 +14,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.FileObserver;
 import android.text.Html;
-import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -30,8 +26,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.content.Context;
-import java.lang.reflect.Method;
-import java.lang.reflect.Field;
 
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
@@ -68,13 +62,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     
     private LutEngine mEngine = new LutEngine();
     private PreloadLutTask currentPreloadTask = null; 
-    private SonyFileObserver mFileObserver;
-    private String sonyDCIMPath = "";
-    
-    private boolean isPolling = false;
-    private long lastNewestFileTime = 0;
-
-    private FocusOverlayView afOverlay; 
     
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
@@ -102,17 +89,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public enum DialMode { rtl, shutter, aperture, iso, exposure, review }
     private DialMode mDialMode = DialMode.rtl;
 
-    private class SonyFileObserver extends FileObserver {
-        public SonyFileObserver(String path) { super(path, FileObserver.CLOSE_WRITE); }
-        @Override public void onEvent(int event, final String path) {
-            if (path == null || isProcessing || !isReady) return;
-            if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
-                final String fullPath = sonyDCIMPath + "/" + path;
-                runOnUiThread(new Runnable() { @Override public void run() { new ProcessTask().execute(fullPath); }});
-            }
-        }
-    }
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -127,13 +103,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for(int i=0; i<10; i++) profiles[i] = new RTLProfile();
         loadPreferences();
         buildUI(rootLayout);
-
-        String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
-        for (String r : possibleRoots) {
-            File f = new File(r + "/DCIM/100MSDCF");
-            if (f.exists()) { sonyDCIMPath = f.getAbsolutePath(); break; }
-        }
-        if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
         triggerLutPreload();
     }
 
@@ -155,9 +124,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
-
-        afOverlay = new FocusOverlayView(this);
-        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
@@ -402,16 +368,44 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-        
-        // IMMERSIVE MODE: Hide UI on Half-Press
-        if (sc == ScalarInput.ISV_KEY_S1_1) {
+
+        // ---------------------------------------------------------
+        // SHUTTER INTERCEPT & IMMERSIVE MODE (RAM-Level Logic)
+        // ---------------------------------------------------------
+        if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
+            // Half-Press: Hide UI and trigger standard AutoFocus
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE);
                 tvBottomBar.setVisibility(View.GONE);
             }
-            return super.onKeyDown(keyCode, event);
+            if (mCamera != null) {
+                try { mCamera.autoFocus(null); } catch (Exception e) {}
+            }
+            return true;
         }
 
+        if (sc == ScalarInput.ISV_KEY_S1_2 && event.getRepeatCount() == 0) {
+            // Full-Press: Trigger RAM Capture
+            if (!isProcessing && !isPlaybackMode && !isMenuOpen) {
+                isProcessing = true;
+                tvTopStatus.setVisibility(View.VISIBLE);
+                tvTopStatus.setText("PROCESSING...");
+                tvTopStatus.setTextColor(Color.YELLOW);
+                try {
+                    mCamera.takePicture(null, null, new Camera.PictureCallback() {
+                        @Override
+                        public void onPictureTaken(byte[] data, Camera camera) {
+                            new RamProcessTask().execute(data);
+                            camera.startPreview(); // Instantly un-freeze the viewfinder
+                        }
+                    });
+                } catch (Exception e) {
+                    isProcessing = false;
+                }
+            }
+            return true;
+        }
+        
         if (sc == ScalarInput.ISV_KEY_DELETE) { 
             finish(); 
             return true; 
@@ -478,6 +472,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
+            if (mCamera != null) {
+                try { mCamera.cancelAutoFocus(); } catch (Exception e) {}
+            }
+            return true;
         }
         return super.onKeyUp(keyCode, event);
     }
@@ -617,42 +615,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
-    private void startAutoProcessPolling() {
-        isPolling = true;
-        new Thread(new Runnable() {
-            @Override public void run() {
-                while (isPolling) {
-                    try {
-                        Thread.sleep(150); 
-                        File dcim = new File(Environment.getExternalStorageDirectory(), "DCIM");
-                        File sonyDir = new File(dcim, "100MSDCF");
-                        if (sonyDir.exists()) {
-                            File[] files = sonyDir.listFiles();
-                            if (files != null && files.length > 0) {
-                                File newest = null; long maxModified = 0;
-                                for (File f : files) {
-                                    if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("PRCS") && !f.getName().startsWith("GRADED")) {
-                                        if (f.lastModified() > maxModified) { maxModified = f.lastModified(); newest = f; }
-                                    }
-                                }
-                                if (newest != null) {
-                                    if (lastNewestFileTime == 0) { lastNewestFileTime = maxModified; } 
-                                    else if (maxModified > lastNewestFileTime) {
-                                        lastNewestFileTime = maxModified;
-                                        if (!isProcessing && (isReady || profiles[currentSlot].lutIndex == 0)) {
-                                            final String path = newest.getAbsolutePath();
-                                            runOnUiThread(new Runnable() { @Override public void run() { if (!isProcessing) new ProcessTask().execute(path); } });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {}
-                }
-            }
-        }).start();
-    }
-
     private class PreloadLutTask extends AsyncTask<Integer, Void, Boolean> {
         @Override protected void onPreExecute() { isReady = false; updateMainHUD(); }
         @Override protected Boolean doInBackground(Integer... params) {
@@ -661,57 +623,64 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override protected void onPostExecute(Boolean success) { if (isCancelled()) return; isReady = true; updateMainHUD(); }
     }
 
-    private class ProcessTask extends AsyncTask<String, Void, String> {
-        @Override protected void onPreExecute() { 
-            isProcessing = true; tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW);
-        }
-        @Override protected String doInBackground(String... params) {
+    // ---------------------------------------------------------
+    // RAM-LEVEL PROCESS TASK: Bypasses the FileObserver entirely
+    // ---------------------------------------------------------
+    private class RamProcessTask extends AsyncTask<byte[], Void, String> {
+        @Override protected String doInBackground(byte[]... params) {
+            byte[] jpegData = params[0];
             try {
-                File original = new File(params[0]);
-                if (!original.exists()) return "ERR";
-                long lastSize = -1; int timeout = 0;
-                while (timeout < 100) {
-                    long currentSize = original.length();
-                    if (currentSize > 0 && currentSize == lastSize) break;
-                    lastSize = currentSize; Thread.sleep(50); timeout++;
-                }
-
+                // 1. Immediately save the raw RAM array to DCIM as the "Original" backup
+                File dcimDir = new File(Environment.getExternalStorageDirectory(), "DCIM/100MSDCF");
+                if (!dcimDir.exists()) dcimDir.mkdirs();
+                
+                // Construct a unique filename based on time
+                String filename = "DSC" + (System.currentTimeMillis() % 100000) + ".JPG";
+                File origFile = new File(dcimDir, filename);
+                
+                FileOutputStream fos = new FileOutputStream(origFile);
+                fos.write(jpegData);
+                fos.close();
+                
+                // 2. Pass that exact path to the C++ Engine to be graded instantly
                 int scale = (qualityIndex == 0) ? 4 : (qualityIndex == 2 ? 1 : 2);
                 File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
                 if (!outDir.exists()) outDir.mkdirs();
-                File outFile = new File(outDir, original.getName());
+                File outFile = new File(outDir, origFile.getName());
 
                 RTLProfile p = profiles[currentSlot];
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                if (mEngine.applyLutToJpeg(origFile.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
                     sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(outFile)));
+                    sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(origFile)));
                     return "SAVED " + (scale==1?"24MP":(scale==2?"6MP":"1.5MP"));
                 }
-                return "FAILED";
-            } catch (Throwable t) { return "ERR"; }
+            } catch (Throwable t) {}
+            return "FAILED";
         }
         @Override protected void onPostExecute(String result) {
-            isProcessing = false; tvTopStatus.setTextColor(Color.WHITE); updateMainHUD(); 
+            isProcessing = false; 
+            tvTopStatus.setTextColor(Color.WHITE); 
+            updateMainHUD(); 
         }
     }
 
     private void openCamera() {
         if (mCameraEx == null && hasSurface) {
             try { 
-                mCameraEx = CameraEx.open(0, null); mCamera = mCameraEx.getNormalCamera();
-                mCameraEx.startDirectShutter();
-                CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
-                mCameraEx.setAutoPictureReviewControl(apr); apr.setPictureReviewTime(0);
-                mCamera.setPreviewDisplay(mSurfaceView.getHolder()); mCamera.startPreview(); 
+                mCameraEx = CameraEx.open(0, null); 
+                mCamera = mCameraEx.getNormalCamera();
                 
-                if (afOverlay != null) afOverlay.startPolling(); 
-
+                // WE COMPLETELY REMOVED mCameraEx.startDirectShutter();
+                // We now handle shutter captures manually in Java!
+                
+                mCamera.setPreviewDisplay(mSurfaceView.getHolder()); 
+                mCamera.startPreview(); 
                 updateMainHUD();
             } catch (Exception e) {} 
         }
     }
 
     private void closeCamera() {
-        if (afOverlay != null) afOverlay.stopPolling(); 
         if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; mCamera = null; }
     }
 
@@ -722,135 +691,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         super.onResume(); 
         openCamera();
         if (mCamera != null) updateMainHUD(); 
-        startAutoProcessPolling(); 
     }
     
     @Override protected void onPause() { 
         super.onPause(); 
         closeCamera(); 
-        isPolling = false; 
         savePreferences(); 
     }
     
     @Override public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) { updateMainHUD(); }
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
-
-
-    // =========================================================================
-    // CUSTOM AF HUD OVERLAY (BYPASSING COMPILER WITH REFLECTION)
-    // =========================================================================
-    private class FocusOverlayView extends View {
-        private Paint greenPaint;
-        private boolean isPolling = false;
-        private Object scalarInstance = null;
-        private Method getIntMethod = null;
-        private Method getFocusAreasMethod = null;
-        private Field xField, yField, wField, hField;
-        private boolean reflectionFailed = false;
-
-        public FocusOverlayView(Context context) {
-            super(context);
-            greenPaint = new Paint();
-            greenPaint.setColor(Color.GREEN);
-            greenPaint.setStyle(Paint.Style.STROKE);
-            greenPaint.setStrokeWidth(6);
-            greenPaint.setAntiAlias(true);
-
-            // Reflection: Try to hook ScalarWebAPI
-            try {
-                Class<?> scalarClass = Class.forName("com.sony.scalar.sysutil.ScalarWebAPI");
-                Class<?> focusClass = Class.forName("com.sony.scalar.sysutil.FocusArea");
-                
-                try {
-                    Method getInstance = scalarClass.getMethod("getInstance", Context.class);
-                    scalarInstance = getInstance.invoke(null, context);
-                } catch (Exception e) {
-                    scalarInstance = scalarClass.getConstructor(Context.class).newInstance(context);
-                }
-
-                getIntMethod = scalarClass.getMethod("getInt", String.class);
-                getFocusAreasMethod = scalarClass.getMethod("getFocusAreas");
-
-                // Note: The STUBS say 'w' and 'h', but my previous guess used 'right' and 'bottom'. 
-                // Let's grab w and h specifically based on the documentation you provided.
-                xField = focusClass.getField("x");
-                yField = focusClass.getField("y");
-                wField = focusClass.getField("w");
-                hField = focusClass.getField("h");
-
-            } catch (Exception e) {
-                Log.e("COOKBOOK_AF", "REFLECTION SETUP FAILED: " + e.getMessage(), e);
-                reflectionFailed = true;
-            }
-        }
-
-        public void startPolling() {
-            if (!isPolling) {
-                isPolling = true;
-                invalidate(); 
-            }
-        }
-
-        public void stopPolling() {
-            isPolling = false;
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            if (!isPolling) return;
-
-            // 1. Try to use standard Android Camera API as a fallback if Scalar Reflection failed
-            if (reflectionFailed && mCamera != null) {
-                try {
-                    List<Camera.Area> areas = mCamera.getParameters().getFocusAreas();
-                    if (areas != null && !areas.isEmpty()) {
-                        for (Camera.Area a : areas) {
-                            if (a.weight > 0) {
-                                // Standard Android matrix is -1000 to +1000
-                                float left = ((a.rect.left + 1000) / 2000f) * getWidth();
-                                float top = ((a.rect.top + 1000) / 2000f) * getHeight();
-                                float right = ((a.rect.right + 1000) / 2000f) * getWidth();
-                                float bottom = ((a.rect.bottom + 1000) / 2000f) * getHeight();
-                                canvas.drawRect(left, top, right, bottom, greenPaint);
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e("COOKBOOK_AF", "Standard Camera API Failed: " + e.getMessage());
-                }
-            } 
-            
-            // 2. Try the Sony Scalar API
-            else if (scalarInstance != null) {
-                try {
-                    int afStatus = (Integer) getIntMethod.invoke(scalarInstance, "afStatus");
-                    
-                    if (afStatus == 1) { 
-                        Object[] areas = (Object[]) getFocusAreasMethod.invoke(scalarInstance);
-                        if (areas != null) {
-                            for (Object area : areas) {
-                                float ax = xField.getInt(area);
-                                float ay = yField.getInt(area);
-                                float aw = wField.getInt(area);
-                                float ah = hField.getInt(area);
-
-                                // We assume percentages (0 to 100) based on typical Sony stubs
-                                float left = (ax / 100f) * getWidth();
-                                float top = (ay / 100f) * getHeight();
-                                float right = ((ax + aw) / 100f) * getWidth();
-                                float bottom = ((ay + ah) / 100f) * getHeight();
-
-                                canvas.drawRect(left, top, right, bottom, greenPaint);
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e("COOKBOOK_AF", "SCALAR RUNTIME FAILED: " + e.getMessage(), e);
-                }
-            }
-
-            postInvalidateDelayed(100); 
-        }
-    }
 }
