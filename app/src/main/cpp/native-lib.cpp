@@ -8,10 +8,10 @@
 #include <android/log.h>
 
 #define LOG_TAG "COOKBOOK_LOG"
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 std::vector<int> nativeLutR, nativeLutG, nativeLutB;
 int nativeLutSize = 0;
+uint32_t random_seed = 12345;
 
 struct my_error_mgr {
     struct jpeg_error_mgr pub;
@@ -25,12 +25,10 @@ METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
 METHODDEF(void) my_emit_message (j_common_ptr cinfo, int msg_level) {}
 METHODDEF(void) my_output_message (j_common_ptr cinfo) {}
 
-// SPATIAL HASH FUNCTION: Eliminates geometric banding and creates pure, organic randomness
-inline int spatial_noise(int x, int y, int seed) {
-    unsigned int n = x + y * 57 + seed * 131;
-    n = (n << 13) ^ n;
-    unsigned int res = (n * (n * n * 15731 + 789221) + 1376312589);
-    return (res & 0xFF); // Returns 0 to 255
+// The User-Approved Fast Pseudo-Random Generator
+inline int fast_rand() {
+    random_seed = (214013 * random_seed + 2531011);
+    return (random_seed >> 16) & 0xFF;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -92,13 +90,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     cinfo_d->err = jpeg_std_error(&jerr_d->pub);
     jerr_d->pub.error_exit = my_error_exit;
-    jerr_d->pub.emit_message = my_emit_message; jerr_d->pub.output_message = my_output_message;
     
     if (setjmp(jerr_d->setjmp_buffer)) {
         jpeg_destroy_decompress(cinfo_d); free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); 
-        env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
-        return JNI_FALSE;
+        fclose(infile); fclose(outfile); return JNI_FALSE;
     }
     
     jpeg_create_decompress(cinfo_d);
@@ -111,14 +106,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     cinfo_c->err = jpeg_std_error(&jerr_c->pub);
     jerr_c->pub.error_exit = my_error_exit;
-    jerr_c->pub.emit_message = my_emit_message; jerr_c->pub.output_message = my_output_message;
     
     if (setjmp(jerr_c->setjmp_buffer)) {
         jpeg_destroy_compress(cinfo_c); jpeg_destroy_decompress(cinfo_d);
         free(cinfo_d); free(jerr_d); free(cinfo_c); free(jerr_c); free(map);
-        fclose(infile); fclose(outfile); 
-        env->ReleaseStringUTFChars(inPath, in_file); env->ReleaseStringUTFChars(outPath, out_file);
-        return JNI_FALSE;
+        fclose(infile); fclose(outfile); return JNI_FALSE;
     }
     
     jpeg_create_compress(cinfo_c);
@@ -152,6 +144,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
 
     while (cinfo_d->output_scanline < cinfo_d->output_height) {
         long long current_y = cinfo_d->output_scanline;
+        
+        // SEED RESET: Eliminates any diagonal 2D patterns
+        random_seed = 12345 + (current_y * 1337); 
+
         jpeg_read_scanlines(cinfo_d, buffer, 1);
         unsigned char* row = buffer[0];
         long long dy = current_y - cy;
@@ -220,25 +216,15 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(JNIEnv* env, job
                 outB = (outB * vig_mult) >> 8;
             }
 
-            // 4. ORGANIC SPATIAL FILM GRAIN
+            // 4. THE MAGIC GAUSSIAN GRAIN (Restored)
             if (grain > 0) {
-                int actual_x = x / 3;
-                
-                // Divide coordinates by 2 to clump grain into soft 2x2 "Silver Halide" crystals
-                int px = actual_x / 2;
-                int py = current_y / 2;
-
-                // Generate 3 unique Spatial Hashes to perfectly mimic a Gaussian bell curve
-                int n1 = spatial_noise(px, py, 0);
-                int n2 = spatial_noise(px, py, 12345);
-                int n3 = spatial_noise(px, py, 54321);
-                
-                int noise = ((n1 + n2 + n3) / 3) - 128; // Beautiful, pattern-free Gaussian noise (-128 to +127)
+                int n1 = fast_rand(); int n2 = fast_rand(); int n3 = fast_rand();
+                int noise = ((n1 + n2 + n3) / 3) - 128; 
                 
                 int lum = (outR*77 + outG*150 + outB*29) >> 8; 
-                int mask = 128 - abs(lum - 128); // Apply heaviest to midtones, zero at pure black/white
+                int mask = 128 - abs(lum - 128); 
                 
-                int grain_val = (noise * mask * grain) >> 15; 
+                int grain_val = (noise * mask * grain) >> 14; 
                 outR += grain_val;
                 outG += grain_val;
                 outB += grain_val;

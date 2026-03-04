@@ -7,7 +7,9 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.hardware.Camera;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
@@ -38,14 +40,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private Camera mCamera;
     private SurfaceView mSurfaceView;
     
-    // UI Elements
     private FrameLayout mainUIContainer;
     private ScrollView menuScrollView;
     private LinearLayout menuContainer;
     private TextView tvBottomBar, tvTopStatus; 
     private TextView[] menuItems = new TextView[7];
     
-    // IN-APP PLAYBACK ELEMENTS
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
     private TextView tvPlaybackInfo;
@@ -53,7 +53,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int playbackIndex = 0;
     private Bitmap currentPlaybackBitmap = null;
     
-    // State & Engine
     private boolean isProcessing = false;
     private boolean isReady = false; 
     private boolean isMenuOpen = false;
@@ -82,7 +81,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int qualityIndex = 1; 
     private int menuSelection = 0; 
 
-    // ADDED 'review' TO THE DIAL MODES
     public enum DialMode { rtl, shutter, aperture, iso, exposure, review }
     private DialMode mDialMode = DialMode.rtl;
 
@@ -168,7 +166,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         playbackImageView = new ImageView(this);
         playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        playbackImageView.setAdjustViewBounds(true); // FIXES SQUISHED PROPORTIONS
         playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
         
         tvPlaybackInfo = new TextView(this);
@@ -185,7 +182,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    // --- HIGH-QUALITY IN-APP PLAYBACK LOGIC ---
+    // --- HIGH-QUALITY, ROTATION-AWARE PLAYBACK ---
     private void refreshPlaybackFiles() {
         playbackFiles.clear();
         File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
@@ -225,20 +222,41 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         options.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
         
-        // FIX: High-Quality decode. Loads up to ~1600px wide, smooths it down
+        // Target high-quality preview width (~1200px)
         int scale = 1;
-        while (options.outWidth / scale > 1600 || options.outHeight / scale > 1600) {
+        while ((options.outWidth / scale) > 1200 || (options.outHeight / scale) > 1200) {
             scale *= 2;
         }
         
         options.inJustDecodeBounds = false;
         options.inSampleSize = scale;
-        options.inDither = true; // Enables smooth color rendering
         
         try {
-            currentPlaybackBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            Bitmap rawBitmap = BitmapFactory.decodeFile(imgFile.getAbsolutePath(), options);
+            
+            // EXIF ROTATION FIX: Prevents Portrait photos from looking squished!
+            ExifInterface exif = new ExifInterface(imgFile.getAbsolutePath());
+            int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            int rotationAngle = 0;
+            if (orientation == ExifInterface.ORIENTATION_ROTATE_90) rotationAngle = 90;
+            else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) rotationAngle = 180;
+            else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) rotationAngle = 270;
+
+            if (rotationAngle != 0) {
+                Matrix matrix = new Matrix();
+                matrix.postRotate(rotationAngle);
+                currentPlaybackBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.getWidth(), rawBitmap.getHeight(), matrix, true);
+                if (currentPlaybackBitmap != rawBitmap) {
+                    rawBitmap.recycle();
+                }
+            } else {
+                currentPlaybackBitmap = rawBitmap;
+            }
+
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
             tvPlaybackInfo.setText((playbackIndex + 1) + " / " + playbackFiles.size() + "\n" + imgFile.getName());
+        } catch (Exception e) {
+            tvPlaybackInfo.setText("DECODE ERROR");
         } catch (OutOfMemoryError e) {
             tvPlaybackInfo.setText("MEMORY ERROR");
         }
@@ -256,6 +274,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // --- BULLETPROOF SD CARD SYNC ---
+    private File getLutDir() {
+        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
+        if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+        if (!lutDir.exists()) lutDir = new File("/mnt/sdcard/LUTS");
+        return lutDir;
+    }
+
     private void savePreferences() {
         SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
         editor.putBoolean("has_saved", true);
@@ -271,8 +297,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         editor.commit(); 
 
         try {
-            File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
-            if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+            File lutDir = getLutDir();
             if (lutDir.exists()) {
                 File backupFile = new File(lutDir, "rtl_backup.txt");
                 BufferedWriter bw = new BufferedWriter(new FileWriter(backupFile));
@@ -283,6 +308,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                              profiles[i].opacity + "," + profiles[i].grain + "," + 
                              profiles[i].rollOff + "," + profiles[i].vignette + "\n");
                 }
+                bw.flush();
                 bw.close();
             }
         } catch (Exception e) {}
@@ -292,8 +318,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         SharedPreferences prefs = getSharedPreferences("RTL_PREFS", MODE_PRIVATE);
         boolean hasSaved = prefs.getBoolean("has_saved", false);
         
-        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
-        if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+        File lutDir = getLutDir();
         File backupFile = new File(lutDir, "rtl_backup.txt");
 
         if (!hasSaved && backupFile.exists()) {
@@ -318,7 +343,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     }
                 }
                 br.close();
-                savePreferences(); 
+                savePreferences(); // Seal the backup into the fresh install
                 return;
             } catch (Exception e) {}
         }
@@ -336,19 +361,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (event.getScanCode() == ScalarInput.ISV_KEY_PLAY) return true; // Stop Sony Gallery
+        return super.onKeyUp(keyCode, event);
+    }
+
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_DELETE) { finish(); return true; }
 
         if (isPlaybackMode) {
-            // PLAYBACK NAVIGATION
             if (sc == ScalarInput.ISV_KEY_LEFT || sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { showPlaybackImage(playbackIndex + 1); return true; }
             if (sc == ScalarInput.ISV_KEY_RIGHT || sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { showPlaybackImage(playbackIndex - 1); return true; }
-            if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU) { exitPlayback(); return true; }
+            if (sc == ScalarInput.ISV_KEY_ENTER || sc == ScalarInput.ISV_KEY_MENU || sc == ScalarInput.ISV_KEY_PLAY) { exitPlayback(); return true; }
             return true; 
         }
 
-        // OPEN/CLOSE MENU
         if (sc == ScalarInput.ISV_KEY_MENU) {
             isMenuOpen = !isMenuOpen;
             if (isMenuOpen) {
@@ -365,11 +393,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             return true;
         }
 
-        // CENTER BUTTON LOGIC
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
                 if (mDialMode == DialMode.review) {
-                    // Launch Custom Gallery!
                     isPlaybackMode = true;
                     refreshPlaybackFiles();
                     playbackContainer.setVisibility(View.VISIBLE);
@@ -377,7 +403,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     menuScrollView.setVisibility(View.GONE);
                     showPlaybackImage(0); 
                 } else {
-                    // Toggle Clean Screen
                     displayState = (displayState == 0) ? 1 : 0;
                     mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 }
@@ -516,8 +541,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private void scanRecipes() { 
         recipeList.clear(); recipeList.add("NONE"); 
-        File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
-        if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+        File lutDir = getLutDir();
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) if (f.length() > 10240 && f.getName().toUpperCase().contains("CUB")) recipeList.add(f.getName());
         }
@@ -576,8 +600,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             isReady = false; updateMainHUD();
         }
         @Override protected Boolean doInBackground(Integer... params) {
-            File lutDir = new File(Environment.getExternalStorageDirectory(), "LUTS");
-            if (!lutDir.exists()) lutDir = new File("/storage/sdcard0/LUTS");
+            File lutDir = getLutDir();
             return mEngine.loadLut(new File(lutDir, recipeList.get(params[0])), recipeList.get(params[0]));
         }
         @Override protected void onPostExecute(Boolean success) {
