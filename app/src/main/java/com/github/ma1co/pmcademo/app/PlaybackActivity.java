@@ -34,7 +34,10 @@ public class PlaybackActivity extends BaseActivity implements AdapterView.OnItem
             public void bindView(View view, Context context, Cursor cursor) {
                 ImageInfo info = mediaManager.getImageInfo(cursor);
 
-                String text1 = info.getFolder() + "/" + info.getFilename();
+                // Construct the absolute path natively
+                String absolutePath = info.getFolder() + "/" + info.getFilename();
+                
+                String text1 = absolutePath;
                 String text2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(info.getDate()) + " - " +
                         info.getWidth() + "x" + info.getHeight() + " - " +
                         info.getFocalLength() + "mm" + " - " +
@@ -45,7 +48,7 @@ public class PlaybackActivity extends BaseActivity implements AdapterView.OnItem
                 // Generate thumbnail directly from the graded file using rapid downscaling
                 BitmapFactory.Options opts = new BitmapFactory.Options();
                 opts.inSampleSize = 16; 
-                Bitmap thumbnail = BitmapUtil.fixOrientation(BitmapFactory.decodeFile(info.getFile().getAbsolutePath(), opts), info.getOrientation());
+                Bitmap thumbnail = BitmapUtil.fixOrientation(BitmapFactory.decodeFile(absolutePath, opts), info.getOrientation());
 
                 ((TextView) view.findViewById(android.R.id.text1)).setText(text1);
                 ((TextView) view.findViewById(android.R.id.text2)).setText(text2);
