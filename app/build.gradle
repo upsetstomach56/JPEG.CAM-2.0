@@ -19,6 +19,14 @@ android {
     }
 }
 
+repositories {
+    maven { url "https://jitpack.io" }
+    jcenter()
+    google()
+}
+
 dependencies {
-    // Keep empty to prevent GitHub Actions SDK crash
+    // We NEED the stubs so the compiler knows what CameraEx and ScalarInput are!
+    // 'compileOnly' means it uses it to build, but doesn't package it (since the camera already has it).
+    compileOnly 'com.github.ma1co.OpenMemories-Framework:stubs:-SNAPSHOT'
 }
