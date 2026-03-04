@@ -100,8 +100,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int qualityIndex = 1; 
     private int menuSelection = 0; 
 
-    public enum DialMode { rtl, shutter, aperture, iso, exposure, review }
-    private DialMode mDialMode = DialMode.rtl;
+    // Replaced Enum with Static Constants for old Java compiler support
+    public static final int DIAL_MODE_RTL = 0;
+    public static final int DIAL_MODE_SHUTTER = 1;
+    public static final int DIAL_MODE_APERTURE = 2;
+    public static final int DIAL_MODE_ISO = 3;
+    public static final int DIAL_MODE_EXPOSURE = 4;
+    public static final int DIAL_MODE_REVIEW = 5;
+    private int mDialMode = DIAL_MODE_RTL;
 
     private class SonyFileObserver extends FileObserver {
         public SonyFileObserver(String path) { super(path, FileObserver.CLOSE_WRITE); }
@@ -452,7 +458,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         // IMMERSIVE MODE, IPC TEST, & AF RETICLE
         // -------------------------------------------------------------
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
-            
             // FIRE THE IPC THEORY PROBE
             testIpcTheory();
 
@@ -462,18 +467,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvBottomBar.setVisibility(View.GONE);
             }
             
-            // Set reticle to Yellow (Searching) and trigger standard focus
-            afReticle.setState(FocusReticleView.State.SEARCHING);
+            // Set reticle to Yellow (Searching) and trigger focus
+            afReticle.setState(FocusReticleView.STATE_SEARCHING);
             if (mCamera != null) {
                 try {
                     mCamera.autoFocus(new Camera.AutoFocusCallback() {
                         @Override
                         public void onAutoFocus(boolean success, Camera camera) {
-                            if (success) afReticle.setState(FocusReticleView.State.LOCKED);
-                            else afReticle.setState(FocusReticleView.State.FAILED);
+                            if (success) afReticle.setState(FocusReticleView.STATE_LOCKED);
+                            else afReticle.setState(FocusReticleView.STATE_FAILED);
                         }
                     });
-                } catch (Exception e) { afReticle.setState(FocusReticleView.State.IDLE); }
+                } catch (Exception e) { afReticle.setState(FocusReticleView.STATE_IDLE); }
             }
             
             return super.onKeyDown(keyCode, event);
@@ -508,7 +513,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         if (sc == ScalarInput.ISV_KEY_ENTER) {
             if(!isMenuOpen) {
-                if (mDialMode == DialMode.review) {
+                if (mDialMode == DIAL_MODE_REVIEW) {
                     isPlaybackMode = true; 
                     refreshPlaybackFiles();
                     playbackContainer.setVisibility(View.VISIBLE); 
@@ -549,7 +554,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 tvTopStatus.setVisibility(View.VISIBLE);
                 tvBottomBar.setVisibility(View.VISIBLE);
             }
-            afReticle.setState(FocusReticleView.State.IDLE);
+            afReticle.setState(FocusReticleView.STATE_IDLE);
             if (mCamera != null) {
                 try { mCamera.cancelAutoFocus(); } catch (Exception e) {}
             }
@@ -600,9 +605,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void cycleMode(int dir) {
-        DialMode[] modes = DialMode.values();
-        int ord = (mDialMode.ordinal() + dir + modes.length) % modes.length;
-        mDialMode = modes[ord];
+        int ord = (mDialMode + dir + 6) % 6;
+        mDialMode = ord;
         updateMainHUD();
     }
 
@@ -612,15 +616,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             
-            if (mDialMode == DialMode.rtl) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
-            else if (mDialMode == DialMode.shutter) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
-            else if (mDialMode == DialMode.aperture) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
-            else if (mDialMode == DialMode.iso) {
+            if (mDialMode == DIAL_MODE_RTL) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
+            else if (mDialMode == DIAL_MODE_SHUTTER) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
+            else if (mDialMode == DIAL_MODE_APERTURE) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
+            else if (mDialMode == DIAL_MODE_ISO) {
                 List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
                 int idx = isos.indexOf(pm.getISOSensitivity());
                 if (idx != -1) { pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); mCamera.setParameters(p); }
             }
-            else if (mDialMode == DialMode.exposure) { 
+            else if (mDialMode == DIAL_MODE_EXPOSURE) { 
                 p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), Math.min(p.getMaxExposureCompensation(), p.getExposureCompensation() + d))); 
                 mCamera.setParameters(p); 
             }
@@ -644,12 +648,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String exp = String.format("%.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
 
             String g = "<font color='#00FF00'>"; String w = "<font color='#FFFFFF'>";
-            String html = (mDialMode == DialMode.rtl ? g : w) + "[RTL " + (currentSlot+1) + "]</font>   " +
-                          (mDialMode == DialMode.shutter ? g : w) + "S: " + ss + "</font>   " + 
-                          (mDialMode == DialMode.aperture ? g : w) + "A: " + ap + "</font>   " + 
-                          (mDialMode == DialMode.iso ? g : w) + "ISO: " + iso + "</font>   " + 
-                          (mDialMode == DialMode.exposure ? g : w) + "EV: " + exp + "</font>   " +
-                          (mDialMode == DialMode.review ? g : w) + "[REVIEW]</font>";
+            String html = (mDialMode == DIAL_MODE_RTL ? g : w) + "[RTL " + (currentSlot+1) + "]</font>   " +
+                          (mDialMode == DIAL_MODE_SHUTTER ? g : w) + "S: " + ss + "</font>   " + 
+                          (mDialMode == DIAL_MODE_APERTURE ? g : w) + "A: " + ap + "</font>   " + 
+                          (mDialMode == DIAL_MODE_ISO ? g : w) + "ISO: " + iso + "</font>   " + 
+                          (mDialMode == DIAL_MODE_EXPOSURE ? g : w) + "EV: " + exp + "</font>   " +
+                          (mDialMode == DIAL_MODE_REVIEW ? g : w) + "[REVIEW]</font>";
             tvBottomBar.setText(Html.fromHtml(html));
         } catch (Exception e) {}
     }
@@ -813,8 +817,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     // =========================================================================
     private class FocusReticleView extends View {
         private Paint paint;
-        public enum State { IDLE, SEARCHING, LOCKED, FAILED }
-        private State currentState = State.IDLE;
+        
+        public static final int STATE_IDLE = 0;
+        public static final int STATE_SEARCHING = 1;
+        public static final int STATE_LOCKED = 2;
+        public static final int STATE_FAILED = 3;
+        
+        private int currentState = STATE_IDLE;
 
         public FocusReticleView(Context context) {
             super(context);
@@ -824,7 +833,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             paint.setAntiAlias(true);
         }
 
-        public void setState(State state) {
+        public void setState(int state) {
             this.currentState = state;
             invalidate(); // Redraw the UI immediately
         }
@@ -835,10 +844,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
             // Determine color based on Focus State
             switch (currentState) {
-                case IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break; // Faint White
-                case SEARCHING: paint.setColor(Color.YELLOW); break;
-                case LOCKED:    paint.setColor(Color.GREEN); break;
-                case FAILED:    paint.setColor(Color.RED); break;
+                case STATE_IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break; // Faint White
+                case STATE_SEARCHING: paint.setColor(Color.YELLOW); break;
+                case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
+                case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
 
             int cx = getWidth() / 2;
