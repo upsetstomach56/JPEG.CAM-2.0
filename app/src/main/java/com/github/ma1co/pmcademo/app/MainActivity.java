@@ -19,6 +19,7 @@ import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.text.Html;
 import android.util.Pair;
 import android.view.Gravity;
@@ -100,6 +101,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 lastBatteryLevel = (level * 100) / scale;
                 if (tvBattery != null) tvBattery.setText(lastBatteryLevel + "%");
             }
+        }
+    };
+
+    // Live Exposure Polling Handler
+    private Handler uiHandler = new Handler();
+    private Runnable liveUpdater = new Runnable() {
+        @Override
+        public void run() {
+            // Only poll the exposure if we are actively framing a shot (not in menu, not processing)
+            if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
+                updateMainHUD();
+            }
+            uiHandler.postDelayed(this, 500); // 2 updates per second
         }
     };
 
@@ -248,7 +262,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
         menuContainer.setPadding(30, 30, 30, 30);
         
-        for (int i = 0; i < 12; i++) { // Increased to 12
+        for (int i = 0; i < 12; i++) { 
             menuRows[i] = new LinearLayout(this);
             menuRows[i].setOrientation(LinearLayout.HORIZONTAL);
             menuRows[i].setGravity(Gravity.CENTER_VERTICAL);
@@ -583,7 +597,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
                 case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
                 case 11: 
-                    // Scene Mode Override
                     Camera.Parameters cp = mCamera.getParameters();
                     List<String> scnModes = cp.getSupportedSceneModes();
                     if (scnModes != null && scnModes.size() > 0) {
@@ -614,7 +627,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuLabels[9].setText("[LOCKED] WB Shift");menuValues[9].setText(String.valueOf(p.wbShift));
         menuLabels[10].setText("[LOCKED] DRO");    menuValues[10].setText(p.dro);
 
-        // Populate dynamic Scene Mode
         String currentScene = "UNKNOWN";
         try {
             if(mCamera != null) {
@@ -627,7 +639,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for (int i = 0; i < 12; i++) {
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
-            // Rows 8, 9, 10 are greyed out (locked)
             boolean isLocked = (i >= 8 && i <= 10);
             menuLabels[i].setTextColor(sel ? Color.WHITE : (isLocked ? Color.GRAY : Color.WHITE));
             menuValues[i].setTextColor(sel ? Color.WHITE : (isLocked ? Color.GRAY : Color.WHITE));
@@ -660,21 +671,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera.setParameters(p); 
             }
             else if (mDialMode == DIAL_MODE_PASM) {
-                List<String> modes = p.getSupportedSceneModes();
-                if (modes != null && modes.size() > 1) { 
-                    // Phase 2.3: Strict PASM filter for HUD Dial
-                    List<String> pasm = new ArrayList<String>();
-                    for(String m : modes) {
-                        if(m.equals("manual") || m.equals("aperture-priority") || m.equals("shutter-priority") || m.equals("program-auto") || m.equals("auto") || m.equals("intelligent-active")) {
-                            pasm.add(m);
-                        }
+                // Brute-force cycle through the official PASM modes
+                String[] pasm = {"manual", "aperture-priority", "shutter-priority", "program-auto", "auto"};
+                int idx = 0;
+                String cur = p.getSceneMode();
+                if (cur != null) {
+                    for(int i=0; i<pasm.length; i++) {
+                        if(pasm[i].equals(cur)) { idx = i; break; }
                     }
-                    if(!pasm.isEmpty()) {
-                        int idx = pasm.indexOf(p.getSceneMode());
-                        if (idx == -1) idx = 0; // If currently in a hidden SCN mode, reset back to first PASM mode
-                        p.setSceneMode(pasm.get((idx + d + pasm.size()) % pasm.size())); 
-                        mCamera.setParameters(p); 
-                    }
+                }
+                
+                // Attempt to set modes until the camera accepts one
+                for(int i=1; i<=pasm.length; i++) {
+                    int next = (idx + (d > 0 ? i : -i) + pasm.length) % pasm.length;
+                    try {
+                        p.setSceneMode(pasm[next]);
+                        mCamera.setParameters(p);
+                        break; // Stop iterating if successfully applied
+                    } catch (Exception e) {}
                 }
             }
             else if (mDialMode == DIAL_MODE_FOCUS) {
@@ -694,8 +708,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         
         String rawName = recipeNames.get(prof.lutIndex);
         String displayName = rawName.length() > 15 ? rawName.substring(0, 12) + "..." : rawName;
-        tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING..."));
-        tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.GREEN : Color.WHITE);
+        
+        // Ensure "PROCESSING..." text from other threads isn't overwritten
+        if (!isProcessing) {
+            tvTopStatus.setText("RTL " + (currentSlot + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING..."));
+            tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.GREEN : Color.WHITE);
+        }
         
         tvReview.setVisibility(mDialMode == DIAL_MODE_REVIEW ? View.VISIBLE : View.GONE);
         if(mDialMode == DIAL_MODE_REVIEW) tvReview.setBackgroundColor(Color.rgb(230, 50, 15)); 
@@ -713,7 +731,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_SHUTTER_PRIORITY)) tvMode.setText("S");
                 else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_PROGRAM_AUTO)) tvMode.setText("P");
                 else if (sceneMode.equals("auto") || sceneMode.equals("intelligent-active")) tvMode.setText("AUTO");
-                else tvMode.setText("SCN"); // Warns user a hidden creative mode is active
+                else tvMode.setText("SCN"); 
             }
 
             tvFocusMode.setBackgroundColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
@@ -813,12 +831,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (mCamera != null) updateMainHUD(); 
         registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (mScanner != null) mScanner.start(); 
+        uiHandler.post(liveUpdater); // Start polling light meter
     }
     
     @Override protected void onPause() { 
         super.onPause(); closeCamera(); 
         try { unregisterReceiver(batteryReceiver); } catch (Exception e) {}
         if (mScanner != null) mScanner.stop(); 
+        uiHandler.removeCallbacks(liveUpdater); // Stop polling
         savePreferences(); 
     }
     
