@@ -49,8 +49,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private TextView[] menuLabels = new TextView[11];
     private TextView[] menuValues = new TextView[11];
     
-    private TextView tvBottomBar, tvTopStatus, tvBattery, tvReview, tvFocusMode; 
-    private ImageView ivMode; 
+    private TextView tvBottomBar, tvTopStatus, tvBattery, tvReview, tvMode, tvFocusMode; 
     
     private FrameLayout playbackContainer;
     private ImageView playbackImageView;
@@ -196,7 +195,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(40, 22));
         rightBar.addView(batteryArea);
 
-        tvReview = createSideTextIcon("REVIEW");
+        tvReview = createSideTextIcon("REV");
         tvReview.setVisibility(View.GONE);
         LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2);
         rvParams.setMargins(0, 20, 0, 0);
@@ -207,24 +206,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         rightParams.setMargins(0, 20, 20, 0);
         mainUIContainer.addView(rightBar, rightParams);
 
-        // Phase 2: Left Bar with Touch Selection
+        // Phase 2.2: Large, Escapable Touch Buttons
         LinearLayout leftBar = new LinearLayout(this);
         leftBar.setOrientation(LinearLayout.VERTICAL);
         
-        ivMode = createSideIconImage(SonyDrawables.s_16_dd_parts_osd_icon_mode_m);
-        ivMode.setOnClickListener(new View.OnClickListener() {
+        tvMode = createSideTextIcon("M");
+        tvMode.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                mDialMode = DIAL_MODE_PASM;
-                handleInput(1); // Cycle forward on tap
+                // Tap to toggle on, tap again to escape to RTL
+                mDialMode = (mDialMode == DIAL_MODE_PASM) ? DIAL_MODE_RTL : DIAL_MODE_PASM;
+                updateMainHUD();
             }
         });
-        leftBar.addView(ivMode);
+        leftBar.addView(tvMode);
 
         tvFocusMode = createSideTextIcon("AF-S");
         tvFocusMode.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                mDialMode = DIAL_MODE_FOCUS;
-                handleInput(1); // Cycle forward on tap
+                // Tap to toggle on, tap again to escape to RTL
+                mDialMode = (mDialMode == DIAL_MODE_FOCUS) ? DIAL_MODE_RTL : DIAL_MODE_FOCUS;
+                updateMainHUD();
             }
         });
         leftBar.addView(tvFocusMode);
@@ -284,7 +285,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvPlaybackInfo = new TextView(this);
         tvPlaybackInfo.setTextColor(Color.WHITE);
         tvPlaybackInfo.setTextSize(18);
-        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK);
+        tvPlaybackInfo.setShadowLayer(3, 0, Color.BLACK);
         FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         pbInfoParams.setMargins(0, 30, 30, 0);
         playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
@@ -295,24 +296,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         renderMenu();
     }
 
-    private ImageView createSideIconImage(int resId) {
-        ImageView iv = new ImageView(this);
-        iv.setImageResource(resId);
-        iv.setBackgroundColor(Color.argb(140, 40, 40, 40));
-        iv.setPadding(15, 15, 15, 15);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMargins(0, 0, 0, 10);
-        iv.setLayoutParams(lp);
-        return iv;
-    }
-
     private TextView createSideTextIcon(String text) {
         TextView tv = new TextView(this);
-        tv.setText(text); tv.setTextColor(Color.WHITE); tv.setTextSize(16);
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); tv.setPadding(12, 6, 12, 6);
+        tv.setText(text); 
+        tv.setTextColor(Color.WHITE); 
+        tv.setTextSize(22); // Larger text
+        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        tv.setPadding(25, 15, 25, 15); // Much larger touch target
         tv.setBackgroundColor(Color.argb(140, 40, 40, 40));
+        tv.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMargins(0, 0, 0, 10);
+        lp.setMargins(0, 0, 0, 15);
         tv.setLayoutParams(lp);
         return tv;
     }
@@ -496,11 +490,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
+            // Hide UI during half-press
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.GONE); tvBottomBar.setVisibility(View.GONE);
-                tvBattery.setVisibility(View.GONE); ivMode.setVisibility(View.GONE); tvFocusMode.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
+                tvBattery.setVisibility(View.GONE); tvMode.setVisibility(View.GONE); tvFocusMode.setVisibility(View.GONE); tvReview.setVisibility(View.GONE);
             }
-            if (afOverlay != null) { afOverlay.startFocus(mCamera); }
+            
+            // Check MF to prevent "chattering"
+            if (afOverlay != null && mCamera != null) { 
+                try {
+                    String fm = mCamera.getParameters().getFocusMode();
+                    if (!"manual".equals(fm)) {
+                        afOverlay.startFocus(mCamera); 
+                    }
+                } catch (Exception e) {}
+            }
             return super.onKeyDown(keyCode, event);
         }
 
@@ -555,12 +559,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override 
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (event.getScanCode() == ScalarInput.ISV_KEY_S1_1) {
+            // Restore UI after half-press
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode) {
                 tvTopStatus.setVisibility(View.VISIBLE); tvBottomBar.setVisibility(View.VISIBLE);
-                tvBattery.setVisibility(View.VISIBLE); ivMode.setVisibility(View.VISIBLE); tvFocusMode.setVisibility(View.VISIBLE);
+                tvBattery.setVisibility(View.VISIBLE); tvMode.setVisibility(View.VISIBLE); tvFocusMode.setVisibility(View.VISIBLE);
                 if (mDialMode == DIAL_MODE_REVIEW) tvReview.setVisibility(View.VISIBLE);
             }
-            if (afOverlay != null) { afOverlay.stopFocus(mCamera); }
+            if (afOverlay != null && mCamera != null) { 
+                try {
+                    String fm = mCamera.getParameters().getFocusMode();
+                    if (!"manual".equals(fm)) {
+                        afOverlay.stopFocus(mCamera); 
+                    }
+                } catch (Exception e) {}
+            }
         }
         return super.onKeyUp(keyCode, event);
     }
@@ -607,7 +619,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void cycleMode(int dir) {
-        // Cycling through 8 modes to include PASM and FOCUS
+        // Cycling through exactly 8 modes: 0=RTL, 1=S, 2=A, 3=ISO, 4=EV, 5=REV, 6=PASM, 7=FOCUS
         mDialMode = (mDialMode + dir + 8) % 8;
         updateMainHUD();
     }
@@ -634,7 +646,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             else if (mDialMode == DIAL_MODE_PASM) {
                 List<String> modes = p.getSupportedSceneModes();
-                if (modes != null && modes.size() > 1) { // If > 1, the camera allows software change
+                if (modes != null && modes.size() > 1) { // Will only change if camera allows software adjustment
                     int idx = modes.indexOf(p.getSceneMode());
                     if (idx != -1) { p.setSceneMode(modes.get((idx + d + modes.size()) % modes.size())); mCamera.setParameters(p); }
                 }
@@ -667,18 +679,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters params = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(params);
             
-            // Highlight active side icon
-            ivMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
-            tvFocusMode.setBackgroundColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
-
+            // Map Scene Modes to Clean Letters
+            tvMode.setBackgroundColor(mDialMode == DIAL_MODE_PASM ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
             String sceneMode = params.getSceneMode();
             if (sceneMode != null) {
-                if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_MANUAL_EXPOSURE)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_m);
-                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_APERTURE_PRIORITY)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_a);
-                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_SHUTTER_PRIORITY)) ivMode.setImageResource(SonyDrawables.s_16_dd_parts_osd_icon_mode_s);
-                else ivMode.setImageResource(SonyDrawables.p_dialogwarning); // Fallback icon for Program/Auto
+                if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_MANUAL_EXPOSURE)) tvMode.setText("M");
+                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_APERTURE_PRIORITY)) tvMode.setText("A");
+                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_SHUTTER_PRIORITY)) tvMode.setText("S");
+                else if (sceneMode.equals(CameraEx.ParametersModifier.SCENE_MODE_PROGRAM_AUTO)) tvMode.setText("P");
+                else if (sceneMode.equals("auto") || sceneMode.equals("intelligent-active")) tvMode.setText("AUTO");
+                else tvMode.setText(sceneMode.substring(0, 1).toUpperCase()); 
             }
 
+            // Map Focus Modes
+            tvFocusMode.setBackgroundColor(mDialMode == DIAL_MODE_FOCUS ? Color.rgb(20, 150, 20) : Color.argb(140, 40, 40, 40));
             String fMode = params.getFocusMode();
             if (fMode != null) {
                 if (fMode.equals("manual")) tvFocusMode.setText("MF");
@@ -751,7 +765,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera.setPreviewDisplay(mSurfaceView.getHolder()); 
                 mCamera.startPreview(); 
                 
-                // Force Single Drive Mode on boot
+                // Force Single Drive Mode on boot to preserve processing memory
                 try {
                     Camera.Parameters params = mCamera.getParameters();
                     CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(params);
