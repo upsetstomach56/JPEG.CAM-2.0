@@ -9,6 +9,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -68,7 +69,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isMenuOpen = false;
     private int displayState = 0; 
     
-    private LutEngine mEngine = new LutEngine(); 
+    private LutEngine mEngine; 
     private PreloadLutTask currentPreloadTask = null; 
     private SonyFileObserver mFileObserver;
     private String sonyDCIMPath = "";
@@ -131,6 +132,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        try {
+            mEngine = new LutEngine();
+        } catch (Throwable t) {
+            Log.e("COOKBOOK", "Native library failed to load.");
+        }
 
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);

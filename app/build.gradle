@@ -5,20 +5,27 @@ android {
     buildToolsVersion "28.0.3"
 
     defaultConfig {
-        applicationId "com.jpgcookbook.sony" // The OS identity
+        applicationId "com.jpgcookbook.sony"
         minSdkVersion 10
         targetSdkVersion 25
         versionCode 1
         versionName "2.0"
     }
+    
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    // Ensures your C++ NDK library is packaged into the APK regardless of where the runner builds it
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs', 'src/main/libs', 'libs']
+        }
+    }
     
-    // Restores your specific APK naming convention
     applicationVariants.all { variant ->
         variant.outputs.all {
             outputFileName = "Sony-JPGCookbook-NDK-v2.0-NDK.apk"
