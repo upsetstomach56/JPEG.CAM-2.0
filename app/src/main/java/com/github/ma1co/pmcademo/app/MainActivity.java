@@ -9,7 +9,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.ExifInterface;
@@ -32,14 +31,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.content.Context;
 
-import java.lang.reflect.Method;
-import java.lang.reflect.Field;
-import java.lang.reflect.Constructor;
 import java.util.List;
-
 import com.sony.scalar.hardware.CameraEx;
 import com.sony.scalar.sysutil.ScalarInput;
-
 import java.io.*;
 import java.util.ArrayList;
 
@@ -77,7 +71,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean isPolling = false;
     private long lastNewestFileTime = 0;
     
-    private HybridFocusView afOverlay;
+    private ProReticleView afOverlay;
 
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
@@ -111,18 +105,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private int mDialMode = DIAL_MODE_RTL;
 
     private class SonyFileObserver extends FileObserver {
-        public SonyFileObserver(String path) { 
-            super(path, FileObserver.CLOSE_WRITE); 
+        public SonyFileObserver(String path) {
+            super(path, FileObserver.CLOSE_WRITE);
         }
-        @Override 
+
+        @Override
         public void onEvent(int event, final String path) {
             if (path == null || isProcessing || !isReady) return;
             if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS")) {
                 final String fullPath = sonyDCIMPath + "/" + path;
-                runOnUiThread(new Runnable() { 
-                    @Override 
-                    public void run() { 
-                        new ProcessTask().execute(fullPath); 
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        new ProcessTask().execute(fullPath);
                     }
                 });
             }
@@ -132,11 +127,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
+        
         try {
             mEngine = new LutEngine();
         } catch (Throwable t) {
-            Log.e("COOKBOOK", "Native library failed to load.");
+            Log.e("COOKBOOK", "Native library failed to load: " + t.getMessage());
         }
 
         FrameLayout rootLayout = new FrameLayout(this);
@@ -154,9 +149,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         String[] possibleRoots = { Environment.getExternalStorageDirectory().getAbsolutePath(), "/mnt/sdcard", "/storage/sdcard0", "/sdcard" };
         for (String r : possibleRoots) {
             File f = new File(r + "/DCIM/100MSDCF");
-            if (f.exists()) { 
-                sonyDCIMPath = f.getAbsolutePath(); 
-                break; 
+            if (f.exists()) {
+                sonyDCIMPath = f.getAbsolutePath();
+                break;
             }
         }
         if (sonyDCIMPath.isEmpty()) sonyDCIMPath = possibleRoots[0] + "/DCIM/100MSDCF";
@@ -183,7 +178,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         botParams.setMargins(0, 0, 0, 30);
         mainUIContainer.addView(tvBottomBar, botParams);
 
-        afOverlay = new HybridFocusView(this);
+        afOverlay = new ProReticleView(this);
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         menuContainer = new LinearLayout(this);
@@ -248,16 +243,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
         }
         java.util.Collections.sort(playbackFiles, new java.util.Comparator<File>() {
-            public int compare(File f1, File f2) { 
-                return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified()); 
+            public int compare(File f1, File f2) {
+                return Long.valueOf(f2.lastModified()).compareTo(f1.lastModified());
             }
         });
     }
 
     private void showPlaybackImage(int index) {
-        if (playbackFiles.isEmpty()) { 
-            tvPlaybackInfo.setText("NO GRADED PHOTOS"); 
-            return; 
+        if (playbackFiles.isEmpty()) {
+            tvPlaybackInfo.setText("NO GRADED PHOTOS");
+            return;
         }
         
         if (index < 0) index = 0;
@@ -266,8 +261,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         File imgFile = playbackFiles.get(playbackIndex);
         
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null); 
-            currentPlaybackBitmap.recycle(); 
+            playbackImageView.setImageBitmap(null);
+            currentPlaybackBitmap.recycle();
             currentPlaybackBitmap = null;
         }
         
@@ -324,8 +319,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             playbackImageView.setImageBitmap(currentPlaybackBitmap);
             
-        } catch (Exception e) { 
-            tvPlaybackInfo.setText("DECODE ERROR"); 
+        } catch (Exception e) {
+            tvPlaybackInfo.setText("DECODE ERROR");
         }
     }
 
@@ -334,8 +329,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
         isPlaybackMode = false;
         if (currentPlaybackBitmap != null && !currentPlaybackBitmap.isRecycled()) {
-            playbackImageView.setImageBitmap(null); 
-            currentPlaybackBitmap.recycle(); 
+            playbackImageView.setImageBitmap(null);
+            currentPlaybackBitmap.recycle();
             currentPlaybackBitmap = null;
         }
     }
@@ -367,6 +362,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (!lutDir.exists()) lutDir.mkdirs(); 
             File backupFile = new File(lutDir, "RTLBAK.TXT");
             if (!backupFile.exists()) backupFile.createNewFile();
+            
             FileOutputStream fos = new FileOutputStream(backupFile);
             StringBuilder sb = new StringBuilder();
             sb.append("quality=").append(qualityIndex).append("\n");
@@ -843,75 +839,50 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
 
     // =========================================================================
-    // HYBRID AF HUD (IPC PROBE + RETICLE FALLBACK)
+    // PRO RETICLE VIEW (Fixed Geometry)
     // =========================================================================
-    private class HybridFocusView extends View {
+    private class ProReticleView extends View {
         private Paint paint;
-        private Object scalarInstance;
-        private Method getIntMethod;
-        private Method getFocusAreasMethod;
-        private boolean isIpcAvailable = false;
-
         public static final int STATE_IDLE = 0;
         public static final int STATE_SEARCHING = 1;
         public static final int STATE_LOCKED = 2;
         public static final int STATE_FAILED = 3;
         private int fallbackState = STATE_IDLE;
-
         private boolean isPolling = false;
 
-        public HybridFocusView(Context context) {
+        public ProReticleView(Context context) {
             super(context);
             paint = new Paint();
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(6);
             paint.setAntiAlias(true);
-
-            try {
-                Class<?> clazz;
-                try {
-                    clazz = Class.forName("com.sony.scalar.sysutil.ScalarWebAPI");
-                } catch (Exception e1) {
-                    clazz = context.getClassLoader().loadClass("com.sony.scalar.sysutil.ScalarWebAPI");
-                }
-
-                Constructor<?> ctor = clazz.getDeclaredConstructor(Context.class);
-                ctor.setAccessible(true);
-                scalarInstance = ctor.newInstance(context.getApplicationContext());
-
-                getIntMethod = clazz.getMethod("getInt", String.class);
-                getFocusAreasMethod = clazz.getMethod("getFocusAreas");
-                isIpcAvailable = true;
-                Log.i("COOKBOOK_AF", "SUCCESS: Found Sony IPC Daemon!");
-            } catch (Exception e) {
-                Log.e("COOKBOOK_AF", "IPC Daemon Not Found. Using Pro Reticle. " + e.getMessage());
-            }
         }
 
         public void startFocus(Camera cam) {
-            if (isIpcAvailable) {
-                if (cam != null) { try { cam.autoFocus(null); } catch (Exception e) {} }
-                isPolling = true;
-                invalidate();
-            } else {
-                fallbackState = STATE_SEARCHING;
-                if (cam != null) {
-                    try {
-                        cam.autoFocus(new Camera.AutoFocusCallback() {
-                            @Override
-                            public void onAutoFocus(boolean success, Camera camera) {
-                                fallbackState = success ? STATE_LOCKED : STATE_FAILED;
-                                invalidate();
-                            }
-                        });
-                    } catch (Exception e) { fallbackState = STATE_IDLE; }
+            fallbackState = STATE_SEARCHING;
+            if (cam != null) {
+                try {
+                    cam.autoFocus(new Camera.AutoFocusCallback() {
+                        @Override
+                        public void onAutoFocus(boolean success, Camera camera) {
+                            fallbackState = success ? STATE_LOCKED : STATE_FAILED;
+                            invalidate();
+                        }
+                    });
+                } catch (Exception e) { 
+                    fallbackState = STATE_IDLE; 
                 }
-                invalidate();
             }
+            isPolling = true;
+            invalidate();
         }
 
         public void stopFocus(Camera cam) {
-            if (cam != null) { try { cam.cancelAutoFocus(); } catch (Exception e) {} }
+            if (cam != null) { 
+                try { 
+                    cam.cancelAutoFocus(); 
+                } catch (Exception e) {} 
+            }
             isPolling = false;
             fallbackState = STATE_IDLE;
             invalidate();
@@ -920,76 +891,41 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+            if (!isPolling) return;
 
-            if (isIpcAvailable && isPolling) {
-                try {
-                    int afStatus = (Integer) getIntMethod.invoke(scalarInstance, "afStatus");
-                    paint.setColor(afStatus == 1 ? Color.GREEN : Color.YELLOW);
-
-                    Object[] areas = (Object[]) getFocusAreasMethod.invoke(scalarInstance);
-                    if (areas != null && areas.length > 0) {
-                        for (Object area : areas) {
-                            int left = 0, top = 0, right = 0, bottom = 0;
-                            try {
-                                Field rectField = area.getClass().getField("rect");
-                                Object rectObj = rectField.get(area);
-                                left = rectObj.getClass().getField("left").getInt(rectObj);
-                                top = rectObj.getClass().getField("top").getInt(rectObj);
-                                right = rectObj.getClass().getField("right").getInt(rectObj);
-                                bottom = rectObj.getClass().getField("bottom").getInt(rectObj);
-                            } catch (Exception e1) {
-                                try {
-                                    left = area.getClass().getField("x").getInt(area);
-                                    top = area.getClass().getField("y").getInt(area);
-                                    right = left + area.getClass().getField("w").getInt(area);
-                                    bottom = top + area.getClass().getField("h").getInt(area);
-                                } catch (Exception e2) {}
-                            }
-
-                            float dLeft, dTop, dRight, dBottom;
-                            if (right <= 1000 && bottom <= 1000) { 
-                                dLeft = ((left + 1000) / 2000f) * getWidth();
-                                dTop = ((top + 1000) / 2000f) * getHeight();
-                                dRight = ((right + 1000) / 2000f) * getWidth();
-                                dBottom = ((bottom + 1000) / 2000f) * getHeight();
-                            } else { 
-                                dLeft = (left / 6000f) * getWidth();
-                                dTop = (top / 4000f) * getHeight();
-                                dRight = (right / 6000f) * getWidth();
-                                dBottom = (bottom / 4000f) * getHeight();
-                            }
-                            canvas.drawRect(dLeft, dTop, dRight, dBottom, paint);
-                        }
-                    }
-                } catch (Exception e) {}
-                postInvalidateDelayed(50);
-            } 
-            else if (!isIpcAvailable) {
-                switch (fallbackState) {
-                    case STATE_IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break;
-                    case STATE_SEARCHING: paint.setColor(Color.YELLOW); break;
-                    case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
-                    case STATE_FAILED:    paint.setColor(Color.RED); break;
-                }
-
-                int cx = getWidth() / 2;
-                int cy = getHeight() / 2;
-                int size = 60;
-                int bracket = 15;
-
-                canvas.drawLine(cx - size, cy - size, cx - size + bracket, cy - size, paint);
-                canvas.drawLine(cx - size, cy - size, cx - size, cy - size + bracket, paint);
-                canvas.drawLine(cx + size, cy - size, cx + size - bracket, cy - size, paint);
-                canvas.drawLine(cx + size, cy - size, cx + size, cy - size + bracket, paint);
-                canvas.drawLine(cx - size, cy + size, cx - size + bracket, cy + size, paint);
-                canvas.drawLine(cx - size, cy + size, cx - size, cy + size - bracket, paint);
-                canvas.drawLine(cx + size, cy + size, cx - size, cy + size - bracket, paint);
-                canvas.drawLine(cx + size, cy + size, cx + size, cy + size - bracket, paint);
-                
-                paint.setStyle(Paint.Style.FILL);
-                canvas.drawCircle(cx, cy, 3, paint);
-                paint.setStyle(Paint.Style.STROKE);
+            switch (fallbackState) {
+                case STATE_IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break;
+                case STATE_SEARCHING: paint.setColor(Color.YELLOW); break;
+                case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
+                case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
+
+            int cx = getWidth() / 2;
+            int cy = getHeight() / 2;
+            int size = 60;
+            int bracket = 15;
+
+            // Top Left
+            canvas.drawLine(cx - size, cy - size, cx - size + bracket, cy - size, paint);
+            canvas.drawLine(cx - size, cy - size, cx - size, cy - size + bracket, paint);
+            
+            // Top Right
+            canvas.drawLine(cx + size, cy - size, cx + size - bracket, cy - size, paint);
+            canvas.drawLine(cx + size, cy - size, cx + size, cy - size + bracket, paint);
+            
+            // Bottom Left
+            canvas.drawLine(cx - size, cy + size, cx - size + bracket, cy + size, paint);
+            canvas.drawLine(cx - size, cy + size, cx - size, cy + size - bracket, paint);
+            
+            // Bottom Right (FIXED MATH HERE)
+            canvas.drawLine(cx + size, cy + size, cx + size - bracket, cy + size, paint);
+            canvas.drawLine(cx + size, cy + size, cx + size, cy + size - bracket, paint);
+            
+            paint.setStyle(Paint.Style.FILL);
+            canvas.drawCircle(cx, cy, 3, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            
+            postInvalidateDelayed(50);
         }
     }
 }

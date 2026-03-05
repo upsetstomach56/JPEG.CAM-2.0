@@ -11,11 +11,15 @@ android {
         versionCode 1
         versionName "2.0"
         
-        // RESTORED: This tells the compiler how to handle your C++ code
         externalNativeBuild {
             cmake {
                 cppFlags ""
             }
+        }
+
+        // THE FIX: Forces the C++ compiler to build for the camera's older ARM architecture
+        ndk {
+            abiFilters "armeabi-v7a", "armeabi"
         }
     }
     
@@ -26,7 +30,6 @@ android {
         }
     }
     
-    // RESTORED: This points the compiler to your actual C++ engine files
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
