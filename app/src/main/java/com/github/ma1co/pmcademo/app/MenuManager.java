@@ -4,13 +4,7 @@ import android.graphics.Color;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.util.Arrays;
 
-/**
- * filmOS Manager: Menu UI Logic
- * Handles Page navigation and Value labels for the 4-page settings menu.
- * Ensures 100% feature parity with the original settings list.
- */
 public class MenuManager {
     private int currentPage = 1;
     private int selection = 0;
@@ -18,8 +12,8 @@ public class MenuManager {
 
     private final String[] intensityLabels = {"OFF", "LOW", "LOW+", "MID", "MID+", "HIGH"};
     private final String[] grainSizeLabels = {"SM", "MED", "LG"};
-    private final String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
-    private final String[] droLabels = {"OFF", "AUTO", "LV1", "LV2", "LV3", "LV4", "LV5"};
+    public final String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
+    public final String[] droLabels = {"OFF", "AUTO", "LV1", "LV2", "LV3", "LV4", "LV5"};
 
     public int getCurrentPage() { return currentPage; }
     public int getSelection() { return selection; }
@@ -33,27 +27,18 @@ public class MenuManager {
 
     public void cyclePage(int d) {
         currentPage = (currentPage + d + 3) % 4 + 1;
-        selection = -1; // Keep focus on header when switching pages
+        selection = -1;
     }
 
-    /**
-     * Maps RecipeManager data to the UI rows.
-     * Re-integrates all variables: WB Shift, DRO, Contrast, Saturation, Sharpness, etc.
-     */
     public void render(TextView title, TextView[] pages, LinearLayout[] rows, 
-                       TextView[] labels, TextView[] values, RecipeManager recipes, ConnectivityManager conn) {
+                       TextView[] labels, TextView[] values, RecipeManager recipes, 
+                       ConnectivityManager conn, boolean showFM, boolean showCM, boolean showGL, String currentScene) {
         
         RTLProfile p = recipes.getCurrentProfile();
-        
-        // Highlight current page number
-        for (int i = 0; i < 4; i++) {
-            pages[i].setTextColor((currentPage == i + 1) ? Color.rgb(230, 50, 15) : Color.WHITE);
-        }
-
-        // Reset rows
+        for (int i = 0; i < 4; i++) pages[i].setTextColor((currentPage == i + 1) ? Color.rgb(230, 50, 15) : Color.WHITE);
         for (LinearLayout row : rows) row.setVisibility(View.GONE);
 
-        if (currentPage == 1) { // RTL Base
+        if (currentPage == 1) {
             title.setText("RTL (Base)");
             itemCount = 7;
             setupRow(0, "RTL Slot", String.valueOf(recipes.getCurrentSlot() + 1), labels, values, rows);
@@ -64,28 +49,28 @@ public class MenuManager {
             setupRow(5, "Roll-off", intensityLabels[p.rollOff], labels, values, rows);
             setupRow(6, "Vignette", intensityLabels[p.vignette], labels, values, rows);
         } 
-        else if (currentPage == 2) { // Color & Detail
+        else if (currentPage == 2) {
             title.setText("RTL (Color)");
             itemCount = 7;
             setupRow(0, "White Balance", p.whiteBalance, labels, values, rows);
-            setupRow(1, "WB Shift A-B", formatSign(p.wbShift), labels, values, rows);
-            setupRow(2, "WB Shift G-M", formatSign(p.wbShiftGM), labels, values, rows);
+            setupRow(1, "WB Shift A-B", formatAB(p.wbShift), labels, values, rows);
+            setupRow(2, "WB Shift G-M", formatGM(p.wbShiftGM), labels, values, rows);
             setupRow(3, "DRO", p.dro, labels, values, rows);
             setupRow(4, "Contrast", formatSign(p.contrast), labels, values, rows);
             setupRow(5, "Saturation", formatSign(p.saturation), labels, values, rows);
             setupRow(6, "Sharpness", formatSign(p.sharpness), labels, values, rows);
         }
-        else if (currentPage == 3) { // Global
+        else if (currentPage == 3) {
             title.setText("Global Settings");
             itemCount = 5;
             String[] qLabels = {"PROXY (1.5MP)", "HIGH (6MP)", "ULTRA (24MP)"};
             setupRow(0, "Quality", qLabels[recipes.getQualityIndex()], labels, values, rows);
-            setupRow(1, "Base Scene", "PASM", labels, values, rows);
-            setupRow(2, "Focus Meter", "N/A", labels, values, rows); // Logic handled in Activity
-            setupRow(3, "Cinema Matte", "N/A", labels, values, rows);
-            setupRow(4, "Grid Lines", "N/A", labels, values, rows);
+            setupRow(1, "Base Scene", currentScene, labels, values, rows);
+            setupRow(2, "Focus Meter", showFM ? "ON" : "OFF", labels, values, rows);
+            setupRow(3, "Cinema Matte", showCM ? "ON" : "OFF", labels, values, rows);
+            setupRow(4, "Grid Lines", showGL ? "ON" : "OFF", labels, values, rows);
         }
-        else if (currentPage == 4) { // Connections
+        else if (currentPage == 4) {
             title.setText("Connections");
             itemCount = 3;
             setupRow(0, "Hotspot", conn.getConnStatusHotspot(), labels, values, rows);
@@ -93,7 +78,6 @@ public class MenuManager {
             setupRow(2, "Stop All", "", labels, values, rows);
         }
 
-        // Apply selection color
         for (int i = 0; i < itemCount; i++) {
             rows[i].setBackgroundColor((i == selection) ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
         }
@@ -105,5 +89,7 @@ public class MenuManager {
         rows[i].setVisibility(View.VISIBLE);
     }
 
-    private String formatSign(int val) { return val > 0 ? "+" + val : String.valueOf(val); }
+    private String formatSign(int v) { return v == 0 ? "0" : (v > 0 ? "+" + v : String.valueOf(v)); }
+    private String formatAB(int v) { return v == 0 ? "0" : (v > 0 ? "A" + v : "B" + Math.abs(v)); }
+    private String formatGM(int v) { return v == 0 ? "0" : (v > 0 ? "G" + v : "M" + Math.abs(v)); }
 }
