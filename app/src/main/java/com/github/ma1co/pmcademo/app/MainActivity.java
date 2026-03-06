@@ -579,7 +579,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         return lutDir;
     }
     
-    // Phase 9.2: Smart Recipe Rescanner
     private void refreshRecipes() {
         String[] savedPaths = new String[10];
         for(int i=0; i<10; i++) {
@@ -717,10 +716,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 p.setWhiteBalance(targetWb);
             }
 
-            p.set("sony-dro", prof.dro.toLowerCase());
+            if (p.get("sony-dro") != null) {
+                p.set("sony-dro", prof.dro.toLowerCase());
+            }
             
-            p.set("light-balance-for-white-balance", prof.wbShift); // A-B Shift
-            p.set("color-compensation-for-white-balance", prof.wbShiftGM); // G-M Shift
+            // PHASE 9.3: Safe Parameter Injection
+            // Only inject parameters that actually exist in the camera's firmware dictionary
+            String[] abKeys = {"light-balance-for-white-balance", "sony-wb-shift-ab", "sony-awb-shift-ab"};
+            for (String key : abKeys) {
+                if (p.get(key) != null) p.set(key, prof.wbShift);
+            }
+            
+            String[] gmKeys = {"color-compensation-for-white-balance", "sony-wb-shift-gm", "sony-awb-shift-gm"};
+            for (String key : gmKeys) {
+                if (p.get(key) != null) p.set(key, prof.wbShiftGM);
+            }
             
             mCamera.setParameters(p);
         } catch (Exception e) {}
@@ -769,7 +779,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     } catch(Exception e){}
                 }
                 
-                // Phase 9.2: Re-scan LUT folder seamlessly when opening menu
                 refreshRecipes();
                 
                 currentPage = 1; menuSelection = 0; 

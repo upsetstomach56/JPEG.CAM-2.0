@@ -11,18 +11,17 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
 import fi.iki.elonen.NanoHTTPD;
-import fi.iki.elonen.NanoHTTPD.IHTTPSession;
-import fi.iki.elonen.NanoHTTPD.Method;
-import fi.iki.elonen.NanoHTTPD.Response;
-import fi.iki.elonen.NanoHTTPD.Response.Status;
 
 public class HttpServer extends NanoHTTPD {
     public static final int PORT = 8080;
@@ -31,6 +30,52 @@ public class HttpServer extends NanoHTTPD {
     public HttpServer(Context context) {
         super(PORT);
         this.context = context;
+        
+        // PHASE 9.3: Route NanoHTTPD Temp files to Android Cache to prevent Sony /tmp crash
+        this.setTempFileManagerFactory(new TempFileManagerFactory() {
+            @Override
+            public TempFileManager create() {
+                return new AndroidTempFileManager(HttpServer.this.context);
+            }
+        });
+    }
+
+    // Android-Safe Temporary File Handlers
+    private static class AndroidTempFile implements TempFile {
+        private File file;
+        private OutputStream fstream;
+        public AndroidTempFile(Context ctx) throws IOException {
+            File cacheDir = ctx.getCacheDir();
+            if (cacheDir == null) {
+                cacheDir = new File(Environment.getExternalStorageDirectory(), "LUTS/.tmp");
+            }
+            if (!cacheDir.exists()) cacheDir.mkdirs();
+            file = File.createTempFile("NanoHTTPD-", "", cacheDir);
+            fstream = new FileOutputStream(file);
+        }
+        @Override public void delete() throws Exception { file.delete(); }
+        @Override public String getName() { return file.getAbsolutePath(); }
+        @Override public OutputStream open() throws Exception { return fstream; }
+    }
+
+    private static class AndroidTempFileManager implements TempFileManager {
+        private Context context;
+        private List<TempFile> tempFiles;
+        public AndroidTempFileManager(Context context) {
+            this.context = context;
+            this.tempFiles = new ArrayList<TempFile>();
+        }
+        @Override public void clear() {
+            for (TempFile file : tempFiles) {
+                try { file.delete(); } catch (Exception ignored) {}
+            }
+            tempFiles.clear();
+        }
+        @Override public TempFile createTempFile(String filename_hint) throws Exception {
+            AndroidTempFile tempFile = new AndroidTempFile(context);
+            tempFiles.add(tempFile);
+            return tempFile;
+        }
     }
 
     @Override
@@ -51,14 +96,12 @@ public class HttpServer extends NanoHTTPD {
                         File lutDir = new File(root, "LUTS");
                         if (!lutDir.exists()) lutDir.mkdirs();
                         
-                        // Sanity check to only allow cube files
                         if (!originalFileName.toLowerCase().endsWith(".cube") && !originalFileName.toLowerCase().endsWith(".cub")) {
                             return newFixedLengthResponse(Status.BAD_REQUEST, "application/json", "{\"error\":\"Only .cube files allowed\"}");
                         }
 
                         File destFile = new File(lutDir, originalFileName);
                         
-                        // Move the uploaded temp file to the LUTS directory
                         FileInputStream in = new FileInputStream(tempFilePath);
                         FileOutputStream out = new FileOutputStream(destFile);
                         byte[] buffer = new byte[8192];
