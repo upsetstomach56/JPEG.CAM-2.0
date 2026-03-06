@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -51,8 +50,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false; 
     
-    // Snapshot of base camera settings to perfectly restore on exit
-    private String originalCameraParams = null; 
+    // Selective Snapshot variables (avoids illegal read-only HAL overwrites)
+    private String origWhiteBalance = null;
+    private String origDroMode = null;
+    private String origDroLevel = null;
+    private String origSonyDro = null;
+    private String origContrast = null;
+    private String origSaturation = null;
+    private String origSharpness = null;
+    private String origWbShiftMode = null;
+    private String origWbShiftLb = null;
+    private String origWbShiftCc = null;
+    private String origFocusMode = null;
     
     private FrameLayout mainUIContainer;
     private LinearLayout menuContainer; 
@@ -614,30 +623,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         }
     }
 
+    // Completely ripped out SharedPreferences; strictly write to SD Card to prevent OS from wiping it.
     private void savePreferences() {
-        SharedPreferences.Editor editor = getSharedPreferences("RTL_PREFS", MODE_PRIVATE).edit();
-        editor.putBoolean("has_saved", true); 
-        editor.putInt("qualityIndex", qualityIndex); 
-        editor.putInt("currentSlot", currentSlot);
-        editor.putBoolean("showFocusMeter", prefShowFocusMeter);
-        editor.putBoolean("showCinemaMattes", prefShowCinemaMattes);
-        editor.putBoolean("showGridLines", prefShowGridLines);
-
-        for(int i=0; i<10; i++) {
-            editor.putString("slot_" + i + "_lutPath", recipePaths.get(profiles[i].lutIndex));
-            editor.putInt("slot_" + i + "_opac", profiles[i].opacity); editor.putInt("slot_" + i + "_grain", profiles[i].grain);
-            editor.putInt("slot_" + i + "_gSize", profiles[i].grainSize); editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
-            editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
-            editor.putString("slot_" + i + "_wb", profiles[i].whiteBalance);
-            editor.putInt("slot_" + i + "_wbShift", profiles[i].wbShift);
-            editor.putInt("slot_" + i + "_wbShiftGM", profiles[i].wbShiftGM);
-            editor.putString("slot_" + i + "_dro", profiles[i].dro);
-            editor.putInt("slot_" + i + "_contrast", profiles[i].contrast);
-            editor.putInt("slot_" + i + "_saturation", profiles[i].saturation);
-            editor.putInt("slot_" + i + "_sharpness", profiles[i].sharpness);
-        }
-        editor.commit(); 
-
         try {
             File lutDir = getLutDir();
             if (!lutDir.exists()) lutDir.mkdirs(); 
@@ -645,7 +632,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (!backupFile.exists()) backupFile.createNewFile();
             FileOutputStream fos = new FileOutputStream(backupFile);
             StringBuilder sb = new StringBuilder();
-            sb.append("quality=").append(qualityIndex).append("\n").append("slot=").append(currentSlot).append("\n");
+            sb.append("quality=").append(qualityIndex).append("\n");
+            sb.append("slot=").append(currentSlot).append("\n");
+            sb.append("prefs=").append(prefShowFocusMeter).append(",").append(prefShowCinemaMattes).append(",").append(prefShowGridLines).append("\n");
             for(int i=0; i<10; i++) {
                 sb.append(i).append(",").append(recipePaths.get(profiles[i].lutIndex)).append(",")
                   .append(profiles[i].opacity).append(",").append(profiles[i].grain).append(",")
@@ -660,32 +649,40 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                   .append(profiles[i].sharpness).append("\n"); 
             }
             fos.write(sb.toString().getBytes()); fos.flush(); fos.getFD().sync(); fos.close();
-            sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
         } catch (Exception e) {}
     }
 
+    // Completely ripped out SharedPreferences; strictly read from SD Card.
     private void loadPreferences() {
-        SharedPreferences prefs = getSharedPreferences("RTL_PREFS", MODE_PRIVATE);
-        boolean hasSaved = prefs.getBoolean("has_saved", false);
         File backupFile = new File(getLutDir(), "RTLBAK.TXT");
-
-        if (!hasSaved && backupFile.exists()) {
+        if (backupFile.exists()) {
             try {
                 BufferedReader br = new BufferedReader(new FileReader(backupFile));
                 String line;
                 while ((line = br.readLine()) != null) {
                     if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("prefs=")) {
+                        String[] p = line.split("=")[1].split(",");
+                        if (p.length >= 3) {
+                            prefShowFocusMeter = Boolean.parseBoolean(p[0]);
+                            prefShowCinemaMattes = Boolean.parseBoolean(p[1]);
+                            prefShowGridLines = Boolean.parseBoolean(p[2]);
+                        }
+                    }
                     else {
                         String[] parts = line.split(",");
                         if (parts.length >= 6) {
-                            int idx = Integer.parseInt(parts[0]); int foundIndex = recipePaths.indexOf(parts[1]);
+                            int idx = Integer.parseInt(parts[0]); 
+                            int foundIndex = recipePaths.indexOf(parts[1]);
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
-                            profiles[idx].opacity = Integer.parseInt(parts[2]); if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
+                            profiles[idx].opacity = Integer.parseInt(parts[2]); 
+                            if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
                             if (parts.length >= 7) {
                                 profiles[idx].grainSize = Math.min(2, Integer.parseInt(parts[4]));
-                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5])); profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
+                                profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5])); 
+                                profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
                             }
                             if (parts.length >= 10) {
                                 profiles[idx].whiteBalance = parts[7];
@@ -703,29 +700,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         }
                     }
                 }
-                br.close(); savePreferences(); return;
+                br.close(); 
             } catch (Exception e) {}
-        }
-
-        qualityIndex = prefs.getInt("qualityIndex", 1); 
-        currentSlot = prefs.getInt("currentSlot", 0);
-        prefShowFocusMeter = prefs.getBoolean("showFocusMeter", true);
-        prefShowCinemaMattes = prefs.getBoolean("showCinemaMattes", false);
-        prefShowGridLines = prefs.getBoolean("showGridLines", false);
-
-        for(int i=0; i<10; i++) {
-            String savedPath = prefs.getString("slot_" + i + "_lutPath", "NONE"); int foundIndex = recipePaths.indexOf(savedPath);
-            profiles[i].lutIndex = (foundIndex != -1) ? foundIndex : 0; 
-            profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100); if (profiles[i].opacity <= 5) profiles[i].opacity = 100; 
-            profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0)); profiles[i].grainSize = Math.min(2, prefs.getInt("slot_" + i + "_gSize", 1));
-            profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0)); profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
-            profiles[i].whiteBalance = prefs.getString("slot_" + i + "_wb", "AUTO");
-            profiles[i].wbShift = prefs.getInt("slot_" + i + "_wbShift", 0);
-            profiles[i].wbShiftGM = prefs.getInt("slot_" + i + "_wbShiftGM", 0);
-            profiles[i].dro = prefs.getString("slot_" + i + "_dro", "OFF");
-            profiles[i].contrast = prefs.getInt("slot_" + i + "_contrast", 0);
-            profiles[i].saturation = prefs.getInt("slot_" + i + "_saturation", 0);
-            profiles[i].sharpness = prefs.getInt("slot_" + i + "_sharpness", 0);
         }
     }
 
@@ -1221,8 +1197,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
-                if (originalCameraParams == null && mCamera != null) {
-                    originalCameraParams = mCamera.getParameters().flatten();
+                // SELECTIVE SNAPSHOT: Only capture what we actually modify
+                if (origWhiteBalance == null && mCamera != null) {
+                    try {
+                        Camera.Parameters p = mCamera.getParameters();
+                        origWhiteBalance = p.getWhiteBalance();
+                        origDroMode = p.get("dro-mode");
+                        origDroLevel = p.get("dro-level");
+                        origSonyDro = p.get("sony-dro");
+                        origContrast = p.get("contrast");
+                        origSaturation = p.get("saturation");
+                        origSharpness = p.get("sharpness");
+                        origWbShiftMode = p.get("white-balance-shift-mode");
+                        origWbShiftLb = p.get("white-balance-shift-lb");
+                        origWbShiftCc = p.get("white-balance-shift-cc");
+                        origFocusMode = p.getFocusMode();
+                    } catch (Exception e) {}
                 }
                 
                 try {
@@ -1308,10 +1298,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
-        if (mCamera != null && originalCameraParams != null) {
+        // SELECTIVE RESTORE: Safely put everything exactly back to where it was without touching Read-Only stuff
+        if (mCamera != null && origWhiteBalance != null) {
             try {
                 Camera.Parameters p = mCamera.getParameters();
-                p.unflatten(originalCameraParams);
+                if (origWhiteBalance != null) p.setWhiteBalance(origWhiteBalance);
+                if (origDroMode != null) p.set("dro-mode", origDroMode);
+                if (origDroLevel != null) p.set("dro-level", origDroLevel);
+                if (origSonyDro != null) p.set("sony-dro", origSonyDro);
+                if (origContrast != null) p.set("contrast", origContrast);
+                if (origSaturation != null) p.set("saturation", origSaturation);
+                if (origSharpness != null) p.set("sharpness", origSharpness);
+                if (origWbShiftMode != null) p.set("white-balance-shift-mode", origWbShiftMode);
+                if (origWbShiftLb != null) p.set("white-balance-shift-lb", origWbShiftLb);
+                if (origWbShiftCc != null) p.set("white-balance-shift-cc", origWbShiftCc);
+                if (origFocusMode != null) p.setFocusMode(origFocusMode);
                 mCamera.setParameters(p);
             } catch (Exception e) {}
         }
