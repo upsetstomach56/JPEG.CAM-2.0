@@ -104,7 +104,6 @@
         let rotation = 0;
         let viewName = "";
         let abortController = null;
-        
         let currentPage = 1;
         const PAGE_SIZE = 24;
 
@@ -342,7 +341,7 @@
             document.getElementById('lut-modal').style.display = 'none';
         }
         
-        // Phase 9.5: Raw Binary Stream Upload
+        // PURE RAW BINARY UPLOAD
         async function handleLutSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -358,7 +357,7 @@
             document.getElementById('lut-upload-status').style.color = 'yellow';
 
             try {
-                // We let the browser calculate and send the Content-Length automatically
+                // Fetch automatically handles the stream and Content-Length mapping
                 const res = await fetch('/api/upload_lut', {
                     method: 'POST',
                     headers: {

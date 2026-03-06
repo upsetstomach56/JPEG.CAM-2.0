@@ -51,7 +51,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false; 
     
-    private String originalCameraParams = null; // Snapshot of base camera settings
+    // Snapshot of base camera settings to perfectly restore on exit
+    private String originalCameraParams = null; 
     
     private FrameLayout mainUIContainer;
     private LinearLayout menuContainer; 
@@ -166,10 +167,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public void run() {
             if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
                 
+                // Only force UI back on if NEITHER shutter stage is pressed (Fixes UI flicker)
                 boolean s1_1_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_1).status == 0;
                 boolean s1_2_free = ScalarInput.getKeyStatus(ScalarInput.ISV_KEY_S1_2).status == 0;
                 
-                // Only force UI back on if NEITHER shutter stage is pressed
                 if (s1_1_free && s1_2_free) {
                     if (afOverlay != null && afOverlay.isPolling()) {
                         afOverlay.stopFocus(mCamera);
@@ -194,6 +195,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // Stop Android OS from complaining about missing thumbnail directory
         File thumbsDir = new File(Environment.getExternalStorageDirectory(), "DCIM/.thumbnails");
         if (!thumbsDir.exists()) thumbsDir.mkdirs();
         
@@ -1219,7 +1221,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
-                // SNAPSHOT ORIGINAL CAMERA STATE
                 if (originalCameraParams == null && mCamera != null) {
                     originalCameraParams = mCamera.getParameters().flatten();
                 }
@@ -1307,7 +1308,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
-        // RESTORE ORIGINAL CAMERA STATE ON EXIT
         if (mCamera != null && originalCameraParams != null) {
             try {
                 Camera.Parameters p = mCamera.getParameters();

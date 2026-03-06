@@ -36,17 +36,19 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
-            // PHASE 9.5: PURE RAW BINARY STREAM LISTENER
+            // PURE RAW BINARY STREAM LISTENER 
             // Completely bypasses NanoHTTPD's internal parser and Temp File limits
             if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
                 try {
-                    String fileName = session.getHeaders().get("x-file-name");
+                    Map<String, String> headers = session.getHeaders();
+                    String fileName = headers.get("x-file-name");
+                    
                     if (fileName == null || (!fileName.toLowerCase().endsWith(".cube") && !fileName.toLowerCase().endsWith(".cub"))) {
                         return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Invalid filename\"}");
                     }
 
-                    String contentLengthHeader = session.getHeaders().get("content-length");
-                    int contentLength = contentLengthHeader != null ? Integer.parseInt(contentLengthHeader) : 0;
+                    String contentLengthStr = headers.get("content-length");
+                    int contentLength = contentLengthStr != null ? Integer.parseInt(contentLengthStr) : 0;
 
                     File lutDir = new File(root, "LUTS");
                     if (!lutDir.exists()) lutDir.mkdirs();
@@ -60,7 +62,10 @@ public class HttpServer extends NanoHTTPD {
                     int read;
                     int totalRead = 0;
                     
-                    while (totalRead < contentLength && (read = in.read(buffer, 0, Math.min(buffer.length, contentLength - totalRead))) != -1) {
+                    while (totalRead < contentLength) {
+                        int bytesToRead = Math.min(buffer.length, contentLength - totalRead);
+                        read = in.read(buffer, 0, bytesToRead);
+                        if (read == -1) break;
                         out.write(buffer, 0, read);
                         totalRead += read;
                     }
