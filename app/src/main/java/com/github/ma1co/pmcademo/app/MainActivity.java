@@ -194,6 +194,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        File thumbsDir = new File(Environment.getExternalStorageDirectory(), "DCIM/.thumbnails");
+        if (!thumbsDir.exists()) thumbsDir.mkdirs();
+        
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
         mSurfaceView.getHolder().addCallback(this);
@@ -1216,6 +1219,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
+                // SNAPSHOT ORIGINAL CAMERA STATE
                 if (originalCameraParams == null && mCamera != null) {
                     originalCameraParams = mCamera.getParameters().flatten();
                 }
@@ -1303,6 +1307,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void closeCamera() {
+        // RESTORE ORIGINAL CAMERA STATE ON EXIT
         if (mCamera != null && originalCameraParams != null) {
             try {
                 Camera.Parameters p = mCamera.getParameters();
@@ -1311,11 +1316,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             } catch (Exception e) {}
         }
         
-        if (mCameraEx != null) { 
-            mCameraEx.release(); 
-            mCameraEx = null; 
-            mCamera = null; 
-        }
+        if (mCameraEx != null) { mCameraEx.release(); mCameraEx = null; mCamera = null; }
     }
 
     @Override public void surfaceCreated(SurfaceHolder h) { hasSurface = true; openCamera(); }
