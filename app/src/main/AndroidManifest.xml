@@ -14,8 +14,8 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_launcher"
-        android:label="@string/app_name"
+        android:icon="@drawable/icon"
+        android:label="Film OS Dashboard"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:hardwareAccelerated="true">
 
@@ -25,7 +25,7 @@
 
         <activity
             android:name=".MainActivity"
-            android:label="@string/app_name"
+            android:label="Film OS Dashboard"
             android:screenOrientation="landscape">
             
             <intent-filter>
