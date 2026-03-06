@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -21,7 +20,8 @@ import java.util.List;
 public class ConnectivityManager {
     private Context context;
     private WifiManager wifiManager;
-    private ConnectivityManager connManager;
+    // Explicitly use the fully qualified name to avoid colliding with our own class name
+    private android.net.ConnectivityManager connManager;
     private DirectManager directManager;
     private HttpServer server;
 
@@ -45,7 +45,8 @@ public class ConnectivityManager {
         this.context = context;
         this.listener = listener;
         this.wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        this.connManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        // Fully qualify the Android system service
+        this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         this.directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
         this.server = new HttpServer(context);
     }
@@ -78,8 +79,8 @@ public class ConnectivityManager {
                     if (intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN) == WifiManager.WIFI_STATE_ENABLED) {
                         wifiManager.reconnect(); 
                     }
-                } else if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
-                    NetworkInfo info = connManager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+                } else if (android.net.ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
+                    NetworkInfo info = connManager.getNetworkInfo(android.net.ConnectivityManager.TYPE_WIFI);
                     if (info != null && info.isConnected()) {
                         WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                         int ip = wifiInfo.getIpAddress();
@@ -97,7 +98,8 @@ public class ConnectivityManager {
         };
         
         IntentFilter filter = new IntentFilter();
-        filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+        // Fully qualify the Android constant
+        filter.addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION);
         filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         context.registerReceiver(wifiReceiver, filter);
         
