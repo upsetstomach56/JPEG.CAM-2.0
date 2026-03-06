@@ -19,6 +19,8 @@ import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.text.Html;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -76,6 +78,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private final String[] intensityLabels = {"OFF", "LOW", "LOW+", "MID", "MID+", "HIGH"};
     private final String[] grainSizeLabels = {"SM", "MED", "LG"};
+    
+    // Unlocked Menu Arrays
+    private final String[] wbLabels = {"AUTO", "DAY", "SHD", "CLD", "INC", "FLR"};
+    private final String[] droLabels = {"OFF", "AUTO", "LV1", "LV2", "LV3", "LV4", "LV5"};
 
     private RTLProfile[] profiles = new RTLProfile[10];
     private int currentSlot = 0; 
@@ -105,6 +111,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 lastBatteryLevel = (level * 100) / scale;
                 if (tvBattery != null) tvBattery.setText(lastBatteryLevel + "%");
             }
+        }
+    };
+
+    private Handler uiHandler = new Handler();
+    private Runnable liveUpdater = new Runnable() {
+        @Override
+        public void run() {
+            if (displayState == 0 && !isMenuOpen && !isPlaybackMode && !isProcessing && hasSurface && mCamera != null) {
+                updateMainHUD();
+            }
+            uiHandler.postDelayed(this, 500); 
         }
     };
 
@@ -246,7 +263,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         fmParams.setMargins(0, 0, 0, 100); 
         mainUIContainer.addView(focusMeter, fmParams);
 
-        // Phase 4: CPU Optimized HTML-Free Bottom Bar
         llBottomBar = new LinearLayout(this);
         llBottomBar.setOrientation(LinearLayout.HORIZONTAL);
         llBottomBar.setGravity(Gravity.CENTER);
@@ -454,6 +470,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             editor.putInt("slot_" + i + "_opac", profiles[i].opacity); editor.putInt("slot_" + i + "_grain", profiles[i].grain);
             editor.putInt("slot_" + i + "_gSize", profiles[i].grainSize); editor.putInt("slot_" + i + "_roll", profiles[i].rollOff);
             editor.putInt("slot_" + i + "_vig", profiles[i].vignette);
+            editor.putString("slot_" + i + "_wb", profiles[i].whiteBalance);
+            editor.putInt("slot_" + i + "_wbShift", profiles[i].wbShift);
+            editor.putString("slot_" + i + "_dro", profiles[i].dro);
         }
         editor.commit(); 
 
@@ -468,7 +487,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             for(int i=0; i<10; i++) {
                 sb.append(i).append(",").append(recipePaths.get(profiles[i].lutIndex)).append(",")
                   .append(profiles[i].opacity).append(",").append(profiles[i].grain).append(",")
-                  .append(profiles[i].grainSize).append(",").append(profiles[i].rollOff).append(",").append(profiles[i].vignette).append("\n");
+                  .append(profiles[i].grainSize).append(",").append(profiles[i].rollOff).append(",")
+                  .append(profiles[i].vignette).append(",")
+                  .append(profiles[i].whiteBalance).append(",")
+                  .append(profiles[i].wbShift).append(",")
+                  .append(profiles[i].dro).append("\n");
             }
             fos.write(sb.toString().getBytes()); fos.flush(); fos.getFD().sync(); fos.close();
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
@@ -494,11 +517,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             profiles[idx].lutIndex = (foundIndex != -1) ? foundIndex : 0;
                             profiles[idx].opacity = Integer.parseInt(parts[2]); if (profiles[idx].opacity <= 5) profiles[idx].opacity = 100;
                             profiles[idx].grain = Math.min(5, Integer.parseInt(parts[3]));
-                            if (parts.length == 7) {
+                            if (parts.length >= 7) {
                                 profiles[idx].grainSize = Math.min(2, Integer.parseInt(parts[4]));
                                 profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[5])); profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[6]));
-                            } else {
-                                profiles[idx].grainSize = 1; profiles[idx].rollOff = Math.min(5, Integer.parseInt(parts[4])); profiles[idx].vignette = Math.min(5, Integer.parseInt(parts[5]));
+                            }
+                            if (parts.length >= 10) {
+                                profiles[idx].whiteBalance = parts[7];
+                                profiles[idx].wbShift = Integer.parseInt(parts[8]);
+                                profiles[idx].dro = parts[9];
                             }
                         }
                     }
@@ -514,7 +540,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             profiles[i].opacity = prefs.getInt("slot_" + i + "_opac", 100); if (profiles[i].opacity <= 5) profiles[i].opacity = 100; 
             profiles[i].grain = Math.min(5, prefs.getInt("slot_" + i + "_grain", 0)); profiles[i].grainSize = Math.min(2, prefs.getInt("slot_" + i + "_gSize", 1));
             profiles[i].rollOff = Math.min(5, prefs.getInt("slot_" + i + "_roll", 0)); profiles[i].vignette = Math.min(5, prefs.getInt("slot_" + i + "_vig", 0));
+            profiles[i].whiteBalance = prefs.getString("slot_" + i + "_wb", "AUTO");
+            profiles[i].wbShift = prefs.getInt("slot_" + i + "_wbShift", 0);
+            profiles[i].dro = prefs.getString("slot_" + i + "_dro", "OFF");
         }
+    }
+
+    // Apply specific camera hardware parameters attached to the RTL Profile
+    private void applyProfileSettings() {
+        if (mCamera == null) return;
+        try {
+            Camera.Parameters p = mCamera.getParameters();
+            RTLProfile prof = profiles[currentSlot];
+            
+            // Map our UI labels to Sony's internal String keys
+            List<String> wbs = p.getSupportedWhiteBalance();
+            String targetWb = "auto";
+            if ("DAY".equals(prof.whiteBalance)) targetWb = "daylight";
+            else if ("SHD".equals(prof.whiteBalance)) targetWb = "shade";
+            else if ("CLD".equals(prof.whiteBalance)) targetWb = "cloudy-daylight";
+            else if ("INC".equals(prof.whiteBalance)) targetWb = "incandescent";
+            else if ("FLR".equals(prof.whiteBalance)) targetWb = "fluorescent";
+            
+            if (wbs != null && wbs.contains(targetWb)) {
+                p.setWhiteBalance(targetWb);
+            }
+
+            // Undocumented Sony Flat Parameter Hacks
+            p.set("sony-dro", prof.dro.toLowerCase());
+            p.set("sony-wb-shift-ab", prof.wbShift);
+            
+            mCamera.setParameters(p);
+        } catch (Exception e) {}
     }
 
     @Override 
@@ -614,6 +671,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 case 5: p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir)); break;
                 case 6: p.rollOff = Math.max(0, Math.min(5, p.rollOff + dir)); break;
                 case 7: p.vignette = Math.max(0, Math.min(5, p.vignette + dir)); break;
+                
+                // Phase 5.0 Unlocked Hardware Calls!
+                case 8: 
+                    int wbi = java.util.Arrays.asList(wbLabels).indexOf(p.whiteBalance);
+                    if(wbi == -1) wbi = 0;
+                    p.whiteBalance = wbLabels[(wbi + dir + wbLabels.length) % wbLabels.length];
+                    applyProfileSettings();
+                    break;
+                case 9:
+                    p.wbShift = Math.max(-7, Math.min(7, p.wbShift + dir));
+                    applyProfileSettings();
+                    break;
+                case 10:
+                    int droi = java.util.Arrays.asList(droLabels).indexOf(p.dro);
+                    if(droi == -1) droi = 0;
+                    p.dro = droLabels[(droi + dir + droLabels.length) % droLabels.length];
+                    applyProfileSettings();
+                    break;
+                
                 case 11: 
                     Camera.Parameters cp = mCamera.getParameters();
                     List<String> scnModes = cp.getSupportedSceneModes();
@@ -641,9 +717,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuLabels[5].setText("Grain Size");       menuValues[5].setText(grainSizeLabels[p.grainSize]);
         menuLabels[6].setText("Highlight Roll");   menuValues[6].setText(intensityLabels[p.rollOff]);
         menuLabels[7].setText("Vignette");         menuValues[7].setText(intensityLabels[p.vignette]);
-        menuLabels[8].setText("[LOCKED] W.Bal");   menuValues[8].setText(p.whiteBalance);
-        menuLabels[9].setText("[LOCKED] WB Shift");menuValues[9].setText(String.valueOf(p.wbShift));
-        menuLabels[10].setText("[LOCKED] DRO");    menuValues[10].setText(p.dro);
+        
+        // Unlocked Render
+        menuLabels[8].setText("White Balance");    menuValues[8].setText(p.whiteBalance);
+        menuLabels[9].setText("WB Shift");         menuValues[9].setText(p.wbShift > 0 ? "+" + p.wbShift : String.valueOf(p.wbShift));
+        menuLabels[10].setText("DRO");             menuValues[10].setText(p.dro);
 
         String currentScene = "UNKNOWN";
         try {
@@ -657,9 +735,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for (int i = 0; i < 12; i++) {
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
-            boolean isLocked = (i >= 8 && i <= 10);
-            menuLabels[i].setTextColor(sel ? Color.WHITE : (isLocked ? Color.GRAY : Color.WHITE));
-            menuValues[i].setTextColor(sel ? Color.WHITE : (isLocked ? Color.GRAY : Color.WHITE));
+            menuLabels[i].setTextColor(sel ? Color.WHITE : Color.WHITE);
+            menuValues[i].setTextColor(sel ? Color.WHITE : Color.WHITE);
         }
     }
 
@@ -674,7 +751,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             Camera.Parameters p = mCamera.getParameters();
             CameraEx.ParametersModifier pm = mCameraEx.createParametersModifier(p);
             
-            if (mDialMode == DIAL_MODE_RTL) { currentSlot = (currentSlot + d + 10) % 10; triggerLutPreload(); }
+            if (mDialMode == DIAL_MODE_RTL) { 
+                currentSlot = (currentSlot + d + 10) % 10; 
+                applyProfileSettings(); // Ensure new slot's WB gets applied instantly
+                triggerLutPreload(); 
+            }
             else if (mDialMode == DIAL_MODE_SHUTTER) { if (d > 0) mCameraEx.incrementShutterSpeed(); else mCameraEx.decrementShutterSpeed(); }
             else if (mDialMode == DIAL_MODE_APERTURE) { if (d > 0) mCameraEx.incrementAperture(); else mCameraEx.decrementAperture(); }
             else if (mDialMode == DIAL_MODE_ISO) {
@@ -712,6 +793,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             updateMainHUD();
         } catch (Exception e) {}
+
+        uiHandler.removeCallbacks(liveUpdater);
+        uiHandler.postDelayed(liveUpdater, 1000); 
     }
 
     private void updateMainHUD() {
@@ -765,7 +849,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String iso = pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity();
             String exp = String.format("%+.1f", params.getExposureCompensation() * params.getExposureCompensationStep());
 
-            // Phase 4: CPU Optimized HTML-Free Text Setting
             tvValShutter.setText(ss);
             tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? Color.rgb(230, 50, 15) : Color.WHITE);
 
@@ -821,7 +904,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 mCamera = mCameraEx.getNormalCamera();
                 mCameraEx.startDirectShutter(); 
                 
-                // Phase 4: CPU Optimized Event-Driven Exposure Listeners via Reflection
                 try {
                     Class<?> apListenerClass = Class.forName("com.sony.scalar.hardware.CameraEx$ApertureChangeListener");
                     Object apProxy = java.lang.reflect.Proxy.newProxyInstance(
@@ -897,6 +979,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     mCamera.setParameters(params);
                 } catch(Exception e) {}
 
+                applyProfileSettings();
                 updateMainHUD();
             } catch (Exception e) {} 
         }
@@ -966,7 +1049,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         protected void onSizeChanged(int w, int h, int oldw, int oldh) {
             super.onSizeChanged(w, h, oldw, oldh);
             if (w > 0 && h > 0) {
-                // Bake the static geometry exactly once
                 bgBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
                 Canvas bgCanvas = new Canvas(bgBitmap);
                 int pad = 50;
@@ -1057,7 +1139,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             switch (fallbackState) {
                 case STATE_IDLE:      paint.setColor(Color.argb(100, 255, 255, 255)); break;
                 case STATE_SEARCHING: paint.setColor(Color.YELLOW); break;
-                // Focus Lock is back to strict Green!
                 case STATE_LOCKED:    paint.setColor(Color.GREEN); break;
                 case STATE_FAILED:    paint.setColor(Color.RED); break;
             }
