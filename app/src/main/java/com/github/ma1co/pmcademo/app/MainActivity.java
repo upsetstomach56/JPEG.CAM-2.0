@@ -77,7 +77,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private ProReticleView afOverlay;
     private AdvancedFocusMeterView focusMeter; 
     private CinemaMatteView cinemaMattes;
-    private GridLinesView gridLines; // Phase 7: Grid Lines
+    private GridLinesView gridLines;
     
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
@@ -98,7 +98,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private boolean prefShowFocusMeter = true;
     private boolean prefShowCinemaMattes = false;
-    private boolean prefShowGridLines = false; // Phase 7 toggle
+    private boolean prefShowGridLines = false;
 
     public static final int DIAL_MODE_RTL = 0;
     public static final int DIAL_MODE_SHUTTER = 1;
@@ -198,7 +198,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         mainUIContainer = new FrameLayout(this);
         rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
 
-        // Drawing order matters! Grid goes under the mattes, mattes go under the UI
         gridLines = new GridLinesView(this);
         mainUIContainer.addView(gridLines, new FrameLayout.LayoutParams(-1, -1));
 
@@ -227,13 +226,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvBattery.setTextColor(Color.WHITE);
         tvBattery.setTextSize(18);
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
-        tvBattery.setPadding(0, 0, 10, 0);
+        tvBattery.setPadding(0, 0, 5, 0);
         batteryArea.addView(tvBattery);
 
         View batteryIcon = new View(this) {
             @Override protected void onDraw(Canvas canvas) { drawSonyBattery(canvas, this); }
         };
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(40, 22));
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); // Added width for safety
         rightBar.addView(batteryArea);
 
         tvReview = createSideTextIcon("▶");
@@ -248,8 +247,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         tvReview.setLayoutParams(rvParams);
         rightBar.addView(tvReview);
 
+        // Increased right margin to prevent battery cut-off
         FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
-        rightParams.setMargins(0, 20, 20, 0);
+        rightParams.setMargins(0, 20, 30, 0); 
         mainUIContainer.addView(rightBar, rightParams);
 
         LinearLayout leftBar = new LinearLayout(this);
@@ -306,7 +306,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuContainer = new LinearLayout(this);
         menuContainer.setOrientation(LinearLayout.VERTICAL);
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
-        menuContainer.setPadding(30, 30, 30, 30);
+        // Reduced padding to allow more text space
+        menuContainer.setPadding(20, 20, 20, 20); 
         
         menuHeaderLayout = new LinearLayout(this);
         menuHeaderLayout.setOrientation(LinearLayout.HORIZONTAL);
@@ -314,7 +315,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         menuHeaderLayout.setPadding(10, 0, 10, 15);
 
         tvMenuTitle = new TextView(this);
-        tvMenuTitle.setTextSize(26);
+        tvMenuTitle.setTextSize(22); // Reduced from 26
         tvMenuTitle.setTypeface(Typeface.DEFAULT_BOLD);
         tvMenuTitle.setTextColor(Color.WHITE);
         menuHeaderLayout.addView(tvMenuTitle, new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -325,7 +326,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         for(int i=0; i<3; i++) {
             tvPageNumbers[i] = new TextView(this);
             tvPageNumbers[i].setText(String.valueOf(i+1));
-            tvPageNumbers[i].setTextSize(22);
+            tvPageNumbers[i].setTextSize(20); // Reduced from 22
             tvPageNumbers[i].setTypeface(Typeface.DEFAULT_BOLD);
             tvPageNumbers[i].setPadding(15, 0, 15, 0);
             pagesLayout.addView(tvPageNumbers[i]);
@@ -347,8 +348,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             
             menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
             
-            menuLabels[i] = new TextView(this); menuLabels[i].setTextSize(22); menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
-            menuValues[i] = new TextView(this); menuValues[i].setTextSize(22); menuValues[i].setGravity(Gravity.RIGHT);
+            menuLabels[i] = new TextView(this); 
+            menuLabels[i].setTextSize(18); // Reduced to prevent cutoff
+            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
+            
+            menuValues[i] = new TextView(this); 
+            menuValues[i].setTextSize(18); // Reduced to prevent cutoff
+            menuValues[i].setGravity(Gravity.RIGHT);
             
             menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
             menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
@@ -411,15 +417,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void drawSonyBattery(Canvas canvas, View v) {
         Paint p = new Paint(); p.setAntiAlias(true); p.setStrokeWidth(2);
         p.setColor(Color.WHITE); p.setStyle(Paint.Style.STROKE);
-        canvas.drawRect(2, 2, v.getWidth() - 6, v.getHeight() - 2, p);
+        
+        // Prevent drawing outside the bounding box
+        canvas.drawRect(2, 2, v.getWidth() - 8, v.getHeight() - 2, p);
         p.setStyle(Paint.Style.FILL);
-        canvas.drawRect(v.getWidth() - 6, v.getHeight()/2 - 4, v.getWidth() - 2, v.getHeight()/2 + 4, p);
+        canvas.drawRect(v.getWidth() - 8, v.getHeight()/2 - 4, v.getWidth() - 2, v.getHeight()/2 + 4, p);
+        
         int barColor = (lastBatteryLevel < 15) ? Color.RED : Color.WHITE;
         p.setColor(barColor);
-        int fillW = (v.getWidth() - 12);
+        int fillW = (v.getWidth() - 14);
         if (lastBatteryLevel > 10) canvas.drawRect(6, 6, 6 + (fillW/3) - 2, v.getHeight() - 6, p);
         if (lastBatteryLevel > 40) canvas.drawRect(6 + (fillW/3) + 2, 6, 6 + (2*fillW/3) - 2, v.getHeight() - 6, p);
-        if (lastBatteryLevel > 70) canvas.drawRect(6 + (2*fillW/3) + 2, 6, v.getWidth() - 10, v.getHeight() - 6, p);
+        if (lastBatteryLevel > 70) canvas.drawRect(6 + (2*fillW/3) + 2, 6, v.getWidth() - 12, v.getHeight() - 6, p);
     }
 
     private void refreshPlaybackFiles() {
@@ -519,7 +528,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         editor.putInt("currentSlot", currentSlot);
         editor.putBoolean("showFocusMeter", prefShowFocusMeter);
         editor.putBoolean("showCinemaMattes", prefShowCinemaMattes);
-        editor.putBoolean("showGridLines", prefShowGridLines); // Phase 7 Toggle
+        editor.putBoolean("showGridLines", prefShowGridLines);
 
         for(int i=0; i<10; i++) {
             editor.putString("slot_" + i + "_lutPath", recipePaths.get(profiles[i].lutIndex));
@@ -775,7 +784,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         break;
                     case 2: prefShowFocusMeter = !prefShowFocusMeter; break;
                     case 3: prefShowCinemaMattes = !prefShowCinemaMattes; break;
-                    case 4: prefShowGridLines = !prefShowGridLines; break; // Toggle Grid Lines
+                    case 4: prefShowGridLines = !prefShowGridLines; break; 
                 }
             } else if (currentPage == 3) { // CONNECTIONS
                 // AlphaOS Integration targets
@@ -815,7 +824,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             String currentScene = "UNKNOWN";
             try { if(mCamera != null) { String sm = mCamera.getParameters().getSceneMode(); if(sm != null) currentScene = sm.toUpperCase(); } } catch(Exception e){}
             
-            String[] gLabels = {"Global Quality", "Base Scene", "Cinema Focus Meter", "Anamorphic Crop (2.35:1)", "Rule of Thirds Grid"};
+            String[] gLabels = {"Global Quality", "Base Scene", "Manual Focus Meter", "Anamorphic Crop (2.35:1)", "Rule of Thirds Grid"};
             String[] gValues = {qLabels[qualityIndex], currentScene, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF"};
             for(int i=0; i<5; i++) {
                 menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE);
@@ -1121,19 +1130,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         public GridLinesView(Context context) {
             super(context);
             paint = new Paint();
-            paint.setColor(Color.argb(120, 255, 255, 255)); // Semi-transparent white
+            paint.setColor(Color.argb(120, 255, 255, 255)); 
             paint.setStrokeWidth(2);
         }
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             int w = getWidth();
             int h = getHeight();
-            // Vertical thirds
-            canvas.drawLine(w / 3f, 0, w / 3f, h, paint);
-            canvas.drawLine((w * 2f) / 3f, 0, (w * 2f) / 3f, h, paint);
-            // Horizontal thirds
-            canvas.drawLine(0, h / 3f, w, h / 3f, paint);
-            canvas.drawLine(0, (h * 2f) / 3f, w, (h * 2f) / 3f, paint);
+            
+            // Calculate 3:2 Photo Bounding Box
+            int imgW = w;
+            int imgH = (int) (w * (2.0f / 3.0f));
+            if (imgH > h) { imgH = h; imgW = (int) (h * (3.0f / 2.0f)); }
+            int offsetX = (w - imgW) / 2;
+            int offsetY = (h - imgH) / 2;
+
+            canvas.drawLine(offsetX + imgW / 3f, offsetY, offsetX + imgW / 3f, offsetY + imgH, paint);
+            canvas.drawLine(offsetX + (imgW * 2f) / 3f, offsetY, offsetX + (imgW * 2f) / 3f, offsetY + imgH, paint);
+            canvas.drawLine(offsetX, offsetY + imgH / 3f, offsetX + imgW, offsetY + imgH / 3f, paint);
+            canvas.drawLine(offsetX, offsetY + (imgH * 2f) / 3f, offsetX + imgW, offsetY + (imgH * 2f) / 3f, paint);
         }
     }
 
@@ -1152,12 +1167,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             super.onDraw(canvas);
             int w = getWidth();
             int h = getHeight();
-            int targetHeight = (int)(w / 2.35f); 
-            int barHeight = (h - targetHeight) / 2;
-            if (barHeight > 0) {
-                canvas.drawRect(0, 0, w, barHeight, mattePaint); 
-                canvas.drawRect(0, h - barHeight, w, h, mattePaint); 
-            }
+            
+            // Calculate 3:2 Photo Bounding Box
+            int imgW = w;
+            int imgH = (int) (w * (2.0f / 3.0f));
+            if (imgH > h) { imgH = h; imgW = (int) (h * (3.0f / 2.0f)); }
+            
+            int targetHeight = (int) (imgW / 2.35f);
+            int topBarBottom = (h - targetHeight) / 2;
+            int bottomBarTop = (h + targetHeight) / 2;
+
+            // Black out everything above and below the true anamorphic frame
+            canvas.drawRect(0, 0, w, topBarBottom, mattePaint);
+            canvas.drawRect(0, bottomBarTop, w, h, mattePaint);
         }
     }
 
