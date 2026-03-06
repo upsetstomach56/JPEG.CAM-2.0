@@ -17,13 +17,13 @@ import android.hardware.Camera;
 import android.media.ExifInterface;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.Uri; // <--- THE MISSING IMPORT HAS RETURNED!
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.text.Html;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -106,7 +106,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
 
-    // Phase 8: AlphaOS Networking Variables
+    // AlphaOS State Tracking
     private String connStatusHotspot = "Press ENTER to Start";
     private String connStatusWifi = "Press ENTER to Start";
     
@@ -596,6 +596,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                   .append(profiles[i].wbShiftGM).append("\n"); 
             }
             fos.write(sb.toString().getBytes()); fos.flush(); fos.getFD().sync(); fos.close();
+            // Using correct URI package now!
             sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(backupFile)));
         } catch (Exception e) {}
     }
@@ -731,7 +732,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     displayState = (displayState == 0) ? 1 : 0; mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
                 }
             } else {
-                // Phase 8: Trigger AlphaOS Connections from Page 3
                 if (currentPage == 3 && menuSelection >= 0) {
                     if (menuSelection == 0) startAlphaOSHotspot();
                     else if (menuSelection == 1) startAlphaOSHomeWifi();
@@ -885,7 +885,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             for(int i=0; i<3; i++) {
                 menuLabels[i].setText(cLabels[i]); 
                 menuValues[i].setText(cValues[i]); 
-                // Highlight active network connection orange
                 if (cValues[i].startsWith("http")) menuValues[i].setTextColor(Color.rgb(230, 50, 15));
                 else menuValues[i].setTextColor(Color.WHITE);
                 menuRows[i].setVisibility(View.VISIBLE);
@@ -896,7 +895,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             boolean sel = (i == menuSelection);
             menuRows[i].setBackgroundColor(sel ? Color.rgb(230, 50, 15) : Color.TRANSPARENT);
             menuLabels[i].setTextColor(sel ? Color.WHITE : Color.WHITE);
-            // Ignore color override if it's a live IP address link on page 3
             if (currentPage != 3 || !menuValues[i].getText().toString().startsWith("http")) {
                 menuValues[i].setTextColor(sel ? Color.WHITE : Color.WHITE);
             }
@@ -1169,7 +1167,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (mScanner != null) mScanner.stop(); 
         uiHandler.removeCallbacks(liveUpdater);
         
-        // Safety hook: If you exit the entire app, kill the server to save battery
         stopAlphaOSNetworking();
         savePreferences(); 
     }
