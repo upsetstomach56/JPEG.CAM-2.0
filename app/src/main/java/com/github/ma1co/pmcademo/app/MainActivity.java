@@ -189,7 +189,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             @Override 
             public void onProcessStarted() { 
-                isProcessing = true; 
                 runOnUiThread(new Runnable() { 
                     public void run() { 
                         tvTopStatus.setText("PROCESSING..."); 
@@ -217,17 +216,49 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             @Override 
             public void onNewPhotoDetected(final String path) { 
-                // RACE CONDITION FIX: Wait 800ms to allow camera hardware to finish writing massive file
-                uiHandler.postDelayed(new Runnable() { 
-                    public void run() { 
-                        File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile()); 
-                    } 
-                }, 800); 
+                // CRITICAL FIX: Math-based polling to wait for SD card hardware to finish writing the giant RAW+JPG buffer
+                processWhenFileReady(path);
             }
         });
         mScanner.start();
         triggerLutPreload();
+    }
+
+    private void processWhenFileReady(final String path) {
+        isProcessing = true; // Lock the UI and Shutter instantly to protect RAM
+        runOnUiThread(new Runnable() { 
+            public void run() { 
+                tvTopStatus.setText("SAVING TO SD..."); 
+                tvTopStatus.setTextColor(Color.YELLOW); 
+                updateMainHUD(); 
+            } 
+        });
+        
+        final File f = new File(path);
+        final long[] lastSize = {-1};
+        final int[] retries = {0};
+        
+        Runnable checker = new Runnable() {
+            @Override
+            public void run() {
+                long currentSize = f.length();
+                if (currentSize > 0 && currentSize == lastSize[0]) {
+                    // File size stabilized, it is perfectly safe to hand to the C++ engine
+                    File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
+                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
+                } else if (retries[0] < 30) { 
+                    // File is still growing, wait and check again (Max wait 15 seconds)
+                    lastSize[0] = currentSize;
+                    retries[0]++;
+                    uiHandler.postDelayed(this, 500);
+                } else {
+                    // Failsafe timeout
+                    isProcessing = false;
+                    updateMainHUD();
+                }
+            }
+        };
+        uiHandler.postDelayed(checker, 500);
     }
 
     private void triggerLutPreload() {
@@ -237,10 +268,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onShutterHalfPressed() {
-        if (isPlaybackMode) { 
-            exitPlayback(); 
-            return; 
-        }
+        if (isPlaybackMode) { exitPlayback(); return; }
+        if (isProcessing) return; // Prevent RAM overload
         
         mDialMode = DIAL_MODE_RTL;
         if (displayState == 0 && !isMenuOpen) {
@@ -274,10 +303,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onMenuPressed() {
-        if (isPlaybackMode) { 
-            exitPlayback(); 
-            return; 
-        }
+        if (isPlaybackMode) { exitPlayback(); return; }
+        if (isProcessing) return; // Lock menu during processing
         
         isMenuOpen = !isMenuOpen;
         if (isMenuOpen) {
@@ -297,10 +324,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onEnterPressed() {
-        if (isPlaybackMode) { 
-            exitPlayback(); 
-            return; 
-        }
+        if (isPlaybackMode) { exitPlayback(); return; }
+        if (isProcessing) return;
         
         if (!isMenuOpen) {
             if (mDialMode == DIAL_MODE_REVIEW) {
@@ -316,12 +341,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public void onUpPressed() { 
+        if (isProcessing) return;
         menuManager.moveSelection(-1); 
         renderMenu(); 
     }
     
     @Override 
     public void onDownPressed() { 
+        if (isProcessing) return;
         menuManager.moveSelection(1); 
         renderMenu(); 
     }
@@ -332,7 +359,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             showPlaybackImage(playbackIndex - 1);
         } else if (isMenuOpen) {
             handleMenuHorizontal(-1); 
-        } else {
+        } else if (!isProcessing) {
             cycleDialMode(-1); 
         }
     }
@@ -343,7 +370,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             showPlaybackImage(playbackIndex + 1);
         } else if (isMenuOpen) {
             handleMenuHorizontal(1); 
-        } else {
+        } else if (!isProcessing) {
             cycleDialMode(1); 
         }
     }
@@ -354,7 +381,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             showPlaybackImage(playbackIndex + direction);
         } else if (isMenuOpen) {
             handleMenuChange(direction); 
-        } else {
+        } else if (!isProcessing) {
             handleHardwareInput(direction); 
         }
     }
@@ -391,23 +418,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         else if (mDialMode == DIAL_MODE_ISO) {
             List<Integer> isos = (List<Integer>) pm.getSupportedISOSensitivities();
-            int idx = isos.indexOf(pm.getISOSensitivity());
-            if (idx != -1) { 
-                pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); 
-                c.setParameters(p); 
+            if (isos != null) {
+                int idx = isos.indexOf(pm.getISOSensitivity());
+                if (idx != -1) { 
+                    pm.setISOSensitivity(isos.get(Math.max(0, Math.min(isos.size()-1, idx + d)))); 
+                    c.setParameters(p); 
+                }
             }
         }
+        // EXPOSURE FIX: Properly calculate EV bounds and apply
+        else if (mDialMode == DIAL_MODE_EXPOSURE) {
+            int ev = p.getExposureCompensation();
+            int minEv = p.getMinExposureCompensation();
+            int maxEv = p.getMaxExposureCompensation();
+            p.setExposureCompensation(Math.max(minEv, Math.min(maxEv, ev + d)));
+            c.setParameters(p);
+        }
+        // PASM FIX: Safely map modes and prevent crashing on "Auto"
         else if (mDialMode == DIAL_MODE_PASM) {
             List<String> valid = new ArrayList<String>(); 
             String[] desired = {"manual-exposure", "aperture-priority", "shutter-priority", "program-auto"};
-            for (String s : desired) { 
-                if (p.getSupportedSceneModes().contains(s)) {
-                    valid.add(s); 
+            List<String> supported = p.getSupportedSceneModes();
+            if (supported != null) {
+                for (String s : desired) { 
+                    if (supported.contains(s)) valid.add(s); 
+                }
+                if (!valid.isEmpty()) {
+                    int idx = valid.indexOf(p.getSceneMode()); 
+                    if (idx == -1) idx = 0; // If currently in 'auto' or 'night', drop them to 'manual' safely
+                    p.setSceneMode(valid.get((idx + d + valid.size()) % valid.size())); 
+                    c.setParameters(p);
                 }
             }
-            int idx = valid.indexOf(p.getSceneMode()); 
-            p.setSceneMode(valid.get((idx + d + valid.size()) % valid.size())); 
-            c.setParameters(p);
         }
         
         uiHandler.removeCallbacks(liveUpdater); 
@@ -524,7 +566,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         playbackContainer.setVisibility(View.GONE);
         mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
         
-        // MEMORY CRASH FIX: Sweep viewer memory instantly when exiting
         playbackImageView.setImageBitmap(null);
         if (currentPlaybackBitmap != null) { 
             currentPlaybackBitmap.recycle(); 
@@ -547,7 +588,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         File file = playbackFiles.get(idx);
         
         try {
-            // MEMORY CRASH FIX: Ensure previous giant bitmap is destroyed before decoding next
             playbackImageView.setImageBitmap(null);
             if (currentPlaybackBitmap != null) {
                 currentPlaybackBitmap.recycle();
@@ -563,7 +603,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             ExifInterface exif = new ExifInterface(file.getAbsolutePath());
             tvPlaybackInfo.setText((idx + 1) + "/" + playbackFiles.size() + "\n" + file.getName());
             
-            // MEMORY CRASH FIX: Downsample 8x instead of 2x. Uses 1.5MB instead of 24MB.
+            // OOM FIX: Safe memory sampling down to 1.5MB to prevent Dalvik crashes on scroll
             BitmapFactory.Options opts = new BitmapFactory.Options(); 
             opts.inSampleSize = 8; 
             Bitmap raw = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
@@ -621,7 +661,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else if (pg == 3) {
             switch(sel) {
                 case 0: recipeManager.setQualityIndex(recipeManager.getQualityIndex() + dir); break;
-                case 1: handleHardwareInput(dir); break; 
+                // BASE SCENE MENU FIX: Explicitly cycle the full list of supported scenes
+                case 1: 
+                    Camera c = cameraManager.getCamera();
+                    if (c != null) {
+                        Camera.Parameters params = c.getParameters();
+                        List<String> supported = params.getSupportedSceneModes();
+                        if (supported != null && !supported.isEmpty()) {
+                            int idx = supported.indexOf(params.getSceneMode());
+                            if (idx == -1) idx = 0;
+                            params.setSceneMode(supported.get((idx + dir + supported.size()) % supported.size()));
+                            c.setParameters(params);
+                        }
+                    }
+                    break; 
                 case 2: prefShowFocusMeter = !prefShowFocusMeter; break;
                 case 3: prefShowCinemaMattes = !prefShowCinemaMattes; break;
                 case 4: prefShowGridLines = !prefShowGridLines; break;
@@ -656,11 +709,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override 
     public boolean onKeyDown(int k, KeyEvent e) { 
+        // SHUTTER HARD-BLOCK: Physically consume shutter keystrokes to prevent buffer overload while processing
+        if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
+            return true; 
+        }
         return inputManager.handleKeyDown(k, e) || super.onKeyDown(k, e); 
     }
     
     @Override 
     public boolean onKeyUp(int k, KeyEvent e) { 
+        if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
+            return true; 
+        }
         return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e); 
     }
     
@@ -708,7 +768,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String name = recipeManager.getRecipeNames().get(prof.lutIndex);
         String displayName = name.length() > 15 ? name.substring(0, 12) + "..." : name;
         
-        tvTopStatus.setText("RTL " + (recipeManager.getCurrentSlot() + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+        if (!isProcessing) {
+            tvTopStatus.setText("RTL " + (recipeManager.getCurrentSlot() + 1) + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+        }
         
         String sm = p.getSceneMode(); 
         if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
@@ -722,7 +784,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvValIso.setText(pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity());
         tvValEv.setText(String.format("%+.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         
-        // UI HIGHLIGHT FIX: Added visual color swapping to all on-screen menu items
         tvTopStatus.setTextColor(mDialMode == DIAL_MODE_RTL ? Color.rgb(230, 50, 15) : Color.WHITE);
         tvReview.setBackgroundColor(mDialMode == DIAL_MODE_REVIEW ? Color.rgb(230, 50, 15) : Color.argb(140, 40, 40, 40));
         tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? Color.rgb(230, 50, 15) : Color.WHITE);
