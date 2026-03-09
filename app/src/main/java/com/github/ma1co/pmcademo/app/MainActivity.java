@@ -123,6 +123,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private int mDialMode = DIAL_MODE_RTL;
 
+    // --- SONY HARDWARE SIGNAL RECEIVER ---
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -492,7 +493,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 enterPlayback();
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
-                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
+                mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE); 
             }
         } else {
             if (currentPage == 4) { 
@@ -862,6 +863,453 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         updateMainHUD();
     }
+    private void applyHardwareRecipe() {
+        if (cameraManager == null) {
+            return;
+        }
+        
+        Camera c = cameraManager.getCamera(); 
+        if (c == null) {
+            return;
+        }
+        
+        RTLProfile prof = recipeManager.getCurrentProfile(); 
+        Camera.Parameters p = c.getParameters();
+        
+        String wb = "auto";
+        if ("DAY".equals(prof.whiteBalance)) {
+            wb = "daylight"; 
+        } else if ("SHD".equals(prof.whiteBalance)) {
+            wb = "shade"; 
+        } else if ("CLD".equals(prof.whiteBalance)) {
+            wb = "cloudy-daylight"; 
+        } else if ("INC".equals(prof.whiteBalance)) {
+            wb = "incandescent"; 
+        } else if ("FLR".equals(prof.whiteBalance)) {
+            wb = "fluorescent";
+        }
+        
+        p.setWhiteBalance(wb);
+        
+        if (p.get("dro-mode") != null) {
+            if ("OFF".equals(prof.dro)) {
+                p.set("dro-mode", "off"); 
+            } else if ("AUTO".equals(prof.dro)) {
+                p.set("dro-mode", "auto"); 
+            } else if (prof.dro.startsWith("LV")) { 
+                p.set("dro-mode", "on"); 
+                try { 
+                    p.set("dro-level", Integer.parseInt(prof.dro.replace("LV", ""))); 
+                } catch(Exception e) {
+                }
+            }
+        } else if (p.get("sony-dro") != null) {
+            p.set("sony-dro", prof.dro.toLowerCase());
+        }
+        
+        if (p.get("contrast") != null) {
+            p.set("contrast", String.valueOf(prof.contrast)); 
+        }
+        if (p.get("saturation") != null) {
+            p.set("saturation", String.valueOf(prof.saturation)); 
+        }
+        if (p.get("sharpness") != null) {
+            p.set("sharpness", String.valueOf(prof.sharpness));
+        }
+        
+        if (p.get("white-balance-shift-mode") != null) {
+            p.set("white-balance-shift-mode", (prof.wbShift != 0 || prof.wbShiftGM != 0) ? "true" : "false");
+        }
+        if (p.get("white-balance-shift-lb") != null) {
+            p.set("white-balance-shift-lb", String.valueOf(prof.wbShift)); 
+        }
+        if (p.get("white-balance-shift-cc") != null) {
+            p.set("white-balance-shift-cc", String.valueOf(prof.wbShiftGM));
+        }
+        
+        try { 
+            c.setParameters(p); 
+        } catch (Exception e) {
+        }
+    }
+
+    private void setAutoPowerOffMode(boolean enable) {
+        String mode = enable ? "APO/NORMAL" : "APO/NO";
+        Intent intent = new Intent();
+        intent.setAction("com.android.server.DAConnectionManagerService.apo");
+        intent.putExtra("apo_info", mode);
+        sendBroadcast(intent);
+    }
+
+    private void handleConnectionAction() {
+        int sel = menuSelection; 
+        if (sel == 0) {
+            if (connectivityManager != null) {
+                connectivityManager.startHotspot(); 
+                setAutoPowerOffMode(false);
+            }
+        } else if (sel == 1) {
+            if (connectivityManager != null) {
+                connectivityManager.startHomeWifi(); 
+                setAutoPowerOffMode(false);
+            }
+        } else if (sel == 2) {
+            if (connectivityManager != null) {
+                connectivityManager.stopNetworking();
+                setAutoPowerOffMode(true);
+            }
+        }
+    }
+
+    private void renderMenu() {
+        String scn = "UNKNOWN"; 
+        if (cameraManager != null) {
+            try { 
+                Camera c = cameraManager.getCamera();
+                if (c != null) {
+                    scn = c.getParameters().getSceneMode().toUpperCase(); 
+                }
+            } catch(Exception e) {
+            }
+        }
+        
+        tvTabRTL.setTextColor(currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.GRAY);
+        tvTabSettings.setTextColor(currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.GRAY);
+        tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
+        
+        if (currentPage == 1) {
+            tvMenuSubtitle.setText("RTL Base (Page 1/2)");
+        } else if (currentPage == 2) {
+            tvMenuSubtitle.setText("Color & Tone (Page 2/2)");
+        } else if (currentPage == 3) {
+            tvMenuSubtitle.setText("Global Settings");
+        } else {
+            tvMenuSubtitle.setText("Web Dashboard Server");
+        }
+
+        for (int i = 0; i < 7; i++) {
+            menuRows[i].setVisibility(View.GONE);
+        }
+
+        RTLProfile p = recipeManager.getCurrentProfile();
+        int itemCount = 0;
+
+        if (currentPage == 1) { 
+            itemCount = 7;
+            String[] rLabels = {"RTL Slot", "LUT", "Opacity", "Grain Amount", "Grain Size", "Highlight Roll", "Vignette"};
+            String[] rValues = {
+                String.valueOf(recipeManager.getCurrentSlot() + 1), 
+                recipeManager.getRecipeNames().get(p.lutIndex), 
+                p.opacity + "%", 
+                String.valueOf(p.grain), 
+                String.valueOf(p.grainSize), 
+                String.valueOf(p.rollOff), 
+                String.valueOf(p.vignette)
+            };
+            for (int i = 0; i < 7; i++) { 
+                menuLabels[i].setText(rLabels[i]); 
+                menuValues[i].setText(rValues[i]); 
+                menuRows[i].setVisibility(View.VISIBLE); 
+            }
+        } else if (currentPage == 2) {
+            itemCount = 7;
+            String[] cLabels = {"White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO", "Contrast", "Saturation", "Sharpness"};
+            String[] cValues = { 
+                p.whiteBalance, 
+                String.valueOf(p.wbShift), 
+                String.valueOf(p.wbShiftGM), 
+                p.dro, 
+                String.valueOf(p.contrast), 
+                String.valueOf(p.saturation), 
+                String.valueOf(p.sharpness) 
+            };
+            for (int i = 0; i < 7; i++) { 
+                menuLabels[i].setText(cLabels[i]); 
+                menuValues[i].setText(cValues[i]); 
+                menuRows[i].setVisibility(View.VISIBLE); 
+            }
+        } else if (currentPage == 3) {
+            itemCount = 5;
+            String[] qLabels = {"PROXY (1.5M)", "HIGH (6M)", "ULTRA (24M)"};
+            String[] gLabels = {"Global Quality", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid"};
+            String[] gValues = { 
+                qLabels[recipeManager.getQualityIndex()], 
+                scn, 
+                prefShowFocusMeter ? "ON" : "OFF", 
+                prefShowCinemaMattes ? "ON" : "OFF", 
+                prefShowGridLines ? "ON" : "OFF" 
+            };
+            for (int i = 0; i < 5; i++) { 
+                menuLabels[i].setText(gLabels[i]); 
+                menuValues[i].setText(gValues[i]); 
+                menuRows[i].setVisibility(View.VISIBLE); 
+            }
+        } else if (currentPage == 4) {
+            itemCount = 3;
+            String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
+            String[] cValues = { "Press ENTER", "Press ENTER", "" };
+            for (int i = 0; i < 3; i++) { 
+                menuLabels[i].setText(cLabels[i]); 
+                menuValues[i].setText(cValues[i]); 
+                menuRows[i].setVisibility(View.VISIBLE); 
+            }
+        }
+
+        for (int i = 0; i < itemCount; i++) {
+            boolean isSelected = (i == menuSelection);
+            if (isSelected) {
+                if (isMenuEditing) {
+                    menuRows[i].setBackgroundColor(Color.TRANSPARENT);
+                    menuLabels[i].setTextColor(Color.WHITE);
+                    menuValues[i].setTextColor(Color.rgb(230, 50, 15)); 
+                } else {
+                    menuRows[i].setBackgroundColor(Color.rgb(230, 50, 15));
+                    menuLabels[i].setTextColor(Color.WHITE);
+                    menuValues[i].setTextColor(Color.WHITE);
+                }
+            } else {
+                menuRows[i].setBackgroundColor(Color.TRANSPARENT);
+                menuLabels[i].setTextColor(Color.WHITE);
+                menuValues[i].setTextColor(Color.WHITE);
+            }
+        }
+        
+        currentItemCount = itemCount;
+    }
+
+    private void buildUI(FrameLayout rootLayout) {
+        mainUIContainer = new FrameLayout(this); 
+        rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
+        
+        gridLines = new GridLinesView(this); 
+        mainUIContainer.addView(gridLines, new FrameLayout.LayoutParams(-1, -1));
+        
+        cinemaMattes = new CinemaMatteView(this); 
+        mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvTopStatus = new TextView(this); 
+        tvTopStatus.setTextColor(Color.WHITE); 
+        tvTopStatus.setTextSize(20); 
+        tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
+        tvTopStatus.setGravity(Gravity.CENTER); 
+        tvTopStatus.setShadowLayer(4, 0, 0, Color.BLACK);
+        
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
+        topParams.setMargins(0, 15, 0, 0); 
+        mainUIContainer.addView(tvTopStatus, topParams);
+        
+        LinearLayout rightBar = new LinearLayout(this); 
+        rightBar.setOrientation(LinearLayout.VERTICAL); 
+        rightBar.setGravity(Gravity.RIGHT);
+        
+        LinearLayout batteryArea = new LinearLayout(this); 
+        batteryArea.setOrientation(LinearLayout.HORIZONTAL); 
+        batteryArea.setGravity(Gravity.CENTER_VERTICAL);
+        
+        tvBattery = new TextView(this); 
+        tvBattery.setTextColor(Color.WHITE); 
+        tvBattery.setTextSize(18); 
+        tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
+        tvBattery.setPadding(0, 0, 10, 0); 
+        batteryArea.addView(tvBattery);
+        
+        batteryIcon = new BatteryView(this); 
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); 
+        rightBar.addView(batteryArea);
+        
+        tvReview = createSideTextIcon("▶"); 
+        LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2); 
+        rvParams.setMargins(0, 20, 0, 0); 
+        tvReview.setLayoutParams(rvParams); 
+        rightBar.addView(tvReview);
+        
+        FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
+        rightParams.setMargins(0, 20, 30, 0); 
+        mainUIContainer.addView(rightBar, rightParams);
+        
+        LinearLayout leftBar = new LinearLayout(this); 
+        leftBar.setOrientation(LinearLayout.VERTICAL); 
+        tvMode = createSideTextIcon("M"); 
+        leftBar.addView(tvMode); 
+        tvFocusMode = createSideTextIcon("AF-S"); 
+        leftBar.addView(tvFocusMode);
+        
+        FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT); 
+        leftParams.setMargins(20, 20, 0, 0); 
+        mainUIContainer.addView(leftBar, leftParams);
+        
+        focusMeter = new AdvancedFocusMeterView(this); 
+        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 80, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
+        fmParams.setMargins(0, 0, 0, 100); 
+        mainUIContainer.addView(focusMeter, fmParams);
+        
+        llBottomBar = new LinearLayout(this); 
+        llBottomBar.setOrientation(LinearLayout.HORIZONTAL); 
+        llBottomBar.setGravity(Gravity.CENTER); 
+        
+        tvValShutter = createBottomText(); 
+        tvValAperture = createBottomText(); 
+        tvValIso = createBottomText(); 
+        tvValEv = createBottomText();
+        
+        llBottomBar.addView(tvValShutter); 
+        llBottomBar.addView(tvValAperture); 
+        llBottomBar.addView(tvValIso); 
+        llBottomBar.addView(tvValEv);
+        
+        FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
+        botParams.setMargins(0, 0, 0, 25); 
+        mainUIContainer.addView(llBottomBar, botParams);
+        
+        afOverlay = new ProReticleView(this); 
+        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
+        
+        // --- NEW TABBED MENU UI ---
+        menuContainer = new LinearLayout(this); 
+        menuContainer.setOrientation(LinearLayout.VERTICAL); 
+        menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
+        menuContainer.setPadding(20, 20, 20, 20); 
+        
+        LinearLayout tabHeaderLayout = new LinearLayout(this);
+        tabHeaderLayout.setOrientation(LinearLayout.HORIZONTAL);
+        tabHeaderLayout.setGravity(Gravity.CENTER);
+        tabHeaderLayout.setPadding(0, 0, 0, 10);
+        
+        tvTabRTL = createTabHeader("[ RTL ]");
+        tvTabSettings = createTabHeader("[ SETTINGS ]");
+        tvTabNetwork = createTabHeader("[ NETWORK ]");
+        
+        tabHeaderLayout.addView(tvTabRTL);
+        tabHeaderLayout.addView(tvTabSettings);
+        tabHeaderLayout.addView(tvTabNetwork);
+        menuContainer.addView(tabHeaderLayout);
+        
+        tvMenuSubtitle = new TextView(this);
+        tvMenuSubtitle.setTextSize(18);
+        tvMenuSubtitle.setTextColor(Color.WHITE);
+        tvMenuSubtitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvMenuSubtitle.setPadding(10, 0, 0, 15);
+        menuContainer.addView(tvMenuSubtitle);
+        
+        View headerDivider = new View(this); 
+        headerDivider.setBackgroundColor(Color.GRAY); 
+        LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(-1, 2); 
+        divParams.setMargins(0, 0, 0, 15); 
+        menuContainer.addView(headerDivider, divParams);
+        
+        for (int i = 0; i < 7; i++) { 
+            menuRows[i] = new LinearLayout(this); 
+            menuRows[i].setOrientation(LinearLayout.HORIZONTAL); 
+            menuRows[i].setGravity(Gravity.CENTER_VERTICAL); 
+            menuRows[i].setPadding(10, 0, 10, 0); 
+            menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            
+            menuLabels[i] = new TextView(this); 
+            menuLabels[i].setTextSize(18); 
+            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD); 
+            
+            menuValues[i] = new TextView(this); 
+            menuValues[i].setTextSize(18); 
+            menuValues[i].setGravity(Gravity.RIGHT);
+            
+            menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f)); 
+            menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
+            
+            if (i < 6) { 
+                View divider = new View(this); 
+                divider.setBackgroundColor(Color.DKGRAY); 
+                menuContainer.addView(divider, new LinearLayout.LayoutParams(-1, 1)); 
+            }
+        }
+        
+        menuContainer.setVisibility(View.GONE); 
+        rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
+        
+        playbackContainer = new FrameLayout(this); 
+        playbackContainer.setBackgroundColor(Color.BLACK); 
+        playbackContainer.setVisibility(View.GONE);
+        
+        playbackImageView = new ImageView(this); 
+        playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER); 
+        playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvPlaybackInfo = new TextView(this); 
+        tvPlaybackInfo.setTextColor(Color.WHITE); 
+        tvPlaybackInfo.setTextSize(18); 
+        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK); 
+        FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
+        pbInfoParams.setMargins(0, 30, 30, 0); 
+        playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
+        
+        rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private TextView createTabHeader(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(22);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setPadding(15, 0, 15, 0);
+        return tv;
+    }
+
+    private TextView createBottomText() { 
+        TextView tv = new TextView(this); 
+        tv.setTextSize(26); 
+        tv.setTypeface(Typeface.DEFAULT_BOLD); 
+        tv.setShadowLayer(4, 0, 0, Color.BLACK); 
+        tv.setPadding(20, 0, 20, 0); 
+        return tv; 
+    }
+    
+    private TextView createSideTextIcon(String text) { 
+        TextView tv = new TextView(this); 
+        tv.setText(text); 
+        tv.setTextColor(Color.WHITE); 
+        tv.setTextSize(22); 
+        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        tv.setPadding(25, 15, 25, 15); 
+        tv.setBackgroundColor(Color.argb(140, 40, 40, 40)); 
+        tv.setGravity(Gravity.CENTER); 
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); 
+        lp.setMargins(0, 0, 0, 15); 
+        tv.setLayoutParams(lp); 
+        return tv; 
+    }
+    
+    @Override 
+    public boolean onKeyDown(int k, KeyEvent e) { 
+        if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
+            return true; 
+        }
+        
+        if (k == ScalarInput.ISV_KEY_PLAY) {
+            if (isPlaybackMode) {
+                exitPlayback();
+            } else if (!isMenuOpen && !isProcessing) {
+                enterPlayback();
+            }
+            return true;
+        }
+        
+        if (inputManager != null) {
+            return inputManager.handleKeyDown(k, e) || super.onKeyDown(k, e); 
+        }
+        return super.onKeyDown(k, e);
+    }
+    
+    @Override 
+    public boolean onKeyUp(int k, KeyEvent e) { 
+        if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
+            return true; 
+        }
+        
+        if (inputManager != null) {
+            return inputManager.handleKeyUp(k, e) || super.onKeyUp(k, e); 
+        }
+        return super.onKeyUp(k, e);
+    }
+    
     @Override 
     protected void onResume() { 
         super.onResume(); 
