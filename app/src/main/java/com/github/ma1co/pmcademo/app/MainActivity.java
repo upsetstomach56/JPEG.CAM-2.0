@@ -207,7 +207,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void setupEngines() {
-        mProcessor = new ImageProcessor(new ImageProcessor.ProcessorCallback() {
+        mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
             @Override 
             public void onPreloadStarted() { 
                 isReady = false; 

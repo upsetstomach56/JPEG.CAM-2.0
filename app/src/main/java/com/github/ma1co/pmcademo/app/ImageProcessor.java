@@ -1,9 +1,10 @@
 package com.github.ma1co.pmcademo.app;
 
-import android.media.ExifInterface;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.AsyncTask;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -17,9 +18,12 @@ public class ImageProcessor {
         void onProcessFinished(String resultPath);
     }
 
+    private Context mContext;
     private ProcessorCallback mCallback;
 
-    public ImageProcessor(ProcessorCallback callback) {
+    // We bring Context back so we can trigger the Sony Media Scanner
+    public ImageProcessor(Context context, ProcessorCallback callback) {
+        this.mContext = context;
         this.mCallback = callback;
     }
 
@@ -78,6 +82,20 @@ public class ImageProcessor {
 
         @Override
         protected String doInBackground(Void... voids) {
+            File original = new File(inPath);
+            if (!original.exists()) return null;
+
+            // CRITICAL: Wait for the camera hardware to finish writing the file to the SD Card
+            long lastSize = -1;
+            int timeout = 0;
+            while (timeout < 100) {
+                long currentSize = original.length();
+                if (currentSize > 0 && currentSize == lastSize) break;
+                lastSize = currentSize;
+                try { Thread.sleep(50); } catch (Exception e) {}
+                timeout++;
+            }
+
             File dir = new File(outDir);
             if (!dir.exists()) {
                 dir.mkdirs();
@@ -86,41 +104,20 @@ public class ImageProcessor {
             String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
             String finalOutPath = new File(dir, "FILM_" + timeStamp + ".JPG").getAbsolutePath();
 
-            String fileToProcess = inPath;
+            // libjpeg-turbo scale_denom handles downscaling natively during IDCT.
+            // This is lightning fast and lets the C++ layer perfectly preserve the Sony MakerNote EXIF.
             int scaleDenom = 1;
-            boolean isProxy = (qualityIndex == 0);
-            boolean usedThumbnail = false;
-
-            // THUMBNAIL HACK (Path 2): For Proxy Quality, rip the embedded 2MP JPEG directly from the EXIF header
-            if (isProxy) {
-                try {
-                    ExifInterface exif = new ExifInterface(inPath);
-                    byte[] thumbData = exif.getThumbnail();
-                    if (thumbData != null && thumbData.length > 0) {
-                        File tempThumb = new File(outDir, "temp_thumb.jpg");
-                        FileOutputStream fos = new FileOutputStream(tempThumb);
-                        fos.write(thumbData);
-                        fos.close();
-                        
-                        fileToProcess = tempThumb.getAbsolutePath();
-                        scaleDenom = 1; // The thumbnail is already ~2MP, no downscaling needed
-                        usedThumbnail = true;
-                    } else {
-                        // Fallback: If hardware didn't embed a thumbnail, force libjpeg to scale 24MP by 1/4 (1.5MP)
-                        scaleDenom = 4; 
-                    }
-                } catch (Exception e) {
-                    scaleDenom = 4;
-                }
-            } else if (qualityIndex == 1) {
-                scaleDenom = 2; // High: Scales 24MP by 1/2 (~6MP) natively in C++
-            } else {
-                scaleDenom = 1; // Ultra: Full 24MP resolution
+            if (qualityIndex == 0) { 
+                scaleDenom = 4; // PROXY: ~1.5MP (Skip 3/4 of the IDCT calculation)
+            } else if (qualityIndex == 1) { 
+                scaleDenom = 2; // HIGH: ~6MP (Skip 1/2 of the IDCT calculation)
+            } else { 
+                scaleDenom = 1; // ULTRA: Full 24MP resolution
             }
 
-            // C++ JNI Call (Path 1 uses NEON SIMD in C++ for the heavy math)
+            // Route straight to C++ NEON layer
             boolean success = LutEngine.processImageNative(
-                    fileToProcess,
+                    inPath,
                     finalOutPath,
                     scaleDenom,
                     profile.opacity,
@@ -130,47 +127,12 @@ public class ImageProcessor {
                     profile.rollOff
             );
 
-            // Immediately clean up the temporary thumbnail file if we generated one
-            if (usedThumbnail) {
-                File temp = new File(fileToProcess);
-                if (temp.exists()) {
-                    temp.delete();
-                }
-            }
-
             if (success) {
-                // EXIF RESTORATION: The thumbnail extraction strips EXIF tags. 
-                // We must copy the camera's original tags back onto the final graded file so the Playback Viewer works.
-                try {
-                    ExifInterface oldExif = new ExifInterface(inPath);
-                    ExifInterface newExif = new ExifInterface(finalOutPath);
-                    
-                    String[] tagsToCopy = {
-                        ExifInterface.TAG_ORIENTATION, 
-                        ExifInterface.TAG_DATETIME,
-                        ExifInterface.TAG_MAKE, 
-                        ExifInterface.TAG_MODEL,
-                        ExifInterface.TAG_FLASH, 
-                        ExifInterface.TAG_WHITE_BALANCE,
-                        "FNumber", 
-                        "ExposureTime", 
-                        "ISOSpeedRatings", 
-                        "FocalLength"
-                    };
-                    
-                    for (String tag : tagsToCopy) {
-                        String val = oldExif.getAttribute(tag);
-                        if (val != null) {
-                            newExif.setAttribute(tag, val);
-                        }
-                    }
-                    newExif.saveAttributes();
-                } catch (Exception e) {
-                    // Ignore EXIF copy errors, the image itself is successfully graded and safe.
-                }
+                // CRITICAL: Tell the Sony Avindex (Playback Database) that a new file exists
+                mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(new File(finalOutPath))));
                 return finalOutPath;
             } else {
-                // Failsafe: If C++ processing aborts (e.g., out of memory), clean up the corrupted 0-byte file
+                // Failsafe: Clean up 0-byte files if native crash/OOM occurs
                 File failedOut = new File(finalOutPath);
                 if (failedOut.exists()) {
                     failedOut.delete();
