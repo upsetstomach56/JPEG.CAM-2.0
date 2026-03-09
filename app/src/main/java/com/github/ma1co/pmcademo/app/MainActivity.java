@@ -105,6 +105,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int menuSelection = 0;
     private int currentItemCount = 0;
     private String savedFocusMode = null;
+
+    // Connection Status
+    private String hotspotStatus = "Press ENTER";
+    private String wifiStatus = "Press ENTER";
     
     private GridLinesView gridLines;
     private CinemaMatteView cinemaMattes;
@@ -381,6 +385,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         
         mDialMode = DIAL_MODE_RTL;
+        
+        // Hide the HUD
         if (displayState == 0 && !isMenuOpen) {
             setHUDVisibility(View.GONE);
         }
@@ -388,11 +394,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (cameraManager != null) {
             Camera c = cameraManager.getCamera();
             if (afOverlay != null && c != null) {
-                try { 
-                    if (!"manual".equals(c.getParameters().getFocusMode())) {
-                        afOverlay.startFocus(c); 
-                    }
-                } catch (Exception e) {
+                // INSTANT CHECK: Use the cached boolean instead of c.getParameters()
+                if (!cachedIsManualFocus) {
+                    afOverlay.startFocus(c); 
                 }
             }
         }
@@ -951,21 +955,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void handleConnectionAction() {
         int sel = menuSelection; 
         if (sel == 0) {
+            hotspotStatus = "Starting..."; // Instant UI feedback
             if (connectivityManager != null) {
                 connectivityManager.startHotspot(); 
                 setAutoPowerOffMode(false);
             }
         } else if (sel == 1) {
+            wifiStatus = "Connecting..."; // Instant UI feedback
             if (connectivityManager != null) {
                 connectivityManager.startHomeWifi(); 
                 setAutoPowerOffMode(false);
             }
         } else if (sel == 2) {
+            hotspotStatus = "Press ENTER"; // Reset
+            wifiStatus = "Press ENTER";    // Reset
             if (connectivityManager != null) {
                 connectivityManager.stopNetworking();
                 setAutoPowerOffMode(true);
             }
         }
+        renderMenu(); // Redraw immediately to show "Starting..."
     }
 
     private void renderMenu() {
@@ -1025,10 +1034,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else if (currentPage == 2) {
             itemCount = 7;
             String[] cLabels = {"White Balance", "WB Shift (A-B)", "WB Shift (G-M)", "DRO", "Contrast", "Saturation", "Sharpness"};
+            
+            // Format A/B (Amber/Blue) and G/M (Green/Magenta)
+            String abStr = p.wbShift == 0 ? "0" : (p.wbShift < 0 ? "B" + Math.abs(p.wbShift) : "A" + p.wbShift);
+            String gmStr = p.wbShiftGM == 0 ? "0" : (p.wbShiftGM < 0 ? "M" + Math.abs(p.wbShiftGM) : "G" + p.wbShiftGM);
+
             String[] cValues = { 
                 p.whiteBalance, 
-                p.wbShift > 0 ? "+" + p.wbShift : String.valueOf(p.wbShift), 
-                p.wbShiftGM > 0 ? "+" + p.wbShiftGM : String.valueOf(p.wbShiftGM), 
+                abStr, 
+                gmStr, 
                 p.dro, 
                 stepLabels[Math.max(0, Math.min(6, p.contrast + 3))], 
                 stepLabels[Math.max(0, Math.min(6, p.saturation + 3))], 
@@ -1058,7 +1072,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else if (currentPage == 4) {
             itemCount = 3;
             String[] cLabels = {"Camera Hotspot", "Home Wi-Fi", "Stop Networking"};
-            String[] cValues = { "Press ENTER", "Press ENTER", "" };
+            // Use the live status variables instead of hardcoded "Press ENTER"
+            String[] cValues = { hotspotStatus, wifiStatus, "" };
             for (int i = 0; i < 3; i++) { 
                 menuLabels[i].setText(cLabels[i]); 
                 menuValues[i].setText(cValues[i]); 
@@ -1125,7 +1140,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         batteryArea.addView(tvBattery);
         
         batteryIcon = new BatteryView(this); 
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); 
+        // Increased from (45, 22) to (80, 35) to prevent cutoff
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(80, 35)); 
         rightBar.addView(batteryArea);
         
         tvReview = createSideTextIcon("▶"); 
@@ -1537,10 +1553,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override 
-    public void onStatusUpdate(String target, String status) { 
-        if (isMenuOpen && currentPage == 4) {
-            renderMenu(); 
-        }
+    public void onStatusUpdate(final String target, final String status) { 
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                // Determine which menu item gets the status update
+                if (menuSelection == 0) {
+                    hotspotStatus = status;
+                } else if (menuSelection == 1) {
+                    wifiStatus = status;
+                }
+                
+                if (isMenuOpen && currentPage == 4) {
+                    renderMenu(); 
+                }
+            }
+        });
     }
 
     private void enterPlayback() {

@@ -59,7 +59,7 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
     jint scaleDenom, jint opacity, jint grain, jint grainSize, 
-    jint vignette, jint rollOff) {
+    jint vignette, jint rollOff, jint jpegQuality) {
     
     long long start_time = get_time_ms();
     
@@ -175,7 +175,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     cinfo_c.input_components = 3; 
     cinfo_c.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo_c); 
-    jpeg_set_quality(&cinfo_c, 95, TRUE); 
+    jpeg_set_quality(&cinfo_c, jpegQuality, TRUE); 
     
     jpeg_start_compress(&cinfo_c, TRUE);
 

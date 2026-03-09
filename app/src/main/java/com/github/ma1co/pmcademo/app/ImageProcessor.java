@@ -81,7 +81,7 @@ public class ImageProcessor {
                 // 0=Proxy (4), 1=High (2), 2=Ultra (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20)) {
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, globalJpegQuality)) {
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
