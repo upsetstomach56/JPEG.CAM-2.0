@@ -1,88 +1,116 @@
 package com.github.ma1co.pmcademo.app;
 
-import android.os.FileObserver;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
 import java.io.File;
 
 public class SonyFileScanner {
-    private String dcimPath;
+    private String dcimRoot;
     private ScannerCallback mCallback;
-    private SonyFileObserver mFileObserver;
+    private String lastSeenFilePath = "";
+    
+    private Handler pollHandler;
+    private Runnable pollRunnable;
     private boolean isPolling = false;
-    private long lastNewestFileTime = 0;
 
-    // The Bridge back to MainActivity
     public interface ScannerCallback {
         void onNewPhotoDetected(String filePath);
         boolean isReadyToProcess(); 
     }
 
     public SonyFileScanner(String path, ScannerCallback callback) {
-        this.dcimPath = path;
+        File f = new File(path);
+        this.dcimRoot = (f.getParent() != null) ? f.getParent() : path;
         this.mCallback = callback;
-        this.mFileObserver = new SonyFileObserver(dcimPath);
+        
+        Log.d("filmOS", "SonyFileScanner initialized. DCIM Root: " + dcimRoot);
+        
+        // Find baseline without triggering callback
+        findNewestFile(false); 
+        
+        // Setup hybrid fallback polling (1-second intervals)
+        pollHandler = new Handler(Looper.getMainLooper());
+        pollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (isPolling) {
+                    findNewestFile(true);
+                    pollHandler.postDelayed(this, 1000);
+                }
+            }
+        };
+        start();
     }
 
     public void start() {
-        mFileObserver.startWatching();
-        startPolling();
+        if (!isPolling) {
+            Log.d("filmOS", "Starting file scanner polling loop...");
+            isPolling = true;
+            pollHandler.post(pollRunnable);
+        }
     }
 
     public void stop() {
-        mFileObserver.stopWatching();
+        Log.d("filmOS", "Stopping file scanner polling loop.");
         isPolling = false;
+        pollHandler.removeCallbacks(pollRunnable);
     }
 
-    private class SonyFileObserver extends FileObserver {
-        public SonyFileObserver(String path) {
-            super(path, FileObserver.CLOSE_WRITE);
-        }
-
-        @Override
-        public void onEvent(int event, final String path) {
-            if (path == null || !mCallback.isReadyToProcess()) return;
-            if (path.toUpperCase().endsWith(".JPG") && !path.startsWith("PRCS") && !path.startsWith("GRADED")) {
-                mCallback.onNewPhotoDetected(dcimPath + "/" + path);
-            }
-        }
+    public void checkNow() {
+        Log.d("filmOS", "Hardware Broadcast caught! Forcing immediate check...");
+        findNewestFile(true);
     }
 
-    private void startPolling() {
-        isPolling = true;
-        new Thread(new Runnable() {
-            @Override 
-            public void run() {
-                while (isPolling) {
-                    try {
-                        Thread.sleep(150); 
-                        File sonyDir = new File(dcimPath);
-                        if (sonyDir.exists()) {
-                            File[] files = sonyDir.listFiles();
-                            if (files != null && files.length > 0) {
-                                File newest = null; 
-                                long maxModified = 0;
-                                for (File f : files) {
-                                    if (f.getName().toUpperCase().endsWith(".JPG") && !f.getName().startsWith("PRCS") && !f.getName().startsWith("GRADED")) {
-                                        if (f.lastModified() > maxModified) { 
-                                            maxModified = f.lastModified(); 
-                                            newest = f; 
-                                        }
-                                    }
-                                }
-                                if (newest != null) {
-                                    if (lastNewestFileTime == 0) { 
-                                        lastNewestFileTime = maxModified; 
-                                    } else if (maxModified > lastNewestFileTime) {
-                                        lastNewestFileTime = maxModified;
-                                        if (mCallback.isReadyToProcess()) {
-                                            mCallback.onNewPhotoDetected(newest.getAbsolutePath());
-                                        }
-                                    }
+    private void findNewestFile(boolean triggerCallback) {
+        File dcimDir = new File(dcimRoot);
+        if (!dcimDir.exists() || !dcimDir.isDirectory()) {
+            if (triggerCallback) Log.e("filmOS", "DCIM directory not found: " + dcimRoot);
+            return;
+        }
+
+        File newestFile = null;
+        long maxModified = 0;
+
+        File[] subDirs = dcimDir.listFiles();
+        if (subDirs != null) {
+            for (File dir : subDirs) {
+                if (dir.isDirectory() && dir.getName().toUpperCase().endsWith("MSDCF")) {
+                    File[] files = dir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            String name = f.getName().toUpperCase();
+                            // Look for original Sony JPEGs (Ignore our FILM_ outputs and temp files)
+                            if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS") && !name.startsWith("temp_")) {
+                                if (f.lastModified() > maxModified) {
+                                    maxModified = f.lastModified();
+                                    newestFile = f;
                                 }
                             }
                         }
-                    } catch (Exception e) {}
+                    }
                 }
             }
-        }).start();
+        }
+
+        if (newestFile != null) {
+            String currentPath = newestFile.getAbsolutePath();
+            if (!currentPath.equals(lastSeenFilePath)) {
+                Log.d("filmOS", "NEW FILE DETECTED: " + currentPath);
+                lastSeenFilePath = currentPath;
+                
+                if (triggerCallback && mCallback != null) {
+                    boolean isReady = mCallback.isReadyToProcess();
+                    Log.d("filmOS", "isReadyToProcess() evaluated to: " + isReady);
+                    
+                    if (isReady) {
+                        Log.d("filmOS", "Firing onNewPhotoDetected callback!");
+                        mCallback.onNewPhotoDetected(currentPath);
+                    } else {
+                        Log.w("filmOS", "Engine blocked processing. (Either LUT is 0/OFF or processor is not initialized).");
+                    }
+                }
+            }
+        }
     }
 }

@@ -7,10 +7,7 @@ public class LutEngine {
     private String currentLutName = "";
     
     private native boolean loadLutNative(String filePath);
-    // Added grainSize to the JNI bridge
-    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff);
-
-    public String getCurrentLutName() { return currentLutName; }
+    private native boolean processImageNative(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff, int jpegQuality);
 
     public boolean loadLut(File cubeFile, String lutName) {
         if (lutName.equals(currentLutName)) return true;
@@ -20,7 +17,7 @@ public class LutEngine {
         return false;
     }
 
-    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff) {
-        return processImageNative(inPath, outPath, scaleDenom, opacity, grain, grainSize, vignette, rollOff);
+    public boolean applyLutToJpeg(String inPath, String outPath, int scaleDenom, int opacity, int grain, int grainSize, int vignette, int rollOff, int jpegQuality) {
+        return processImageNative(inPath, outPath, scaleDenom, opacity, grain, grainSize, vignette, rollOff, jpegQuality);
     }
 }
