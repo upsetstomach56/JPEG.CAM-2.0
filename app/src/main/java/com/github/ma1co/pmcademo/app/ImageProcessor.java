@@ -28,7 +28,7 @@ public class ImageProcessor {
     }
 
     public void processJpeg(String inPath, String outDir, int qualityIndex, RTLProfile profile) {
-        new ProcessTask(inPath, outDir, qualityIndex, profile).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        new ProcessTask(inPath, outDir, qualityIndex, profile).execute();
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
