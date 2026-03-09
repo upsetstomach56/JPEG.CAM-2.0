@@ -16,19 +16,15 @@ public class SonyFileScanner {
         File f = new File(path);
         this.dcimRoot = (f.getParent() != null) ? f.getParent() : path;
         this.mCallback = callback;
-        // Baseline to prevent processing old images on app start
         findNewestFile(false); 
     }
 
     public void start() {
-        // No-op for the new signal-based scanner
     }
 
     public void stop() {
-        // No-op for the new signal-based scanner
     }
 
-    // Triggered by the Sony Broadcast Signal
     public void checkNow() {
         findNewestFile(true);
     }

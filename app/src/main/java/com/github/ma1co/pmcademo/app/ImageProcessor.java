@@ -95,31 +95,31 @@ public class ImageProcessor {
             int scaleDenom = 1;
             boolean usedThumbnail = false;
 
-            // THUMBNAIL OPTIMIZATION: For Proxy Quality, rip the 2MP JPEG directly from EXIF
+            // THUMBNAIL OPTIMIZATION: For Proxy quality, rip the 2MP thumbnail directly from EXIF
             if (qualityIndex == 0) {
                 try {
                     ExifInterface exif = new ExifInterface(inPath);
                     byte[] thumb = exif.getThumbnail();
                     if (thumb != null && thumb.length > 0) {
-                        File temp = new File(outDir, "temp_proxy.jpg");
+                        File temp = new File(outDir, "temp_rip.jpg");
                         FileOutputStream fos = new FileOutputStream(temp);
                         fos.write(thumb);
                         fos.close();
                         fileToProcess = temp.getAbsolutePath();
                         usedThumbnail = true;
                     } else {
-                        scaleDenom = 4; // Fallback
+                        scaleDenom = 4;
                     }
                 } catch (Exception e) {
                     scaleDenom = 4;
                 }
             } else if (qualityIndex == 1) {
-                scaleDenom = 2; // HIGH: 6MP
+                scaleDenom = 2; // HIGH: ~6MP
             } else {
-                scaleDenom = 1; // ULTRA: 24MP
+                scaleDenom = 1; // ULTRA: Full 24MP resolution
             }
 
-            // Execute Native NEON Image Processing
+            // Route to C++ NEON native layer
             boolean success = LutEngine.processImageNative(
                     fileToProcess,
                     finalOutPath,
@@ -131,12 +131,13 @@ public class ImageProcessor {
                     profile.rollOff
             );
 
+            // Cleanup temp file if used
             if (usedThumbnail) {
                 new File(fileToProcess).delete();
             }
 
             if (success) {
-                // EXIF RESTORATION: Copy metadata back so the Sony Playback Database accepts the file
+                // EXIF RESTORATION: Copy essential metadata from original to processed file
                 try {
                     ExifInterface oldExif = new ExifInterface(inPath);
                     ExifInterface newExif = new ExifInterface(finalOutPath);
@@ -144,10 +145,11 @@ public class ImageProcessor {
                         ExifInterface.TAG_ORIENTATION, 
                         ExifInterface.TAG_DATETIME, 
                         ExifInterface.TAG_MAKE, 
-                        ExifInterface.TAG_MODEL, 
+                        ExifInterface.TAG_MODEL,
                         "FNumber", 
                         "ExposureTime", 
-                        "ISOSpeedRatings"
+                        "ISOSpeedRatings",
+                        "FocalLength"
                     };
                     for (String t : tags) {
                         String v = oldExif.getAttribute(t);
@@ -156,7 +158,7 @@ public class ImageProcessor {
                     newExif.saveAttributes();
                 } catch (Exception e) {}
 
-                // Tell the Sony Avindex that a new graded file exists
+                // CRITICAL: Notify the Sony Avindex (Playback Database) that a new file exists
                 mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(new File(finalOutPath))));
                 return finalOutPath;
             } else {
