@@ -6,7 +6,6 @@
 #include <setjmp.h>
 #include <math.h>
 #include <sys/time.h>
-#include <arm_neon.h>
 #include "jpeglib.h"
 #include <android/log.h>
 
@@ -80,11 +79,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     int finalScale = scaleDenom;
 
     // --- 1. EXIF & DIMENSION SNIPER ---
-    unsigned char* header = (unsigned char*)malloc(1048576); // 1MB scan window
+    unsigned char* header = (unsigned char*)malloc(1048576); 
     if (header) {
         int readLen = fread(header, 1, 1048576, infile);
         
-        // A. Rip the EXIF safely
         for (int i = 0; i < readLen - 8; i++) {
             if (header[i] == 0xFF && header[i+1] == 0xE1) {
                 if (header[i+4] == 'E' && header[i+5] == 'x' && header[i+6] == 'i' && header[i+7] == 'f') {
@@ -97,29 +95,25 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
             }
         }
 
-        // B. Dimension Sniper for Proxy Mode
         if (scaleDenom == 4) {
-            // Start at 1000 to skip the main 24MP Start-Of-Image
             for (int i = 1000; i < readLen - 10; i++) {
                 if (header[i] == 0xFF && header[i+1] == 0xD8) {
-                    // Found an embedded SOI. Now scan forward for its Start-Of-Frame (FF C0)
                     for (int j = i + 2; j < i + 65536 && j < readLen - 10; j++) {
                         if (header[j] == 0xFF && header[j+1] == 0xC0) {
                             int height = (header[j+5] << 8) | header[j+6];
                             int width  = (header[j+7] << 8) | header[j+8];
                             
-                            // Target lock: Width between 1000 and 2000 pixels (1.5MP to 2MP)
                             if (width >= 1000 && width <= 2000) { 
                                 targetOffset = i;
-                                finalScale = 1; // It's already the right size
+                                finalScale = 1; 
                                 LOGD("Sniper locked on proxy at offset %d: %dx%d", i, width, height);
                                 break;
                             }
-                            break; // Stop looking for SOF for this SOI, move to next
+                            break;
                         }
                     }
                 }
-                if (finalScale == 1) break; // Break outer loop if found
+                if (finalScale == 1) break; 
             }
         }
         free(header);
@@ -206,7 +200,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JSAMPROW row_pointer[1];
     uint32_t master_seed = 98765;
 
-    // --- 4. PROCESSING LOOP (SCALAR + NEON) ---
+    // --- 4. PROCESSING LOOP (SCALAR O3) ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
@@ -214,65 +208,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         uint32_t seed = master_seed + (abs_y * 1337); 
         int prev_noise = 0; 
 
-        int x = 0;
-
-        // NEON FAST PATH: 8 Pixels (24 bytes) at a time for pure LUT processing
-        if (nativeLutSize > 0 && grain == 0 && vignette == 0 && rollOff == 0) {
-            for (; x <= row_stride - 24; x += 24) {
-                uint8x8x3_t v_rgb = vld3_u8(&row_buf[x]); 
-                uint8_t r_arr[8], g_arr[8], b_arr[8];
-                
-                vst1_u8(r_arr, v_rgb.val[0]);
-                vst1_u8(g_arr, v_rgb.val[1]);
-                vst1_u8(b_arr, v_rgb.val[2]);
-
-                for(int p = 0; p < 8; ++p) {
-                    int r = r_arr[p], g = g_arr[p], b = b_arr[p];
-                    int fX = map[r], fY = map[g], fZ = map[b];
-                    int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
-                    int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
-                    int y1 = (y0 < lutMax) ? y0 + 1 : lutMax;
-                    int z1 = (z0 < lutMax) ? z0 + 1 : lutMax;
-                    int dx = fX & 0x7F, dy_l = fY & 0x7F, dz = fZ & 0x7F;
-                    int v1, v2, w0, w1, w2, w3;
-                    
-                    if (dx >= dy_l) {
-                        if (dy_l >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dx; w1=dx-dy_l; w2=dy_l-dz; w3=dz; } 
-                        else if (dx >= dz) { v1=x1+y0*nativeLutSize+z0*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dx; w1=dx-dz; w2=dz-dy_l; w3=dy_l; } 
-                        else { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x1+y0*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dx; w2=dx-dy_l; w3=dy_l; }
-                    } else {
-                        if (dz >= dy_l) { v1=x0+y0*nativeLutSize+z1*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dz; w1=dz-dy_l; w2=dy_l-dx; w3=dx; } 
-                        else if (dz >= dx) { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x0+y1*nativeLutSize+z1*lutSize2; w0=128-dy_l; w1=dy_l-dz; w2=dz-dx; w3=dx; } 
-                        else { v1=x0+y1*nativeLutSize+z0*lutSize2; v2=x1+y1*nativeLutSize+z0*lutSize2; w0=128-dy_l; w1=dy_l-dx; w2=dx-dz; w3=dz; }
-                    }
-                    
-                    const uint8_t* p0 = &nativeLut[(x0 + y0*nativeLutSize + z0*lutSize2)*3];
-                    const uint8_t* p1 = &nativeLut[v1*3];
-                    const uint8_t* p2 = &nativeLut[v2*3];
-                    const uint8_t* p3 = &nativeLut[(x1 + y1*nativeLutSize + z1*lutSize2)*3];
-                    
-                    int lR = (p0[0]*w0 + p1[0]*w1 + p2[0]*w2 + p3[0]*w3) >> 7;
-                    int lG = (p0[1]*w0 + p1[1]*w1 + p2[1]*w2 + p3[1]*w3) >> 7;
-                    int lB = (p0[2]*w0 + p1[2]*w1 + p2[2]*w2 + p3[2]*w3) >> 7;
-
-                    int outR = r + (((lR - r) * opac_mapped) >> 8);
-                    int outG = g + (((lG - g) * opac_mapped) >> 8);
-                    int outB = b + (((lB - b) * opac_mapped) >> 8);
-
-                    r_arr[p] = (uint8_t)(outR<0?0:outR>255?255:outR);
-                    g_arr[p] = (uint8_t)(outG<0?0:outG>255?255:outG);
-                    b_arr[p] = (uint8_t)(outB<0?0:outB>255?255:outB);
-                }
-
-                v_rgb.val[0] = vld1_u8(r_arr);
-                v_rgb.val[1] = vld1_u8(g_arr);
-                v_rgb.val[2] = vld1_u8(b_arr);
-                vst3_u8(&row_buf[x], v_rgb);
-            }
-        }
-
-        // SCALAR FALLBACK (For edge pixels, or Grain/Vignette/RollOff)
-        for (; x < row_stride; x += 3) {
+        for (int x = 0; x < row_stride; x += 3) {
             int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
             int outR = r, outG = g, outB = b;
 

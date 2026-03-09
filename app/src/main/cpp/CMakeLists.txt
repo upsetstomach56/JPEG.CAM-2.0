@@ -6,8 +6,8 @@ set(ENABLE_EXECUTABLES OFF CACHE BOOL "" FORCE)
 set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(WITH_JPEG8 ON CACHE BOOL "" FORCE)
 
-# PERFORMANCE FIX: Enable SIMD for libjpeg-turbo on ARMv7
-set(WITH_SIMD ON CACHE BOOL "" FORCE)
+# HARDWARE FIX: Disable SIMD since the BIONZ X lacks the NEON silicon module
+set(WITH_SIMD OFF CACHE BOOL "" FORCE)
 
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -23,9 +23,9 @@ target_include_directories(native-lib PRIVATE
 
 set_target_properties(native-lib PROPERTIES LINK_FLAGS "-Wl,-Bsymbolic -Wl,--exclude-libs,ALL")
 
-# HYBRID SPEED FIX: Force max optimization, hardware NEON, and fast math
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mfpu=neon -ffast-math")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -mfpu=neon -ffast-math")
+# SPEED FIX: Max optimization and fast math (No NEON overrides)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -ffast-math")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -ffast-math")
 
 find_library(log-lib log)
 target_link_libraries(native-lib jpeg-static ${log-lib})
