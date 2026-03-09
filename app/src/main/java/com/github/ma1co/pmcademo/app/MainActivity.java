@@ -293,6 +293,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         triggerLutPreload();
     }
     private void processWhenFileReady(final String path) {
+        Log.d("filmOS", "--> processWhenFileReady triggered for: " + path);
         isProcessing = true; 
         runOnUiThread(new Runnable() { 
             public void run() { 
@@ -312,7 +313,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override
             public void run() {
                 long currentSize = f.length();
+                Log.d("filmOS", "Checker loop " + retries[0] + ": file size = " + currentSize);
+
                 if (currentSize > 0 && currentSize == lastSize[0]) {
+                    Log.d("filmOS", "File stabilized at " + currentSize + " bytes. Firing ImageProcessor!");
                     File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
                     mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), recipeManager.getCurrentProfile());
                 } else if (retries[0] < 30) { 
@@ -320,6 +324,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     retries[0]++;
                     uiHandler.postDelayed(this, 300);
                 } else {
+                    Log.e("filmOS", "Checker timed out! File never stabilized or stayed 0 bytes.");
                     isProcessing = false;
                     updateMainHUD();
                 }

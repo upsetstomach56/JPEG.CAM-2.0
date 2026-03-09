@@ -5,6 +5,8 @@ import android.content.Intent;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.util.Log;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
@@ -29,10 +31,12 @@ public class ImageProcessor {
     }
 
     public void triggerLutPreload(String lutPath, String name) {
+        Log.d("filmOS", "ImageProcessor: Triggering LUT Preload for " + name);
         new PreloadLutTask().execute(lutPath);
     }
 
     public void processJpeg(String inPath, String outDir, int qualityIndex, RTLProfile profile) {
+        Log.d("filmOS", "ImageProcessor.processJpeg called! Queuing AsyncTask...");
         new ProcessTask(inPath, outDir, qualityIndex, profile).execute();
     }
 
@@ -50,11 +54,13 @@ public class ImageProcessor {
             if (path == null || path.equals("NONE")) {
                 return false;
             }
+            Log.d("filmOS", "PreloadLutTask.doInBackground running natively...");
             return LutEngine.loadLut(path);
         }
 
         @Override
         protected void onPostExecute(Boolean success) {
+            Log.d("filmOS", "PreloadLutTask finished. Success: " + success);
             if (mCallback != null) {
                 mCallback.onPreloadFinished(success);
             }
@@ -76,6 +82,7 @@ public class ImageProcessor {
 
         @Override
         protected void onPreExecute() {
+            Log.d("filmOS", "ProcessTask.onPreExecute running on UI thread. Setting to PROCESSING...");
             if (mCallback != null) {
                 mCallback.onProcessStarted();
             }
@@ -83,6 +90,8 @@ public class ImageProcessor {
 
         @Override
         protected String doInBackground(Void... voids) {
+            Log.d("filmOS", "ProcessTask.doInBackground started on worker thread!");
+            
             File dir = new File(outDir);
             if (!dir.exists()) {
                 dir.mkdirs();
@@ -98,6 +107,7 @@ public class ImageProcessor {
             // THUMBNAIL OPTIMIZATION: For Proxy quality, rip the 2MP thumbnail directly from EXIF
             if (qualityIndex == 0) {
                 try {
+                    Log.d("filmOS", "Attempting to rip EXIF thumbnail for Proxy quality...");
                     ExifInterface exif = new ExifInterface(inPath);
                     byte[] thumb = exif.getThumbnail();
                     if (thumb != null && thumb.length > 0) {
@@ -107,10 +117,13 @@ public class ImageProcessor {
                         fos.close();
                         fileToProcess = temp.getAbsolutePath();
                         usedThumbnail = true;
+                        Log.d("filmOS", "EXIF thumbnail extracted successfully.");
                     } else {
+                        Log.w("filmOS", "No EXIF thumbnail found, falling back to full image scaleDown=4.");
                         scaleDenom = 4;
                     }
                 } catch (Exception e) {
+                    Log.e("filmOS", "Failed to rip thumbnail: " + e.getMessage());
                     scaleDenom = 4;
                 }
             } else if (qualityIndex == 1) {
@@ -119,6 +132,7 @@ public class ImageProcessor {
                 scaleDenom = 1; // ULTRA: Full 24MP resolution
             }
 
+            Log.d("filmOS", "Calling LutEngine.processImageNative...");
             // Route to C++ NEON native layer
             boolean success = LutEngine.processImageNative(
                     fileToProcess,
@@ -130,6 +144,8 @@ public class ImageProcessor {
                     profile.vignette,
                     profile.rollOff
             );
+            
+            Log.d("filmOS", "LutEngine.processImageNative returned: " + success);
 
             // Cleanup temp file if used
             if (usedThumbnail) {
@@ -139,6 +155,7 @@ public class ImageProcessor {
             if (success) {
                 // EXIF RESTORATION: Copy essential metadata from original to processed file
                 try {
+                    Log.d("filmOS", "Restoring EXIF data...");
                     ExifInterface oldExif = new ExifInterface(inPath);
                     ExifInterface newExif = new ExifInterface(finalOutPath);
                     String[] tags = {
@@ -156,12 +173,16 @@ public class ImageProcessor {
                         if (v != null) newExif.setAttribute(t, v);
                     }
                     newExif.saveAttributes();
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    Log.e("filmOS", "Failed to restore EXIF: " + e.getMessage());
+                }
 
                 // CRITICAL: Notify the Sony Avindex (Playback Database) that a new file exists
+                Log.d("filmOS", "Sending MEDIA_SCANNER broadcast for " + finalOutPath);
                 mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(new File(finalOutPath))));
                 return finalOutPath;
             } else {
+                Log.e("filmOS", "Processing failed, deleting output file if it exists.");
                 File f = new File(finalOutPath);
                 if (f.exists()) f.delete();
                 return null;
@@ -170,6 +191,7 @@ public class ImageProcessor {
 
         @Override
         protected void onPostExecute(String resultPath) {
+            Log.d("filmOS", "ProcessTask.onPostExecute completed. Result: " + resultPath);
             if (mCallback != null) {
                 mCallback.onProcessFinished(resultPath);
             }
