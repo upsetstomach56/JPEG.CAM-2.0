@@ -95,6 +95,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95; // <-- ADD THIS LINE
+
+    / --- LENS MAPPER VARIABLES ---
+    private LensProfileManager lensManager;
+    private int currentLensSlot = 1;
+    private boolean isCalibrating = false;
+    private List<LensProfileManager.CalPoint> tempCalPoints = new ArrayList<LensProfileManager.CalPoint>();
+    
+    // The strict linear steps: Min, 1m, 3m, Infinity
+    private int calibStep = 0;
+    private float[] wizardDistances = {0.3f, 1.0f, 3.0f, 999.0f}; // 0.3m represents "Min Focus"
+    private String[] wizardLabels = {"MINIMUM FOCUS", "1.0 METER", "3.0 METERS", "INFINITY"};
     
     private boolean cachedIsManualFocus = false;
     private float cachedAperture = 2.8f;
@@ -213,6 +224,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         inputManager = new InputManager(this);
         recipeManager = new RecipeManager();
         connectivityManager = new ConnectivityManager(this, this);
+
+        lensManager = new LensProfileManager(this);
+        lensManager.loadProfile("Lens 1"); // Load Slot 1 on boot
         
         recipeManager.loadPreferences();
         
@@ -503,10 +517,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // 1. WIZARD PROGRESSION: Log the point and move to the next step
+        if (isCalibrating) {
+            tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, wizardDistances[calibStep]));
+            calibStep++;
+            
+            if (calibStep >= wizardDistances.length) {
+                // Finished! Save the profile and close the wizard.
+                lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
+                isCalibrating = false;
+                tvCalibrationPrompt.setVisibility(View.GONE);
+                setHUDVisibility(View.VISIBLE);
+            } else {
+                // Show the next step
+                updateCalibrationUI();
+            }
+            return;
+        }
+
+        // 2. NORMAL BEHAVIOR & STARTING THE WIZARD
         if (!isMenuOpen) {
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
+            } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
+                // START CALIBRATION!
+                isCalibrating = true;
+                tempCalPoints.clear();
+                calibStep = 0; 
+                setHUDVisibility(View.GONE); 
+                tvCalibrationPrompt.setVisibility(View.VISIBLE);
+                updateCalibrationUI();
             } else {
+                // Normal HUD Toggle
                 displayState = (displayState == 0) ? 1 : 0; 
                 mainUIContainer.setVisibility(displayState == 0 ? View.VISIBLE : View.GONE);
             }
@@ -869,15 +911,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         }
         else if (mDialMode == DIAL_MODE_FOCUS) {
-            List<String> focusModes = p.getSupportedFocusModes();
-            if (focusModes != null && !focusModes.isEmpty()) {
-                int idx = focusModes.indexOf(p.getFocusMode());
-                p.setFocusMode(focusModes.get((idx + d + focusModes.size()) % focusModes.size()));
-                try { 
-                    c.setParameters(p); 
-                } catch (Exception e) {
+            List<String> hwModes = p.getSupportedFocusModes();
+            List<String> virtualModes = new ArrayList<String>();
+            
+            // Build a virtual list injecting our 3 memory slots
+            if (hwModes != null) {
+                for (String m : hwModes) {
+                    if (m.equals("manual")) {
+                        virtualModes.add("manual_1");
+                        virtualModes.add("manual_2");
+                        virtualModes.add("manual_3");
+                    } else {
+                        virtualModes.add(m);
+                    }
                 }
             }
+            
+            // Find where we currently are
+            String currentVirtual = p.getFocusMode();
+            if ("manual".equals(currentVirtual)) {
+                currentVirtual = "manual_" + currentLensSlot;
+            }
+            
+            int idx = virtualModes.indexOf(currentVirtual);
+            if (idx == -1) idx = 0;
+            
+            // Advance the dial
+            String nextVirtual = virtualModes.get((idx + d + virtualModes.size()) % virtualModes.size());
+            
+            // Apply it to the hardware
+            if (nextVirtual.startsWith("manual_")) {
+                currentLensSlot = Integer.parseInt(nextVirtual.replace("manual_", ""));
+                p.setFocusMode("manual");
+                if (lensManager != null) lensManager.loadProfile("Lens " + currentLensSlot);
+            } else {
+                p.setFocusMode(nextVirtual);
+            }
+            
+            try { 
+                c.setParameters(p); 
+            } catch (Exception e) {}
         }
         
         updateMainHUD();
@@ -1200,6 +1273,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         afOverlay = new ProReticleView(this); 
         mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
         
+        // --- CALIBRATION WIZARD UI ---
+        tvCalibrationPrompt = new TextView(this); 
+        tvCalibrationPrompt.setTextColor(Color.YELLOW); 
+        tvCalibrationPrompt.setTextSize(22); 
+        tvCalibrationPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        tvCalibrationPrompt.setGravity(Gravity.CENTER); 
+        tvCalibrationPrompt.setShadowLayer(4, 0, 0, Color.BLACK); 
+        tvCalibrationPrompt.setBackgroundColor(Color.argb(200, 15, 15, 15));
+        tvCalibrationPrompt.setPadding(30, 30, 30, 30);
+        tvCalibrationPrompt.setVisibility(View.GONE);
+        
+        FrameLayout.LayoutParams cpParams = new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER); 
+        mainUIContainer.addView(tvCalibrationPrompt, cpParams);
+
         menuContainer = new LinearLayout(this); 
         menuContainer.setOrientation(LinearLayout.VERTICAL); 
         menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
@@ -1398,6 +1485,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    private void updateCalibrationUI() {
+        if (!isCalibrating) return;
+        
+        tvCalibrationPrompt.setText("LENS CALIBRATION (SLOT " + currentLensSlot + ")\n\n" +
+                "Step " + (calibStep + 1) + " of 4\n" +
+                "Turn ring to focus at:\n\n" + 
+                "-->  " + wizardLabels[calibStep] + "  <--\n\n" +
+                "Press [ENTER] to save.");
+    }
+    
     private void updateMainHUD() {
         if (cameraManager == null) {
             return;
@@ -1477,7 +1574,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if ("auto".equals(fm)) {
                 tvFocusMode.setText("AF-S"); 
             } else if (cachedIsManualFocus) {
-                tvFocusMode.setText("MF"); 
+                tvFocusMode.setText("MF (L" + currentLensSlot + ")"); 
             } else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) {
                 tvFocusMode.setText("AF-C"); 
             } else {
