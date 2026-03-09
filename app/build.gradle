@@ -38,6 +38,8 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // THE FIX: Sign the Release build with the default developer key so the camera accepts it!
+            signingConfig signingConfigs.debug
         }
     }
     
