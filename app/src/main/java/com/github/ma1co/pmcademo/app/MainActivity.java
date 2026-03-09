@@ -67,9 +67,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView tvFocusMode;
     private TextView tvReview;
     private TextView tvPlaybackInfo;
-    private TextView tvMenuTitle;
     
-    private TextView[] tvPageNumbers = new TextView[4];
+    // Tabbed Menu Headers
+    private TextView tvTabRTL;
+    private TextView tvTabSettings;
+    private TextView tvTabNetwork;
+    private TextView tvMenuSubtitle;
+    
     private LinearLayout[] menuRows = new LinearLayout[7];
     private TextView[] menuLabels = new TextView[7];
     private TextView[] menuValues = new TextView[7];
@@ -92,8 +96,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private boolean cachedIsManualFocus = false;
     private float cachedAperture = 2.8f;
+    
+    // Menu State
     private boolean isMenuEditing = false;
-    private int currentPage = 1;
+    private int currentMainTab = 0; // 0 = RTL, 1 = SETTINGS, 2 = NETWORK
+    private int currentPage = 1;    // 1 = RTL Base, 2 = RTL Color, 3 = Settings, 4 = Network
     private int menuSelection = 0;
     private int currentItemCount = 0;
     private String savedFocusMode = null;
@@ -418,6 +425,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             
             refreshRecipes();
+            currentMainTab = 0;
             currentPage = 1; 
             menuSelection = 0; 
             isMenuEditing = false;
@@ -492,9 +500,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (isMenuEditing) {
                 handleMenuChange(1);
             } else {
-                menuSelection--; 
+                menuSelection--;
                 if (menuSelection < 0) {
-                    menuSelection = currentItemCount - 1; 
+                    if (currentMainTab == 0 && currentPage == 2) {
+                        currentPage = 1;
+                        menuSelection = 6; // Wrap to bottom of Base page
+                    } else {
+                        menuSelection = currentItemCount - 1; 
+                    }
                 }
                 renderMenu();
             }
@@ -513,9 +526,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (isMenuEditing) {
                 handleMenuChange(-1);
             } else {
-                menuSelection++; 
+                menuSelection++;
                 if (menuSelection >= currentItemCount) {
-                    menuSelection = 0; 
+                    if (currentMainTab == 0 && currentPage == 1) {
+                        currentPage = 2;
+                        menuSelection = 0; // Wrap to top of Color/Tone page
+                    } else {
+                        menuSelection = 0;
+                    }
                 }
                 renderMenu();
             }
@@ -532,7 +550,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (isMenuEditing) {
                 handleMenuChange(-1);
             } else {
-                currentPage = (currentPage == 1) ? 4 : currentPage - 1; 
+                currentMainTab = Math.max(0, currentMainTab - 1);
+                if (currentMainTab == 0) currentPage = 1;
+                if (currentMainTab == 1) currentPage = 3;
+                if (currentMainTab == 2) currentPage = 4;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -549,7 +570,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (isMenuEditing) {
                 handleMenuChange(1);
             } else {
-                currentPage = (currentPage == 4) ? 1 : currentPage + 1; 
+                currentMainTab = Math.min(2, currentMainTab + 1);
+                if (currentMainTab == 0) currentPage = 1;
+                if (currentMainTab == 1) currentPage = 3;
+                if (currentMainTab == 2) currentPage = 4;
                 menuSelection = 0; 
                 renderMenu();
             }
@@ -567,12 +591,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleMenuChange(direction);
             } else {
                 if (direction > 0) {
-                    currentPage = (currentPage == 4) ? 1 : currentPage + 1; 
+                    onDownPressed();
                 } else {
-                    currentPage = (currentPage == 1) ? 4 : currentPage - 1; 
+                    onUpPressed();
                 }
-                menuSelection = 0; 
-                renderMenu();
             }
         } else if (!isProcessing) {
             handleHardwareInput(direction); 
@@ -582,68 +604,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void navigateHomeSpatial(int keyCode) {
         switch (mDialMode) {
             case DIAL_MODE_SHUTTER:
-                if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_APERTURE;
-                } else if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_FOCUS;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_APERTURE;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_FOCUS;
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS; 
                 break;
             case DIAL_MODE_APERTURE:
-                if (keyCode == ScalarInput.ISV_KEY_LEFT) {
-                    mDialMode = DIAL_MODE_SHUTTER;
-                } else if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_ISO;
-                } else if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_FOCUS;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_ISO;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_PASM; 
                 break;
             case DIAL_MODE_ISO:
-                if (keyCode == ScalarInput.ISV_KEY_LEFT) {
-                    mDialMode = DIAL_MODE_APERTURE;
-                } else if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_EXPOSURE;
-                } else if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_REVIEW; 
-                }
+                if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_APERTURE;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_EXPOSURE;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_REVIEW; 
                 break;
             case DIAL_MODE_EXPOSURE:
-                if (keyCode == ScalarInput.ISV_KEY_LEFT) {
-                    mDialMode = DIAL_MODE_ISO;
-                } else if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_REVIEW;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_ISO;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_REVIEW;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_REVIEW; 
                 break;
             case DIAL_MODE_REVIEW: 
-                if (keyCode == ScalarInput.ISV_KEY_DOWN) {
-                    mDialMode = DIAL_MODE_EXPOSURE;
-                } else if (keyCode == ScalarInput.ISV_KEY_LEFT) {
-                    mDialMode = DIAL_MODE_RTL;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_EXPOSURE;
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_RTL;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_EXPOSURE; 
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_RTL; 
                 break;
             case DIAL_MODE_RTL: 
-                if (keyCode == ScalarInput.ISV_KEY_DOWN) {
-                    mDialMode = DIAL_MODE_PASM;
-                } else if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_REVIEW;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_PASM;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_REVIEW;
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_PASM; 
                 break;
             case DIAL_MODE_PASM: 
-                if (keyCode == ScalarInput.ISV_KEY_DOWN) {
-                    mDialMode = DIAL_MODE_FOCUS;
-                } else if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_RTL;
-                } else if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_RTL;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_FOCUS;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_RTL;
+                else if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_RTL;
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_FOCUS; 
                 break;
             case DIAL_MODE_FOCUS: 
-                if (keyCode == ScalarInput.ISV_KEY_UP) {
-                    mDialMode = DIAL_MODE_PASM;
-                } else if (keyCode == ScalarInput.ISV_KEY_DOWN) {
-                    mDialMode = DIAL_MODE_SHUTTER;
-                } else if (keyCode == ScalarInput.ISV_KEY_RIGHT) {
-                    mDialMode = DIAL_MODE_RTL;
-                }
+                if (keyCode == ScalarInput.ISV_KEY_UP) mDialMode = DIAL_MODE_PASM;
+                else if (keyCode == ScalarInput.ISV_KEY_DOWN) mDialMode = DIAL_MODE_SHUTTER;
+                else if (keyCode == ScalarInput.ISV_KEY_RIGHT) mDialMode = DIAL_MODE_PASM; 
+                else if (keyCode == ScalarInput.ISV_KEY_LEFT) mDialMode = DIAL_MODE_SHUTTER; 
                 break;
         }
         updateMainHUD();
@@ -959,19 +960,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         }
         
-        if (currentPage == 1) {
-            tvMenuTitle.setText("1. RTL Base");
-        } else if (currentPage == 2) {
-            tvMenuTitle.setText("2. Color & Tone");
-        } else if (currentPage == 3) {
-            tvMenuTitle.setText("3. Global View");
-        } else {
-            tvMenuTitle.setText("4. Network");
-        }
+        tvTabRTL.setTextColor(currentMainTab == 0 ? Color.rgb(230, 50, 15) : Color.GRAY);
+        tvTabSettings.setTextColor(currentMainTab == 1 ? Color.rgb(230, 50, 15) : Color.GRAY);
+        tvTabNetwork.setTextColor(currentMainTab == 2 ? Color.rgb(230, 50, 15) : Color.GRAY);
         
-        for (int i = 0; i < 4; i++) {
-            boolean isCurPage = (currentPage == i + 1);
-            tvPageNumbers[i].setTextColor(isCurPage ? Color.rgb(230, 50, 15) : Color.WHITE);
+        if (currentPage == 1) {
+            tvMenuSubtitle.setText("RTL Base (Page 1/2)");
+        } else if (currentPage == 2) {
+            tvMenuSubtitle.setText("Color & Tone (Page 2/2)");
+        } else if (currentPage == 3) {
+            tvMenuSubtitle.setText("Global Settings");
+        } else {
+            tvMenuSubtitle.setText("Web Dashboard Server");
         }
 
         for (int i = 0; i < 7; i++) {
@@ -1064,6 +1064,206 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         currentItemCount = itemCount;
     }
 
+    private void buildUI(FrameLayout rootLayout) {
+        mainUIContainer = new FrameLayout(this); 
+        rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
+        
+        gridLines = new GridLinesView(this); 
+        mainUIContainer.addView(gridLines, new FrameLayout.LayoutParams(-1, -1));
+        
+        cinemaMattes = new CinemaMatteView(this); 
+        mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvTopStatus = new TextView(this); 
+        tvTopStatus.setTextColor(Color.WHITE); 
+        tvTopStatus.setTextSize(20); 
+        tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
+        tvTopStatus.setGravity(Gravity.CENTER); 
+        tvTopStatus.setShadowLayer(4, 0, 0, Color.BLACK);
+        
+        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
+        topParams.setMargins(0, 15, 0, 0); 
+        mainUIContainer.addView(tvTopStatus, topParams);
+        
+        LinearLayout rightBar = new LinearLayout(this); 
+        rightBar.setOrientation(LinearLayout.VERTICAL); 
+        rightBar.setGravity(Gravity.RIGHT);
+        
+        LinearLayout batteryArea = new LinearLayout(this); 
+        batteryArea.setOrientation(LinearLayout.HORIZONTAL); 
+        batteryArea.setGravity(Gravity.CENTER_VERTICAL);
+        
+        tvBattery = new TextView(this); 
+        tvBattery.setTextColor(Color.WHITE); 
+        tvBattery.setTextSize(18); 
+        tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
+        tvBattery.setPadding(0, 0, 10, 0); 
+        batteryArea.addView(tvBattery);
+        
+        batteryIcon = new BatteryView(this); 
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); 
+        rightBar.addView(batteryArea);
+        
+        tvReview = createSideTextIcon("▶"); 
+        LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2); 
+        rvParams.setMargins(0, 20, 0, 0); 
+        tvReview.setLayoutParams(rvParams); 
+        rightBar.addView(tvReview);
+        
+        FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
+        rightParams.setMargins(0, 20, 30, 0); 
+        mainUIContainer.addView(rightBar, rightParams);
+        
+        LinearLayout leftBar = new LinearLayout(this); 
+        leftBar.setOrientation(LinearLayout.VERTICAL); 
+        tvMode = createSideTextIcon("M"); 
+        leftBar.addView(tvMode); 
+        tvFocusMode = createSideTextIcon("AF-S"); 
+        leftBar.addView(tvFocusMode);
+        
+        FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT); 
+        leftParams.setMargins(20, 20, 0, 0); 
+        mainUIContainer.addView(leftBar, leftParams);
+        
+        focusMeter = new AdvancedFocusMeterView(this); 
+        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 80, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
+        fmParams.setMargins(0, 0, 0, 100); 
+        mainUIContainer.addView(focusMeter, fmParams);
+        
+        llBottomBar = new LinearLayout(this); 
+        llBottomBar.setOrientation(LinearLayout.HORIZONTAL); 
+        llBottomBar.setGravity(Gravity.CENTER); 
+        
+        tvValShutter = createBottomText(); 
+        tvValAperture = createBottomText(); 
+        tvValIso = createBottomText(); 
+        tvValEv = createBottomText();
+        
+        llBottomBar.addView(tvValShutter); 
+        llBottomBar.addView(tvValAperture); 
+        llBottomBar.addView(tvValIso); 
+        llBottomBar.addView(tvValEv);
+        
+        FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
+        botParams.setMargins(0, 0, 0, 25); 
+        mainUIContainer.addView(llBottomBar, botParams);
+        
+        afOverlay = new ProReticleView(this); 
+        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
+        
+        // --- NEW TABBED MENU UI ---
+        menuContainer = new LinearLayout(this); 
+        menuContainer.setOrientation(LinearLayout.VERTICAL); 
+        menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
+        menuContainer.setPadding(20, 20, 20, 20); 
+        
+        LinearLayout tabHeaderLayout = new LinearLayout(this);
+        tabHeaderLayout.setOrientation(LinearLayout.HORIZONTAL);
+        tabHeaderLayout.setGravity(Gravity.CENTER);
+        tabHeaderLayout.setPadding(0, 0, 0, 10);
+        
+        tvTabRTL = createTabHeader("[ RTL ]");
+        tvTabSettings = createTabHeader("[ SETTINGS ]");
+        tvTabNetwork = createTabHeader("[ NETWORK ]");
+        
+        tabHeaderLayout.addView(tvTabRTL);
+        tabHeaderLayout.addView(tvTabSettings);
+        tabHeaderLayout.addView(tvTabNetwork);
+        menuContainer.addView(tabHeaderLayout);
+        
+        tvMenuSubtitle = new TextView(this);
+        tvMenuSubtitle.setTextSize(18);
+        tvMenuSubtitle.setTextColor(Color.WHITE);
+        tvMenuSubtitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvMenuSubtitle.setPadding(10, 0, 0, 15);
+        menuContainer.addView(tvMenuSubtitle);
+        
+        View headerDivider = new View(this); 
+        headerDivider.setBackgroundColor(Color.GRAY); 
+        LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(-1, 2); 
+        divParams.setMargins(0, 0, 0, 15); 
+        menuContainer.addView(headerDivider, divParams);
+        
+        for (int i = 0; i < 7; i++) { 
+            menuRows[i] = new LinearLayout(this); 
+            menuRows[i].setOrientation(LinearLayout.HORIZONTAL); 
+            menuRows[i].setGravity(Gravity.CENTER_VERTICAL); 
+            menuRows[i].setPadding(10, 0, 10, 0); 
+            menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            
+            menuLabels[i] = new TextView(this); 
+            menuLabels[i].setTextSize(18); 
+            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD); 
+            
+            menuValues[i] = new TextView(this); 
+            menuValues[i].setTextSize(18); 
+            menuValues[i].setGravity(Gravity.RIGHT);
+            
+            menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f)); 
+            menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
+            
+            if (i < 6) { 
+                View divider = new View(this); 
+                divider.setBackgroundColor(Color.DKGRAY); 
+                menuContainer.addView(divider, new LinearLayout.LayoutParams(-1, 1)); 
+            }
+        }
+        
+        menuContainer.setVisibility(View.GONE); 
+        rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
+        
+        playbackContainer = new FrameLayout(this); 
+        playbackContainer.setBackgroundColor(Color.BLACK); 
+        playbackContainer.setVisibility(View.GONE);
+        
+        playbackImageView = new ImageView(this); 
+        playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER); 
+        playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
+        
+        tvPlaybackInfo = new TextView(this); 
+        tvPlaybackInfo.setTextColor(Color.WHITE); 
+        tvPlaybackInfo.setTextSize(18); 
+        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK); 
+        FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
+        pbInfoParams.setMargins(0, 30, 30, 0); 
+        playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
+        
+        rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private TextView createTabHeader(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(22);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setPadding(15, 0, 15, 0);
+        return tv;
+    }
+
+    private TextView createBottomText() { 
+        TextView tv = new TextView(this); 
+        tv.setTextSize(26); 
+        tv.setTypeface(Typeface.DEFAULT_BOLD); 
+        tv.setShadowLayer(4, 0, 0, Color.BLACK); 
+        tv.setPadding(20, 0, 20, 0); 
+        return tv; 
+    }
+    
+    private TextView createSideTextIcon(String text) { 
+        TextView tv = new TextView(this); 
+        tv.setText(text); 
+        tv.setTextColor(Color.WHITE); 
+        tv.setTextSize(22); 
+        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        tv.setPadding(25, 15, 25, 15); 
+        tv.setBackgroundColor(Color.argb(140, 40, 40, 40)); 
+        tv.setGravity(Gravity.CENTER); 
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); 
+        lp.setMargins(0, 0, 0, 15); 
+        tv.setLayoutParams(lp); 
+        return tv; 
+    }
+    
     @Override 
     public boolean onKeyDown(int k, KeyEvent e) { 
         if (isProcessing && (k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) {
@@ -1244,202 +1444,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    private void buildUI(FrameLayout rootLayout) {
-        mainUIContainer = new FrameLayout(this); 
-        rootLayout.addView(mainUIContainer, new FrameLayout.LayoutParams(-1, -1));
-        
-        gridLines = new GridLinesView(this); 
-        mainUIContainer.addView(gridLines, new FrameLayout.LayoutParams(-1, -1));
-        
-        cinemaMattes = new CinemaMatteView(this); 
-        mainUIContainer.addView(cinemaMattes, new FrameLayout.LayoutParams(-1, -1));
-        
-        tvTopStatus = new TextView(this); 
-        tvTopStatus.setTextColor(Color.WHITE); 
-        tvTopStatus.setTextSize(20); 
-        tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvTopStatus.setGravity(Gravity.CENTER); 
-        tvTopStatus.setShadowLayer(4, 0, 0, Color.BLACK);
-        
-        FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
-        topParams.setMargins(0, 15, 0, 0); 
-        mainUIContainer.addView(tvTopStatus, topParams);
-        
-        LinearLayout rightBar = new LinearLayout(this); 
-        rightBar.setOrientation(LinearLayout.VERTICAL); 
-        rightBar.setGravity(Gravity.RIGHT);
-        
-        LinearLayout batteryArea = new LinearLayout(this); 
-        batteryArea.setOrientation(LinearLayout.HORIZONTAL); 
-        batteryArea.setGravity(Gravity.CENTER_VERTICAL);
-        
-        tvBattery = new TextView(this); 
-        tvBattery.setTextColor(Color.WHITE); 
-        tvBattery.setTextSize(18); 
-        tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvBattery.setPadding(0, 0, 10, 0); 
-        batteryArea.addView(tvBattery);
-        
-        batteryIcon = new BatteryView(this); 
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(45, 22)); 
-        rightBar.addView(batteryArea);
-        
-        tvReview = createSideTextIcon("▶"); 
-        LinearLayout.LayoutParams rvParams = new LinearLayout.LayoutParams(-2, -2); 
-        rvParams.setMargins(0, 20, 0, 0); 
-        tvReview.setLayoutParams(rvParams); 
-        rightBar.addView(tvReview);
-        
-        FrameLayout.LayoutParams rightParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
-        rightParams.setMargins(0, 20, 30, 0); 
-        mainUIContainer.addView(rightBar, rightParams);
-        
-        LinearLayout leftBar = new LinearLayout(this); 
-        leftBar.setOrientation(LinearLayout.VERTICAL); 
-        tvMode = createSideTextIcon("M"); 
-        leftBar.addView(tvMode); 
-        tvFocusMode = createSideTextIcon("AF-S"); 
-        leftBar.addView(tvFocusMode);
-        
-        FrameLayout.LayoutParams leftParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.LEFT); 
-        leftParams.setMargins(20, 20, 0, 0); 
-        mainUIContainer.addView(leftBar, leftParams);
-        
-        focusMeter = new AdvancedFocusMeterView(this); 
-        FrameLayout.LayoutParams fmParams = new FrameLayout.LayoutParams(-1, 80, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL); 
-        fmParams.setMargins(0, 0, 0, 100); 
-        mainUIContainer.addView(focusMeter, fmParams);
-        
-        llBottomBar = new LinearLayout(this); 
-        llBottomBar.setOrientation(LinearLayout.HORIZONTAL); 
-        llBottomBar.setGravity(Gravity.CENTER); 
-        
-        tvValShutter = createBottomText(); 
-        tvValAperture = createBottomText(); 
-        tvValIso = createBottomText(); 
-        tvValEv = createBottomText();
-        
-        llBottomBar.addView(tvValShutter); 
-        llBottomBar.addView(tvValAperture); 
-        llBottomBar.addView(tvValIso); 
-        llBottomBar.addView(tvValEv);
-        
-        FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
-        botParams.setMargins(0, 0, 0, 25); 
-        mainUIContainer.addView(llBottomBar, botParams);
-        
-        afOverlay = new ProReticleView(this); 
-        mainUIContainer.addView(afOverlay, new FrameLayout.LayoutParams(-1, -1));
-        
-        menuContainer = new LinearLayout(this); 
-        menuContainer.setOrientation(LinearLayout.VERTICAL); 
-        menuContainer.setBackgroundColor(Color.argb(250, 15, 15, 15)); 
-        menuContainer.setPadding(20, 20, 20, 20); 
-        
-        LinearLayout menuHeaderLayout = new LinearLayout(this); 
-        menuHeaderLayout.setOrientation(LinearLayout.HORIZONTAL); 
-        menuHeaderLayout.setGravity(Gravity.CENTER_VERTICAL); 
-        menuHeaderLayout.setPadding(10, 0, 10, 15);
-        
-        tvMenuTitle = new TextView(this); 
-        tvMenuTitle.setTextSize(22); 
-        tvMenuTitle.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvMenuTitle.setTextColor(Color.WHITE); 
-        menuHeaderLayout.addView(tvMenuTitle, new LinearLayout.LayoutParams(0, -2, 1.0f));
-        
-        LinearLayout pagesLayout = new LinearLayout(this); 
-        pagesLayout.setOrientation(LinearLayout.HORIZONTAL); 
-        pagesLayout.setGravity(Gravity.RIGHT);
-        
-        for (int i = 0; i < 4; i++) { 
-            tvPageNumbers[i] = new TextView(this); 
-            tvPageNumbers[i].setText(String.valueOf(i + 1)); 
-            tvPageNumbers[i].setTextSize(20); 
-            tvPageNumbers[i].setTypeface(Typeface.DEFAULT_BOLD); 
-            tvPageNumbers[i].setPadding(15, 0, 15, 0); 
-            pagesLayout.addView(tvPageNumbers[i]); 
-        }
-        
-        menuHeaderLayout.addView(pagesLayout, new LinearLayout.LayoutParams(-2, -2)); 
-        menuContainer.addView(menuHeaderLayout);
-        
-        View headerDivider = new View(this); 
-        headerDivider.setBackgroundColor(Color.GRAY); 
-        LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(-1, 2); 
-        divParams.setMargins(0, 0, 0, 15); 
-        menuContainer.addView(headerDivider, divParams);
-        
-        for (int i = 0; i < 7; i++) { 
-            menuRows[i] = new LinearLayout(this); 
-            menuRows[i].setOrientation(LinearLayout.HORIZONTAL); 
-            menuRows[i].setGravity(Gravity.CENTER_VERTICAL); 
-            menuRows[i].setPadding(10, 0, 10, 0); 
-            menuContainer.addView(menuRows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
-            
-            menuLabels[i] = new TextView(this); 
-            menuLabels[i].setTextSize(18); 
-            menuLabels[i].setTypeface(Typeface.DEFAULT_BOLD); 
-            
-            menuValues[i] = new TextView(this); 
-            menuValues[i].setTextSize(18); 
-            menuValues[i].setGravity(Gravity.RIGHT);
-            
-            menuRows[i].addView(menuLabels[i], new LinearLayout.LayoutParams(0, -2, 1.0f)); 
-            menuRows[i].addView(menuValues[i], new LinearLayout.LayoutParams(-2, -2));
-            
-            if (i < 6) { 
-                View divider = new View(this); 
-                divider.setBackgroundColor(Color.DKGRAY); 
-                menuContainer.addView(divider, new LinearLayout.LayoutParams(-1, 1)); 
-            }
-        }
-        
-        menuContainer.setVisibility(View.GONE); 
-        rootLayout.addView(menuContainer, new FrameLayout.LayoutParams(-1, -1));
-        
-        playbackContainer = new FrameLayout(this); 
-        playbackContainer.setBackgroundColor(Color.BLACK); 
-        playbackContainer.setVisibility(View.GONE);
-        
-        playbackImageView = new ImageView(this); 
-        playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER); 
-        playbackContainer.addView(playbackImageView, new FrameLayout.LayoutParams(-1, -1));
-        
-        tvPlaybackInfo = new TextView(this); 
-        tvPlaybackInfo.setTextColor(Color.WHITE); 
-        tvPlaybackInfo.setTextSize(18); 
-        tvPlaybackInfo.setShadowLayer(3, 0, 0, Color.BLACK); 
-        FrameLayout.LayoutParams pbInfoParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT); 
-        pbInfoParams.setMargins(0, 30, 30, 0); 
-        playbackContainer.addView(tvPlaybackInfo, pbInfoParams);
-        
-        rootLayout.addView(playbackContainer, new FrameLayout.LayoutParams(-1, -1));
-    }
-
-    private TextView createBottomText() { 
-        TextView tv = new TextView(this); 
-        tv.setTextSize(26); 
-        tv.setTypeface(Typeface.DEFAULT_BOLD); 
-        tv.setShadowLayer(4, 0, 0, Color.BLACK); 
-        tv.setPadding(20, 0, 20, 0); 
-        return tv; 
-    }
-    
-    private TextView createSideTextIcon(String text) { 
-        TextView tv = new TextView(this); 
-        tv.setText(text); 
-        tv.setTextColor(Color.WHITE); 
-        tv.setTextSize(22); 
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
-        tv.setPadding(25, 15, 25, 15); 
-        tv.setBackgroundColor(Color.argb(140, 40, 40, 40)); 
-        tv.setGravity(Gravity.CENTER); 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); 
-        lp.setMargins(0, 0, 0, 15); 
-        tv.setLayoutParams(lp); 
-        return tv; 
-    }
-    
     @Override 
     public void surfaceCreated(SurfaceHolder h) { 
         hasSurface = true; 
