@@ -1711,11 +1711,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (rot != 0) {
                 m.postRotate(rot); 
             }
-            m.postScale(0.8888f, 1.0f);
+            // REMOVED CPU SCALE: Do not alter the raw image pixels!
             
+            // Create the rotated, high-definition bitmap
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), m, true);
+            
             if (playbackImageView != null) {
                 playbackImageView.setImageBitmap(bmp);
+                
+                // GPU SQUISH: Apply the 0.8888f correction directly to the View!
+                playbackImageView.setScaleX(0.8888f);
+                playbackImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             }
             currentPlaybackBitmap = bmp;
         } catch (Exception e) {
