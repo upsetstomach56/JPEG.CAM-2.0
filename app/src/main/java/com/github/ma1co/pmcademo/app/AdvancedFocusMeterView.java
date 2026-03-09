@@ -86,16 +86,21 @@ public class AdvancedFocusMeterView extends View {
         int pad = 50;
         int trackW = w - (pad * 2);
         int y = h / 2 + 10;
-        float needleX = pad + (trackW * ratio);
+        // --- ADDED CLAMP: Guarantee the sliders NEVER fly off screen ---
+        float safeRatio = ratio;
+        if (safeRatio < 0.0f) safeRatio = 0.0f;
+        if (safeRatio > 1.0f) safeRatio = 1.0f;
 
-        // DOF Calculation logic extracted from MainActivity
+        float needleX = pad + (trackW * safeRatio);
+
+        // DOF Calculation
         float apFactor = aperture / 22.0f;
-        float ratioExp = ratio * ratio; 
+        float ratioExp = safeRatio * safeRatio; 
         float dofSpread = (trackW * 0.015f) + (trackW * 0.35f * apFactor * ratioExp);
         float leftRadius = dofSpread * 0.35f;
         float rightRadius = dofSpread * 0.65f; 
         
-        if (ratio > 0.95f) rightRadius = trackW; 
+        if (safeRatio > 0.95f) rightRadius = trackW;
 
         canvas.save();
         canvas.clipRect(pad, 0, w - pad, h);

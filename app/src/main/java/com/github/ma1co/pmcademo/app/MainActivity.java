@@ -1137,19 +1137,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         rightBar.setGravity(Gravity.RIGHT);
         
         LinearLayout batteryArea = new LinearLayout(this); 
-        batteryArea.setOrientation(LinearLayout.HORIZONTAL); 
-        batteryArea.setGravity(Gravity.CENTER_VERTICAL);
+        batteryArea.setOrientation(LinearLayout.HORIZONTAL); // Back to Horizontal
+        batteryArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT); // Push to the right
         
         tvBattery = new TextView(this); 
         tvBattery.setTextColor(Color.WHITE); 
-        tvBattery.setTextSize(18); 
+        tvBattery.setTextSize(14); // Shrunk from 18 to 14
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvBattery.setPadding(0, 0, 10, 0); 
+        tvBattery.setPadding(0, 0, 5, 0); // Tightened padding from 10 to 5
         batteryArea.addView(tvBattery);
         
         batteryIcon = new BatteryView(this); 
-        // Increased from (45, 22) to (80, 35) to prevent cutoff
-        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(80, 35)); 
+        // Shrunk icon down to 28x12 so it fits perfectly on the same line!
+        batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(28, 12)); 
         rightBar.addView(batteryArea);
         
         tvReview = createSideTextIcon("▶"); 
@@ -1492,7 +1492,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // FIX: Force the UI to draw the frame immediately when switching to MF,
             // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
             if (shouldShow) {
-                focusMeter.update(-1f, cachedAperture);
+                focusMeter.update(0.5f, cachedAperture);
             }
         }
         
@@ -1563,7 +1563,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             runOnUiThread(new Runnable() { 
                 public void run() {
                     // Reverted to true so it actually draws!
-                    focusMeter.update(-1f, cachedAperture);
+                    focusMeter.update(0.5f, cachedAperture);
                 }
             });
         }
@@ -1741,7 +1741,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // FIX: Force the UI to draw the frame immediately when switching to MF,
             // even before the user touches the lens ring. (-1 tells the view it's an initial draw).
             if (shouldShow) {
-                focusMeter.update(-1f, cachedAperture);
+                focusMeter.update(0.5f, cachedAperture);
             }
         }
     }
