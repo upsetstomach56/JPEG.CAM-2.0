@@ -94,7 +94,7 @@ public class AdvancedFocusMeterView extends View {
         
         int pad = 40;
         int trackW = w - (pad * 2);
-        int y = h / 2;
+        int y = h / 2 + 20; // Shifted down slightly to make room for text
         
         // 0. Draw Track Background
         canvas.drawLine(pad, y, w - pad, y, bgPaint);
@@ -103,7 +103,7 @@ public class AdvancedFocusMeterView extends View {
         if (currentState != null && currentState.nearMotor != null) {
             float nearX = pad + (trackW * currentState.nearMotor.floatValue());
             float farX = pad + trackW; // Default to Infinity edge
-            if (currentState.farMotor != null) {
+            if (currentState.farMotor != null && currentState.farMotor < 1.0) {
                 farX = pad + (trackW * currentState.farMotor.floatValue());
             }
             // Draw the organically breathing orange rectangle!
@@ -116,15 +116,14 @@ public class AdvancedFocusMeterView extends View {
                 float markX = pad + (trackW * pt.ratio);
                 canvas.drawCircle(markX, y, 5, markPaint);
                 
-                // Draw text if we have the ruler paint initialized
                 if (rulerTextPaint != null) {
                     if (pt.distance > 0f && pt.distance < 999.0f) {
                         float totalInches = pt.distance * 39.3701f;
                         int ft = (int) (totalInches / 12);
-                        canvas.drawText(ft + "'", markX, y - 12, rulerTextPaint); 
-                        canvas.drawText(String.format("%.1fm", pt.distance), markX, y + 26, rulerTextPaint); 
+                        canvas.drawText(ft + "'", markX, y - 16, rulerTextPaint); 
+                        canvas.drawText(String.format("%.1fm", pt.distance), markX, y + 28, rulerTextPaint); 
                     } else if (pt.distance >= 999.0f) {
-                        canvas.drawText("INF", markX, y + 26, rulerTextPaint);
+                        canvas.drawText("INF", markX, y + 28, rulerTextPaint);
                     }
                 }
             }
@@ -134,12 +133,35 @@ public class AdvancedFocusMeterView extends View {
         if (currentState != null && currentState.hyperMotor != null) {
             float hX = pad + (trackW * currentState.hyperMotor.floatValue());
             if (rulerTextPaint != null) {
-                canvas.drawText("[H]", hX, y - 25, rulerTextPaint);
+                canvas.drawText("[H]", hX, y - 30, rulerTextPaint); // Mark H on the track
             }
         }
 
-        // 4. Draw Current Focus Needle
+        // --- 4. DRAW THE CURRENT FOCUS NEEDLE ---
         float currentX = pad + (trackW * currentRatio);
         canvas.drawCircle(currentX, y, 12, needlePaint);
+
+        // --- 5. THE LIVE TEXT ENGINE (Clamped to Hyperfocal!) ---
+        if (currentState != null) {
+            String distStr;
+            
+            // If the math says we passed Hyperfocal, stop showing wildly high meters!
+            if (currentState.focusDist >= currentState.hyperfocalDist) {
+                distStr = String.format("INF (H: %.1fm)", currentState.hyperfocalDist);
+            } else if (currentState.focusDist >= 999.0) {
+                distStr = "INFINITY";
+            } else {
+                float totalInches = (float) currentState.focusDist * 39.3701f;
+                int ft = (int) (totalInches / 12);
+                int in = (int) (totalInches % 12);
+                distStr = String.format("%.2fm / %d'%d\"", currentState.focusDist, ft, in);
+            }
+            
+            canvas.drawText(distStr, w / 2, y - 70, liveTextPaint);
+        } else if (isCalibrating) {
+            canvas.drawText("MAPPING LENS...", w / 2, y - 70, liveTextPaint);
+        } else {
+            canvas.drawText("UNMAPPED LENS", w / 2, y - 70, liveTextPaint);
+        }
     }
 }
