@@ -649,6 +649,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             lensManager.saveProfile(detectedLensName, detectedFocalLength, tempCalPoints);
             lensManager.saveProfile("Lens " + currentLensSlot, detectedFocalLength, tempCalPoints);
             
+            // --- CRITICAL FIX: FORCE LOAD NEW DATA INTO RAM ---
+            lensManager.loadProfile("Lens " + currentLensSlot);
+            
             isCalibrating = false;
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             setHUDVisibility(View.VISIBLE);
@@ -656,6 +659,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
+        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
             if (isMenuEditing) handleMenuChange(1);
             else {

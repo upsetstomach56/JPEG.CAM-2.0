@@ -75,12 +75,15 @@ public class AdvancedFocusMeterView extends View {
         this.isCalibrating = isCalibrating;
         this.calPoints = points;
         
-        // Automatically crunch the advanced optical physics
-        if (points != null && points.size() >= 2) {
+        // --- CRITICAL FIX: DO NOT RUN MATH WHILE CALIBRATING ---
+        // If we are mapping, the 2-point regression will hallucinate the H-mark. 
+        // We only build the Gauge State if calibration is completely finished!
+        if (!isCalibrating && points != null && points.size() >= 2) {
             currentState = LensMath.buildGaugeState(ratio, aperture, focalLength, points);
         } else {
-            currentState = null;
+            currentState = null; // Forces the UI to hide the H-mark and orange bar
         }
+        
         invalidate();
     }
 
