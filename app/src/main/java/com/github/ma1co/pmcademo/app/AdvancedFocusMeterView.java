@@ -22,6 +22,9 @@ public class AdvancedFocusMeterView extends View {
     private float ratio = 0.5f; 
     private float aperture = 2.8f;
     private float liveDistance = -1.0f; // Fed directly from LensProfileManager math
+    private LensMath.GaugeState currentState = null;
+    private float currentFocalLength = 50.0f;
+    private boolean isCalibrating = false;
     
     // Holds the dynamic calibration points to draw the dots
     private List<LensProfileManager.CalPoint> calPoints = new ArrayList<LensProfileManager.CalPoint>();
@@ -64,16 +67,20 @@ public class AdvancedFocusMeterView extends View {
     }
 
     // Feeds the view the UI dots AND the math result
-    public void update(float currentRatio, float fStop, float calculatedDistance, List<LensProfileManager.CalPoint> points) {
-        this.ratio = currentRatio;
-        this.aperture = fStop;
-        this.liveDistance = calculatedDistance;
+    public void update(float ratio, float aperture, float focalLength, boolean isCalibrating, List<LensProfileManager.CalPoint> points) {
+        this.currentRatio = ratio;
+        this.currentAperture = aperture;
+        this.currentFocalLength = focalLength;
+        this.isCalibrating = isCalibrating;
+        this.calPoints = points;
         
-        this.calPoints.clear();
-        if (points != null) {
-            this.calPoints.addAll(points);
+        // Automatically crunch the advanced optical physics
+        if (points != null && points.size() >= 2) {
+            currentState = LensMath.buildGaugeState(ratio, aperture, focalLength, points);
+        } else {
+            currentState = null;
         }
-        invalidate(); 
+        invalidate();
     }
 
     private String getLiveDistanceString() {
@@ -92,61 +99,62 @@ public class AdvancedFocusMeterView extends View {
         }
     }
 
-    @Override protected void onDraw(Canvas canvas) {
+    @Override
+    protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
+        
         int w = getWidth();
         int h = getHeight();
-        int pad = 50;
+        if (w == 0 || h == 0) return;
+        
+        int pad = 40;
         int trackW = w - (pad * 2);
-        int y = h / 2 + 10;
+        int y = h / 2;
         
-        float safeRatio = Math.max(0.0f, Math.min(1.0f, ratio));
-        float needleX = pad + (trackW * safeRatio);
+        // 0. Draw Track Background
+        canvas.drawLine(pad, y, w - pad, y, bgPaint);
+        
+        // --- 1. THE DYNAMIC DOF BAND ---
+        if (currentState != null && currentState.nearMotor != null) {
+            float nearX = pad + (trackW * currentState.nearMotor.floatValue());
+            float farX = pad + trackW; // Default to Infinity edge
+            if (currentState.farMotor != null) {
+                farX = pad + (trackW * currentState.farMotor.floatValue());
+            }
+            // Draw the organically breathing orange rectangle!
+            canvas.drawRect(Math.min(nearX, farX), y - 10, Math.max(nearX, farX), y + 10, dofPaint);
+        }
 
-        // 1. Draw the Base Track
-        canvas.drawLine(pad, y, w - pad, y, trackPaint);
-        
-        // 2. Draw Dynamic Plot Marks & The Ruler!
-        for (LensProfileManager.CalPoint pt : calPoints) {
-            float markX = pad + (trackW * pt.ratio);
-            canvas.drawCircle(markX, y, 5, markPaint);
-            
-            // Draw numerical ruler marks if it's not the 0 position
-            if (pt.distance > 0f && pt.distance < 999.0f) {
-                String mStr = String.format("%.1fm", pt.distance);
-                float totalInches = pt.distance * 39.3701f;
-                int ft = (int) (totalInches / 12);
-                String fStr = ft + "'";
+        // --- 2. THE RULER & TICKS ---
+        if (calPoints != null) {
+            for (LensProfileManager.CalPoint pt : calPoints) {
+                float markX = pad + (trackW * pt.ratio);
+                canvas.drawCircle(markX, y, 5, markPaint);
                 
-                canvas.drawText(fStr, markX, y - 12, rulerTextPaint); // Feet above the line
-                canvas.drawText(mStr, markX, y + 26, rulerTextPaint); // Meters below the line
-            } else if (pt.distance >= 999.0f) {
-                canvas.drawText("INF", markX, y + 26, rulerTextPaint);
+                // Draw text if we have the ruler paint initialized
+                if (rulerTextPaint != null) {
+                    if (pt.distance > 0f && pt.distance < 999.0f) {
+                        float totalInches = pt.distance * 39.3701f;
+                        int ft = (int) (totalInches / 12);
+                        canvas.drawText(ft + "'", markX, y - 12, rulerTextPaint); 
+                        canvas.drawText(String.format("%.1fm", pt.distance), markX, y + 26, rulerTextPaint); 
+                    } else if (pt.distance >= 999.0f) {
+                        canvas.drawText("INF", markX, y + 26, rulerTextPaint);
+                    }
+                }
+            }
+        }
+        
+        // --- 3. THE HYPERFOCAL INDICATOR ---
+        if (currentState != null && currentState.hyperMotor != null) {
+            float hX = pad + (trackW * currentState.hyperMotor.floatValue());
+            if (rulerTextPaint != null) {
+                canvas.drawText("[H]", hX, y - 25, rulerTextPaint);
             }
         }
 
-        // 3. DOF Calculation & Orange Spread
-        float apFactor = aperture / 22.0f;
-        float ratioExp = safeRatio * safeRatio; 
-        float dofSpread = (trackW * 0.015f) + (trackW * 0.35f * apFactor * ratioExp);
-        float leftRadius = dofSpread * 0.35f;
-        float rightRadius = dofSpread * 0.65f; 
-        if (safeRatio > 0.95f) rightRadius = trackW;
-
-        canvas.save();
-        canvas.clipRect(pad, 0, w - pad, h);
-        canvas.drawLine(needleX - leftRadius, y, needleX + rightRadius, y, dofPaint);
-        canvas.restore();
-        
-        // 4. Draw the Needle & Triangle
-        canvas.drawLine(needleX, y - 18, needleX, y + 18, needlePaint);
-        Path path = new Path();
-        path.moveTo(needleX, y - 24);
-        path.lineTo(needleX - 8, y - 36);
-        path.lineTo(needleX + 8, y - 36);
-        path.close();
-        canvas.drawPath(path, needlePaint);
-
-        // 5. Draw Live Interpolated Distance Text!
-        canvas.drawText(getLiveDistanceString(), needleX, y - 45, liveTextPaint);
+        // 4. Draw Current Focus Needle
+        float currentX = pad + (trackW * currentRatio);
+        canvas.drawCircle(currentX, y, 12, needlePaint);
     }
 }

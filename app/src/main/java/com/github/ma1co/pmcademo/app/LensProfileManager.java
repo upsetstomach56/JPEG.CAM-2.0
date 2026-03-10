@@ -18,6 +18,8 @@ public class LensProfileManager {
     
     // A simple data class to hold our mapped points
     public static class CalPoint {
+        public float currentFocalLength = 50.0f;
+        public float getCurrentFocalLength() { return currentFocalLength; }
         public float ratio;
         public float distance;
         public CalPoint(float r, float d) {
@@ -43,14 +45,15 @@ public class LensProfileManager {
     }
 
     public boolean loadProfile(String lensName) {
-        // MUST CLEAR THE ARRAY IMMEDIATELY TO PREVENT BLEEDING!
         currentPoints.clear();
         currentLensName = lensName;
         
         String data = prefs.getString(lensName, null);
         if (data == null) return false;
+        
+        // Read the focal length back into memory
+        currentFocalLength = prefs.getFloat(lensName + "_focal", 50.0f);
 
-        // Deserialize the data string (e.g. "0.0,0.3;0.5,1.2;1.0,999.0")
         String[] points = data.split(";");
         for (String p : points) {
             String[] parts = p.split(",");
@@ -64,18 +67,15 @@ public class LensProfileManager {
         return !currentPoints.isEmpty();
     }
 
-    public void saveProfile(String lensName, List<CalPoint> points) {
-        this.currentLensName = lensName;
-        this.currentPoints = new ArrayList<CalPoint>(points);
-        sortPoints();
-
+    public void saveProfile(String lensName, float focalLength, List<CalPoint> points) {
+        currentFocalLength = focalLength;
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < currentPoints.size(); i++) {
-            sb.append(currentPoints.get(i).ratio).append(",").append(currentPoints.get(i).distance);
-            if (i < currentPoints.size() - 1) sb.append(";");
+        for (CalPoint p : points) {
+            sb.append(p.ratio).append(",").append(p.distance).append(";");
         }
-
         prefs.edit().putString(lensName, sb.toString()).apply();
+        // Save the focal length right next to the array data!
+        prefs.edit().putFloat(lensName + "_focal", focalLength).apply();
     }
 
     private void sortPoints() {

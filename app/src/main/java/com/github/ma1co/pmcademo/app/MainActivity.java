@@ -106,6 +106,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int calibStep = 0; // 0: ID, 1: Min, 2: 1m, 3: 3m
     private float minDistanceInput = 0.3f;
     private String detectedLensName = "Manual Lens";
+    private float detectedFocalLength = 50.0f;
     private TextView tvCalibrationPrompt;
     
     private boolean cachedIsManualFocus = false;
@@ -347,6 +348,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // --- SILENT LENS ID INTERCEPTOR ---
         if (isAutoLoading || (isCalibrating && calibStep == 0)) {
             String extractedName = "Manual Lens " + currentLensSlot;
+            float extractedFocal = 50.0f; // NEW
+            
             try {
                 ExifInterface exif = new ExifInterface(path);
                 String fl = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH);
@@ -354,23 +357,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     String[] parts = fl.split("/");
                     int focal = Integer.parseInt(parts[0]) / Integer.parseInt(parts[1]);
                     extractedName = focal + "mm Lens";
+                    extractedFocal = (float) focal; // Save the raw number!
                 }
             } catch (Exception e) {}
             
-            new File(path).delete(); // Throw the photo away instantly!
+            new File(path).delete(); 
             final String finalName = extractedName;
+            final float finalFocal = extractedFocal;
             
             runOnUiThread(new Runnable() {
                 public void run() {
                     if (isAutoLoading) {
                         isAutoLoading = false;
                         if (lensManager.loadProfile(finalName)) {
-                            detectedLensName = finalName; // Sync the UI name
+                            detectedLensName = finalName;
+                            detectedFocalLength = finalFocal; // Update memory
                             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                             setHUDVisibility(View.VISIBLE);
                             updateMainHUD();
                         } else {
-                            detectedLensName = finalName; // Store it for the DOWN press bypass!
+                            detectedLensName = finalName;
+                            detectedFocalLength = finalFocal; // Store for bypass
                             if (tvCalibrationPrompt != null) {
                                 tvCalibrationPrompt.setText("No profile found for:\n" + finalName + "\n\nPress [DOWN] to map it.");
                             }
@@ -378,6 +385,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         }
                     } else if (isCalibrating && calibStep == 0) {
                         detectedLensName = finalName;
+                        detectedFocalLength = finalFocal; // Set for new map
                         calibStep = 1;
                         minDistanceInput = 0.3f;
                         tempCalPoints.clear();
@@ -638,8 +646,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
             
             // Save under BOTH the EXIF name (for Auto-Load) and the Slot (for fast swapping)
-            lensManager.saveProfile(detectedLensName, tempCalPoints);
-            lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
+            lensManager.saveProfile(detectedLensName, detectedFocalLength, tempCalPoints);
+            lensManager.saveProfile("Lens " + currentLensSlot, detectedFocalLength, tempCalPoints);
             
             isCalibrating = false;
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
@@ -724,6 +732,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 // Clone active points, strip infinity cap, and skip to Step 2
                 tempCalPoints = new ArrayList<LensProfileManager.CalPoint>(lensManager.getCurrentPoints());
                 detectedLensName = lensManager.getCurrentLensName();
+                detectedFocalLength = lensManager.getCurrentFocalLength(); // Add this line
                 
                 if (!tempCalPoints.isEmpty() && tempCalPoints.get(tempCalPoints.size() - 1).ratio >= 0.99f) {
                     tempCalPoints.remove(tempCalPoints.size() - 1);
@@ -1753,15 +1762,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             
             if (shouldShow) {
-                // If we are actively calibrating, show the temporary array and "--" for distance
-                if (isCalibrating) {
-                    focusMeter.update(cachedFocusRatio, cachedAperture, -1.0f, tempCalPoints);
-                } 
-                // If normal shooting, pull the math and saved points from LensManager
-                else if (lensManager != null) {
-                    float currentDist = lensManager.getDistanceForRatio(cachedFocusRatio);
-                    focusMeter.update(cachedFocusRatio, cachedAperture, currentDist, lensManager.getCurrentPoints());
-                }
+                float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
+                List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                
+                focusMeter.update(cachedFocusRatio, cachedAperture, focalToUse, isCalibrating, ptsToUse);
             }
         }
         
@@ -1842,12 +1846,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     cachedFocusRatio = ratio; 
                     
                     // ONLY update the gauge, do not rebuild the whole UI!
-                    if (isCalibrating) {
-                        focusMeter.update(cachedFocusRatio, cachedAperture, -1.0f, tempCalPoints);
-                    } else if (lensManager != null) {
-                        float currentDist = lensManager.getDistanceForRatio(cachedFocusRatio);
-                        focusMeter.update(cachedFocusRatio, cachedAperture, currentDist, lensManager.getCurrentPoints());
-                    }
+                    float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
+                    List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                    
+                    focusMeter.update(cachedFocusRatio, cachedAperture, focalToUse, isCalibrating, ptsToUse);
                 }
             });
         }
