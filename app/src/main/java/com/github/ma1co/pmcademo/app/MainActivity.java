@@ -345,10 +345,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         triggerLutPreload();
     }
     private void processWhenFileReady(final String path) {
+        final File f = new File(path);
+        
+        // --- GHOST EVENT KILLER ---
+        // Android's FileObserver fires twice. If the first event deleted this file, abort instantly!
+        if (!f.exists()) return; 
+
         // --- SILENT LENS ID INTERCEPTOR ---
         if (isAutoLoading || (isCalibrating && calibStep == 0)) {
             String extractedName = "Manual Lens " + currentLensSlot;
-            float extractedFocal = 50.0f; // NEW
+            float extractedFocal = 50.0f; 
             
             try {
                 ExifInterface exif = new ExifInterface(path);
@@ -357,11 +363,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     String[] parts = fl.split("/");
                     int focal = Integer.parseInt(parts[0]) / Integer.parseInt(parts[1]);
                     extractedName = focal + "mm Lens";
-                    extractedFocal = (float) focal; // Save the raw number!
+                    extractedFocal = (float) focal; 
                 }
             } catch (Exception e) {}
             
-            new File(path).delete(); 
+            f.delete(); // Throw the photo away!
             final String finalName = extractedName;
             final float finalFocal = extractedFocal;
             
@@ -371,21 +377,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         isAutoLoading = false;
                         if (lensManager.loadProfile(finalName)) {
                             detectedLensName = finalName;
-                            detectedFocalLength = finalFocal; // Update memory
+                            detectedFocalLength = finalFocal; 
                             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                             setHUDVisibility(View.VISIBLE);
                             updateMainHUD();
                         } else {
                             detectedLensName = finalName;
-                            detectedFocalLength = finalFocal; // Store for bypass
+                            detectedFocalLength = finalFocal; 
                             if (tvCalibrationPrompt != null) {
-                                tvCalibrationPrompt.setText("No profile found for:\n" + finalName + "\n\nPress [DOWN] to map it.");
+                                tvCalibrationPrompt.setText("No profile for " + finalName + ". Press [DOWN] to map it.");
                             }
                             waitingForProfileChoice = true; 
                         }
                     } else if (isCalibrating && calibStep == 0) {
                         detectedLensName = finalName;
-                        detectedFocalLength = finalFocal; // Set for new map
+                        detectedFocalLength = finalFocal; 
                         calibStep = 1;
                         minDistanceInput = 0.3f;
                         tempCalPoints.clear();
@@ -408,18 +414,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } 
         });
         
-        final File f = new File(path);
         final long[] lastSize = {-1};
         final int[] retries = {0};
         
         Runnable checker = new Runnable() {
             @Override
             public void run() {
+                if (!f.exists()) {
+                    // Failsafe: if file was deleted mid-check, silently abort.
+                    isProcessing = false;
+                    updateMainHUD();
+                    return;
+                }
+                
                 long currentSize = f.length();
-                Log.d("filmOS", "Checker loop " + retries[0] + ": file size = " + currentSize);
-
                 if (currentSize > 0 && currentSize == lastSize[0]) {
-                    Log.d("filmOS", "File stabilized at " + currentSize + " bytes. Firing ImageProcessor!");
                     File outDir = new File(Environment.getExternalStorageDirectory(), "GRADED");
                     mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile());
                 } else if (retries[0] < 30) { 
@@ -427,7 +436,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     retries[0]++;
                     uiHandler.postDelayed(this, 300);
                 } else {
-                    Log.e("filmOS", "Checker timed out! File never stabilized or stayed 0 bytes.");
                     isProcessing = false;
                     updateMainHUD();
                 }
@@ -1656,43 +1664,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void updateCalibrationUI() {
         if (!isCalibrating) return;
         
-        float totalInches = minDistanceInput * 39.3701f;
-        int ft = (int) (totalInches / 12);
-        int in = (int) (totalInches % 12);
-        String distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
+        String distStr;
+        if (minDistanceInput >= 999.0f) {
+            distStr = "INFINITY";
+        } else {
+            float totalInches = minDistanceInput * 39.3701f;
+            int ft = (int) (totalInches / 12);
+            int in = (int) (totalInches % 12);
+            distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
+        }
         
-        // 1. The Header (Now includes a live point counter!)
-        String header = "<font color='#FFFFFF'><b>[ MAPPING: " + detectedLensName + " | POINTS LOGGED: " + tempCalPoints.size() + " ]</b></font><br>";
+        // 1. The Compact Header
+        String html = "<font color='#FFFFFF'><small><b>MAPPING: " + detectedLensName + " (PTS: " + tempCalPoints.size() + ")</b></small><br>";
         
-        // 2. The Slider (Shrunk the line breaks so it takes up less space)
-        String sliderHtml = "<br><font color='#E6320F'><big><b>◄ &nbsp;&nbsp;" + distStr + "&nbsp;&nbsp; ►</b></big></font><br>";
-        
-        String instructions = "";
-        
-        // 3. The Prompts
+        // 2. The Inline Instructions & Slider
         if (calibStep == 1) {
-            instructions = "<font color='#FFFFFF'>STEP 1: Turn ring to hard stop (MIN FOCUS)<br>Dial distance:</font>";
-            instructions += sliderHtml;
-            instructions += "<font color='#FFFFFF'>Press <b>[ENTER]</b> to lock point.</font>";
+            html += "STEP 1: MIN FOCUS &nbsp;&nbsp; <font color='#E6320F'><b>◄ " + distStr + " ►</b></font> &nbsp;&nbsp; [ENTER] lock";
         } else if (calibStep == 2) {
-            instructions = "<font color='#FFFFFF'>STEP 2: Focus on next object.<br>Dial distance:</font>";
-            instructions += sliderHtml;
-            instructions += "<font color='#FFFFFF'>Press <b>[ENTER]</b> to log point.<br>Press <b>[UP]</b> to Save & Finish.</font>";
+            html += "STEP 2: ADD POINT &nbsp;&nbsp; <font color='#E6320F'><b>◄ " + distStr + " ►</b></font> &nbsp;&nbsp; [ENTER] lock &bull; [UP] save";
         }
         
         if (tvCalibrationPrompt != null) {
-            // Push the UI to the Top of the screen so it stops blocking your subject
             try {
+                // Push it to the absolute top of the screen
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) tvCalibrationPrompt.getLayoutParams();
                 lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                lp.topMargin = 20; 
+                lp.topMargin = 10; 
                 tvCalibrationPrompt.setLayoutParams(lp);
             } catch (Exception e) { }
             
-            // Give it a cinematic dark background so it's readable over any scene
-            tvCalibrationPrompt.setBackgroundColor(Color.argb(200, 20, 20, 20)); 
-            tvCalibrationPrompt.setPadding(30, 20, 30, 20); 
-            tvCalibrationPrompt.setText(android.text.Html.fromHtml(header + instructions));
+            // Tight padding, dark background
+            tvCalibrationPrompt.setBackgroundColor(Color.argb(180, 0, 0, 0)); 
+            tvCalibrationPrompt.setPadding(20, 10, 20, 10); 
+            tvCalibrationPrompt.setText(android.text.Html.fromHtml(html));
         }
     }
     
