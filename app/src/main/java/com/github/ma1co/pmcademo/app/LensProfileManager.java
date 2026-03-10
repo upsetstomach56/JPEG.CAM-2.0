@@ -90,6 +90,10 @@ public class LensProfileManager {
         return currentLensName;
     }
 
+    public List<CalPoint> getCurrentPoints() {
+        return currentPoints;
+    }
+
     public boolean hasActiveProfile() {
         return !currentPoints.isEmpty();
     }

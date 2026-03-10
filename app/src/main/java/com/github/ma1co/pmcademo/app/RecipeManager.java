@@ -45,13 +45,25 @@ public class RecipeManager {
         File lutDir = getLutDir();
         if (lutDir.exists() && lutDir.listFiles() != null) {
             for (File f : lutDir.listFiles()) {
-                String u = f.getName().toUpperCase();
-                // Filter for valid LUT files based on size and extension
-                if (f.length() > 10240 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
+                String rawName = f.getName();
+                String u = rawName.toUpperCase();
+                
+                // 1. Ignore Mac hidden dot-files (._MyLUT.cube)
+                if (rawName.startsWith(".")) continue;
+
+                // 2. Relaxed file size limit to 2KB (2048 bytes) to catch smaller LUTs!
+                if (f.length() > 2048 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
                     recipePaths.add(f.getAbsolutePath());
+                    
+                    // Scrub the extensions
                     String prettyName = u.replace(".CUB", "").replace(".CUBE", "");
                     
-                    // Attempt to extract the TITLE metadata from the .cube file
+                    // 3. Scrub the ugly 8.3 FAT32 tilde (e.g., MYCINE~1 becomes MYCINE)
+                    if (prettyName.contains("~")) {
+                        prettyName = prettyName.substring(0, prettyName.indexOf("~"));
+                    }
+                    
+                    // Attempt to extract the TITLE metadata directly from the .cube file header
                     try {
                         BufferedReader br = new BufferedReader(new FileReader(f));
                         String line;
@@ -64,6 +76,7 @@ public class RecipeManager {
                         }
                         br.close();
                     } catch (Exception e) {}
+                    
                     recipeNames.add(prettyName);
                 }
             }
