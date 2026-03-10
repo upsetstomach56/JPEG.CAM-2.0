@@ -357,10 +357,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     if (isAutoLoading) {
                         isAutoLoading = false;
                         if (lensManager.loadProfile(finalName)) {
+                            detectedLensName = finalName; // Sync the UI name
                             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
                             setHUDVisibility(View.VISIBLE);
                             updateMainHUD();
                         } else {
+                            detectedLensName = finalName; // Store it for the DOWN press bypass!
                             if (tvCalibrationPrompt != null) {
                                 tvCalibrationPrompt.setText("No profile found for:\n" + finalName + "\n\nPress [DOWN] to map it.");
                             }
@@ -575,17 +577,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isPlaybackMode) { exitPlayback(); return; }
         if (isProcessing) return;
         
-        // --- DYNAMIC PLOTTER WIZARD PROGRESSION ---
         if (isCalibrating) {
             if (calibStep == 1) {
-                // Anchor Bottom: Pin Min Focus (Strictly locks at 0.0f)
                 tempCalPoints.add(new LensProfileManager.CalPoint(0.0f, minDistanceInput));
-                calibStep = 2; // Move to the open loop
+                calibStep = 2; 
                 updateCalibrationUI();
             } else if (calibStep == 2) {
-                // The Open Loop: Pin Any Focus Point at current physical ring position
                 tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                updateCalibrationUI(); // Stay on step 2 so they can add more!
+                updateCalibrationUI(); 
             }
             return;
         }
@@ -594,8 +593,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
-                // --- BRING UP THE LENS ROUTER ---
                 waitingForProfileChoice = true;
+                detectedLensName = "Manual Lens " + currentLensSlot; // Reset to default
                 
                 setHUDVisibility(View.GONE); 
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
@@ -617,7 +616,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onUpPressed() { 
         if (isProcessing) return;
         
-        // --- AUTO-LOAD CHOICE ---
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isAutoLoading = true;
@@ -629,9 +627,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // --- FINISH CALIBRATION TRAP ---
         if (isCalibrating && calibStep == 2) {
-            // Auto-cap Infinity at 100% (1.0f) and save directly to the current slot!
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
+            
+            // Save under BOTH the EXIF name (for Auto-Load) and the Slot (for fast swapping)
+            lensManager.saveProfile(detectedLensName, tempCalPoints);
             lensManager.saveProfile("Lens " + currentLensSlot, tempCalPoints);
+            
             isCalibrating = false;
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             setHUDVisibility(View.VISIBLE);
@@ -639,7 +640,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
         
-        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
             if (isMenuEditing) handleMenuChange(1);
             else {
@@ -666,14 +666,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (waitingForProfileChoice) {
             waitingForProfileChoice = false;
             isCalibrating = true;
-            calibStep = 0; // Step 0 means waiting for EXIF photo!
-            if (tvCalibrationPrompt != null) {
-                tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
+            
+            // Smart Bypass: If Auto-Load failed, we ALREADY have the EXIF name. Skip Step 0!
+            if (detectedLensName != null && !detectedLensName.startsWith("Manual Lens")) {
+                calibStep = 1;
+                minDistanceInput = 0.3f;
+                tempCalPoints.clear();
+                updateCalibrationUI();
+            } else {
+                // Fresh start: prompt for throwaway photo
+                calibStep = 0; 
+                if (tvCalibrationPrompt != null) {
+                    tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
+                }
             }
             return;
         }
         
-        // --- NORMAL MENU NAVIGATION ---
         if (isMenuOpen) {
             if (isMenuEditing) handleMenuChange(-1);
             else {
