@@ -16,6 +16,7 @@ import java.util.List;
  */
 public class AdvancedFocusMeterView extends View {
     private Paint trackPaint, needlePaint, dofPaint, markPaint, liveTextPaint, rulerTextPaint, bgPaint;
+    private Paint telemetryPaintLeft, telemetryPaintRight; // --- NEW PAINTS ---
     
     private LensMath.GaugeState currentState = null;
     private float currentRatio = 0.5f;
@@ -65,6 +66,17 @@ public class AdvancedFocusMeterView extends View {
         bgPaint = new Paint();
         bgPaint.setColor(Color.DKGRAY);
         bgPaint.setStrokeWidth(4);
+
+        // --- NEW: TELEMETRY HUD SETUP ---
+        telemetryPaintLeft = new Paint();
+        telemetryPaintLeft.setColor(Color.argb(200, 200, 200, 200)); // Slight transparency
+        telemetryPaintLeft.setTextSize(14);
+        telemetryPaintLeft.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL));
+        telemetryPaintLeft.setAntiAlias(true);
+        telemetryPaintLeft.setTextAlign(Paint.Align.LEFT);
+
+        telemetryPaintRight = new Paint(telemetryPaintLeft);
+        telemetryPaintRight.setTextAlign(Paint.Align.RIGHT);
     }
 
     // Feeds the view the UI dots AND the math result
@@ -76,12 +88,10 @@ public class AdvancedFocusMeterView extends View {
         this.calPoints = points;
         
         // --- CRITICAL FIX: DO NOT RUN MATH WHILE CALIBRATING ---
-        // If we are mapping, the 2-point regression will hallucinate the H-mark. 
-        // We only build the Gauge State if calibration is completely finished!
         if (!isCalibrating && points != null && points.size() >= 2) {
             currentState = LensMath.buildGaugeState(ratio, aperture, focalLength, points);
         } else {
-            currentState = null; // Forces the UI to hide the H-mark and orange bar
+            currentState = null; 
         }
         
         invalidate();
@@ -97,7 +107,7 @@ public class AdvancedFocusMeterView extends View {
         
         int pad = 40;
         int trackW = w - (pad * 2);
-        int y = h / 2 + 20; // Shifted down slightly to make room for text
+        int y = h / 2 + 20; 
         
         // 0. Draw Track Background
         canvas.drawLine(pad, y, w - pad, y, bgPaint);
@@ -105,11 +115,10 @@ public class AdvancedFocusMeterView extends View {
         // --- 1. THE DYNAMIC DOF BAND ---
         if (currentState != null && currentState.nearMotor != null) {
             float nearX = pad + (trackW * currentState.nearMotor.floatValue());
-            float farX = pad + trackW; // Default to Infinity edge
+            float farX = pad + trackW; 
             if (currentState.farMotor != null && currentState.farMotor < 1.0) {
                 farX = pad + (trackW * currentState.farMotor.floatValue());
             }
-            // Draw the organically breathing orange rectangle!
             canvas.drawRect(Math.min(nearX, farX), y - 10, Math.max(nearX, farX), y + 10, dofPaint);
         }
 
@@ -136,7 +145,7 @@ public class AdvancedFocusMeterView extends View {
         if (currentState != null && currentState.hyperMotor != null) {
             float hX = pad + (trackW * currentState.hyperMotor.floatValue());
             if (rulerTextPaint != null) {
-                canvas.drawText("[H]", hX, y - 30, rulerTextPaint); // Mark H on the track
+                canvas.drawText("[H]", hX, y - 30, rulerTextPaint); 
             }
         }
 
@@ -144,11 +153,9 @@ public class AdvancedFocusMeterView extends View {
         float currentX = pad + (trackW * currentRatio);
         canvas.drawCircle(currentX, y, 12, needlePaint);
 
-        // --- 5. THE LIVE TEXT ENGINE (Clamped to Hyperfocal!) ---
+        // --- 5. THE LIVE TEXT ENGINE ---
         if (currentState != null) {
             String distStr;
-            
-            // If the math says we passed Hyperfocal, stop showing wildly high meters!
             if (currentState.focusDist >= currentState.hyperfocalDist) {
                 distStr = String.format("INF (H: %.1fm)", currentState.hyperfocalDist);
             } else if (currentState.focusDist >= 999.0) {
@@ -159,12 +166,31 @@ public class AdvancedFocusMeterView extends View {
                 int in = (int) (totalInches % 12);
                 distStr = String.format("%.2fm / %d'%d\"", currentState.focusDist, ft, in);
             }
-            
             canvas.drawText(distStr, w / 2, y - 70, liveTextPaint);
         } else if (isCalibrating) {
             canvas.drawText("MAPPING LENS...", w / 2, y - 70, liveTextPaint);
         } else {
             canvas.drawText("UNMAPPED LENS", w / 2, y - 70, liveTextPaint);
+        }
+
+        // --- 6. TELEMETRY HUD (NEW) ---
+        double coc = LensMath.getCircleOfConfusion();
+        String sensorFormat = (coc >= 0.030) ? "FF" : ((coc <= 0.011) ? "1\"" : "APS-C");
+        
+        // Lower Left: Hardware Specs
+        String leftTelemetry = String.format("[ %.0fmm f/%.1f | %s %.3f ]", currentFocalLength, currentAperture, sensorFormat, coc);
+        canvas.drawText(leftTelemetry, pad, y + 45, telemetryPaintLeft);
+
+        // Lower Right: Math Specs
+        if (currentState != null && !isCalibrating) {
+            String near = currentState.nearDist < 999.0 ? String.format("%.2fm", currentState.nearDist) : "INF";
+            String far = (currentState.farDist != null && currentState.farDist < 999.0) ? String.format("%.2fm", currentState.farDist) : "INF";
+            String rightTelemetry = String.format("[ DoF: %s - %s | H: %.1fm ]", near, far, currentState.hyperfocalDist);
+            canvas.drawText(rightTelemetry, w - pad, y + 45, telemetryPaintRight);
+        } else if (isCalibrating) {
+            canvas.drawText("[ MAPPING IN PROGRESS... ]", w - pad, y + 45, telemetryPaintRight);
+        } else {
+            canvas.drawText("[ AWAITING LENS MAP ]", w - pad, y + 45, telemetryPaintRight);
         }
     }
 }
