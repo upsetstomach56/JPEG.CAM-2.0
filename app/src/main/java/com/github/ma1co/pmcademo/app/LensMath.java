@@ -1,8 +1,31 @@
 package com.github.ma1co.pmcademo.app;
 
+import android.os.Build;
 import java.util.List;
 
 public class LensMath {
+
+    // --- NEW: DYNAMIC SENSOR SIZE DETECTOR ---
+    public static double getCircleOfConfusion() {
+        String model = Build.MODEL;
+        if (model == null) return 0.020; // Default to APS-C
+        
+        model = model.toUpperCase();
+        
+        // Full Frame cameras: A7 series, A9 series, A1, RX1
+        if (model.contains("ILCE-7") || model.contains("ILCE-9") || 
+            model.contains("ILCE-1") || model.contains("RX1")) {
+            return 0.030;
+        }
+        
+        // 1-Inch sensor cameras: RX100 series, ZV-1
+        if (model.contains("RX100") || model.contains("ZV-1")) {
+            return 0.011;
+        }
+        
+        // Default APS-C cameras: a6000 series, NEX, a5000
+        return 0.020; 
+    }
 
     public static class DiopterModel {
         public final double a;
@@ -95,7 +118,8 @@ public class LensMath {
         Double focusDist = motorToDistanceMeters(motorRatio, model);
         if (focusDist == null) focusDist = 999.0;
 
-        double cocMm = 0.020; // Sony APS-C standard
+        // --- FIXED: Now uses dynamic sensor size! ---
+        double cocMm = getCircleOfConfusion(); 
         double H = hyperfocalMeters(focalLengthMm, aperture, cocMm);
         Double hyperMotor = distanceToMotorRatio(H, model);
 

@@ -1907,6 +1907,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    @Override
+    public void onFocalLengthChanged(final float focalLengthMm) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (focalLengthMm > 0.0f) {
+                    // It's a native Sony lens talking to the camera!
+                    if (lensManager != null) {
+                        lensManager.currentFocalLength = focalLengthMm;
+                    }
+                    Log.d("filmOS_Lens", "Native Lens Zoomed! Updated LensProfileManager to: " + focalLengthMm + "mm");
+                    updateMainHUD(); // Instantly update the UI with the new focal length!
+                } else {
+                    // It's a dumb, fully manual lens (0.0mm). 
+                    // We ignore it, allowing the app to safely rely on whatever focal length 
+                    // you last saved into your manual LensProfile!
+                    Log.d("filmOS_Lens", "Dumb Lens Detected! Keeping saved profile focal length.");
+                }
+            }
+        });
+    }
+
     @Override 
     public void onStatusUpdate(final String target, final String status) { 
         runOnUiThread(new Runnable() {
