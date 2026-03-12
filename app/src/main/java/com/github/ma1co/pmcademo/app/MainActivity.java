@@ -335,11 +335,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
-                boolean normalRtl = isReady && !isProcessing && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || p.rollOff != 0); 
-                
-                // --- CRITICAL FIX: DO NOT IGNORE CALIBRATION PHOTOS ---
-                // Even if the RTL Recipe is OFF, we MUST catch the throwaway EXIF photo!
-                return isAutoLoading || (isCalibrating && calibStep == 0) || normalRtl; 
+                return isReady && !isProcessing && !isCalibrating && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || p.rollOff != 0); 
             }
             
             @Override 
@@ -350,69 +346,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         triggerLutPreload();
     }
+
     private void processWhenFileReady(final String path) {
         final File f = new File(path);
         
         // --- GHOST EVENT KILLER ---
         if (!f.exists()) return; 
-        
-        // If we grabbed an EXIF photo in the last 2 seconds, ignore all double-fire events!
-        if (System.currentTimeMillis() - lastExifGrabTime < 2000) {
-            return;
-        }
-
-        // --- SILENT LENS ID INTERCEPTOR ---
-        if (isAutoLoading || (isCalibrating && calibStep == 0)) {
-            lastExifGrabTime = System.currentTimeMillis(); // Lock out the RTL engine for 2 seconds!
-            
-            String extractedName = "Manual Lens " + currentLensSlot;
-            float extractedFocal = 50.0f; 
-            
-            try {
-                ExifInterface exif = new ExifInterface(path);
-                String fl = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH);
-                if (fl != null) {
-                    String[] parts = fl.split("/");
-                    int focal = Integer.parseInt(parts[0]) / Integer.parseInt(parts[1]);
-                    extractedName = focal + "mm Lens";
-                    extractedFocal = (float) focal; 
-                }
-            } catch (Exception e) {}
-            
-            f.delete(); // Throw the photo away
-            final String finalName = extractedName;
-            final float finalFocal = extractedFocal;
-            
-            runOnUiThread(new Runnable() {
-                public void run() {
-                    if (isAutoLoading) {
-                        isAutoLoading = false;
-                        if (lensManager.loadProfile(finalName)) {
-                            detectedLensName = finalName;
-                            detectedFocalLength = finalFocal; 
-                            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
-                            setHUDVisibility(View.VISIBLE);
-                            updateMainHUD();
-                        } else {
-                            detectedLensName = finalName;
-                            detectedFocalLength = finalFocal; 
-                            if (tvCalibrationPrompt != null) {
-                                tvCalibrationPrompt.setText("No profile for " + finalName + ". Press [DOWN] to map it.");
-                            }
-                            waitingForProfileChoice = true; 
-                        }
-                    } else if (isCalibrating && calibStep == 0) {
-                        detectedLensName = finalName;
-                        detectedFocalLength = finalFocal; 
-                        calibStep = 1;
-                        minDistanceInput = 0.3f;
-                        tempCalPoints.clear();
-                        updateCalibrationUI();
-                    }
-                }
-            });
-            return; 
-        }
 
         // --- NORMAL IMAGE GRADING PIPELINE ---
         isProcessing = true; 
@@ -612,16 +551,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isPlaybackMode) { exitPlayback(); return; }
         if (isProcessing) return;
         
+        // --- STEP 0: FOCAL LENGTH INPUT FOR DUMB LENSES ---
+        if (isCalibrating && calibStep == 0) {
+            calibStep = 1;
+            minDistanceInput = 0.3f;
+            tempCalPoints.clear();
+            updateCalibrationUI();
+            return;
+        }
+        
         if (isCalibrating) {
             if (calibStep == 1) {
-                // FIX: Grab the actual physical motor ratio instead of guessing 0.0
                 tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
                 calibStep = 2; 
                 updateCalibrationUI();
             } else if (calibStep == 2) {
-                // Log the mid/infinity points
                 tempCalPoints.add(new LensProfileManager.CalPoint(cachedFocusRatio, minDistanceInput));
-                updateCalibrationUI(); // Redraws to update the Points Logged counter!
+                updateCalibrationUI(); 
             }
             return;
         }
@@ -630,14 +576,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (mDialMode == DIAL_MODE_REVIEW) {
                 enterPlayback();
             } else if (mDialMode == DIAL_MODE_FOCUS && cachedIsManualFocus) {
+                // --- RESTORED ROUTING MENU ---
                 waitingForProfileChoice = true;
-                detectedLensName = "Manual Lens " + currentLensSlot;
-                
                 setHUDVisibility(View.GONE); 
                 if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE); 
                 if (tvCalibrationPrompt != null) {
                     tvCalibrationPrompt.setVisibility(View.VISIBLE);
-                    tvCalibrationPrompt.setText("LENS MAPPING\n\n[UP] Auto-Load Saved Lens\n[DOWN] Map New Lens\n[LEFT] Append to Current Map\n[RIGHT] Cancel");
+                    tvCalibrationPrompt.setText("LENS MAPPING\n\n[DOWN] Map New Lens\n[LEFT] Append to Current Map\n[RIGHT] Cancel");
                 }
             } else {
                 displayState = (displayState == 0) ? 1 : 0; 
@@ -648,29 +593,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else { isMenuEditing = !isMenuEditing; renderMenu(); }
         }
     }
-
+    
     @Override 
     public void onUpPressed() { 
         if (isProcessing) return;
-        
-        if (waitingForProfileChoice) {
-            waitingForProfileChoice = false;
-            isAutoLoading = true;
-            if (tvCalibrationPrompt != null) {
-                tvCalibrationPrompt.setText("AUTO-LOAD LENS\nSnap a photo to read Lens ID...");
-            }
-            return;
-        }
 
         // --- FINISH CALIBRATION TRAP ---
         if (isCalibrating && calibStep == 2) {
             tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
             
-            // Save under BOTH the EXIF name (for Auto-Load) and the Slot (for fast swapping)
             lensManager.saveProfile(detectedLensName, detectedFocalLength, tempCalPoints);
             lensManager.saveProfile("Lens " + currentLensSlot, detectedFocalLength, tempCalPoints);
-            
-            // --- CRITICAL FIX: FORCE LOAD NEW DATA INTO RAM ---
             lensManager.loadProfile("Lens " + currentLensSlot);
             
             isCalibrating = false;
@@ -708,19 +641,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             waitingForProfileChoice = false;
             isCalibrating = true;
             
-            // Smart Bypass: If Auto-Load failed, we ALREADY have the EXIF name. Skip the photo step!
-            if (detectedLensName != null && !detectedLensName.startsWith("Manual Lens")) {
+            if (lensManager != null && lensManager.currentFocalLength > 0.0f) {
+                // Smart Bypass: Native Lens Detected. Skip Step 0!
+                detectedLensName = "Native " + (int)lensManager.currentFocalLength + "mm Lens";
+                detectedFocalLength = lensManager.currentFocalLength;
                 calibStep = 1;
                 minDistanceInput = 0.3f;
                 tempCalPoints.clear();
-                updateCalibrationUI();
             } else {
-                // Fresh start from the main router: prompt for a throwaway photo
+                // Dumb Lens Detected: Go to Step 0
+                detectedLensName = "Manual Lens Slot " + currentLensSlot;
+                detectedFocalLength = 50.0f; // Default starting point
                 calibStep = 0; 
-                if (tvCalibrationPrompt != null) {
-                    tvCalibrationPrompt.setText("MAP NEW LENS\nSnap a photo to read Lens ID...");
-                }
             }
+            updateCalibrationUI();
             return;
         }
         
@@ -747,6 +681,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override 
     public void onLeftPressed() { 
         if (isProcessing) return;
+
+        if (isCalibrating && calibStep == 0) {
+            detectedFocalLength = Math.max(10.0f, detectedFocalLength - 1.0f);
+            updateCalibrationUI();
+            return;
+        }
 
         // --- APPEND TO CURRENT MAP CHOICE ---
         if (waitingForProfileChoice) {
@@ -800,6 +740,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public void onRightPressed() { 
         if (isProcessing) return;
 
+        if (isCalibrating && calibStep == 0) {
+            detectedFocalLength = Math.min(600.0f, detectedFocalLength + 1.0f);
+            updateCalibrationUI();
+            return;
+        }
+        
         // --- UNIVERSAL CANCEL FOR LENS MAPPING ---
         if (waitingForProfileChoice || isAutoLoading || isCalibrating) {
             waitingForProfileChoice = false;
@@ -1010,9 +956,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void handleHardwareInput(int d) {
-        // --- DIAL TRAP FOR CALIBRATION VALUES (Moved to top for instant response!) ---
-        if (isCalibrating && calibStep >= 1) {
-            minDistanceInput = Math.max(0.1f, minDistanceInput + (d * 0.1f));
+        // --- DIAL TRAP FOR FOCAL LENGTH INPUT ---
+        if (isCalibrating && calibStep == 0) {
+            detectedFocalLength = Math.max(10.0f, Math.min(600.0f, detectedFocalLength + d));
             updateCalibrationUI();
             return;
         }
@@ -1675,27 +1621,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void updateCalibrationUI() {
         if (!isCalibrating) return;
         
-        String distStr;
-        if (minDistanceInput >= 999.0f) {
-            distStr = "INFINITY";
-        } else {
-            float totalInches = minDistanceInput * 39.3701f;
-            int ft = (int) (totalInches / 12);
-            int in = (int) (totalInches % 12);
-            distStr = String.format("%.2fm / %d'%d\"", minDistanceInput, ft, in);
-        }
-        
         String header = "<font color='#FFFFFF'><b>[ MAPPING: " + detectedLensName + " | POINTS LOGGED: " + tempCalPoints.size() + " ]</b></font><br>";
-        
-        // Color coding for clear user direction!
-        String wheelText = "<font color='#00FFFF'><b>rear scroll wheel</b></font>"; // Cyan
-        String sliderHtml = "<font color='#E6320F'><big><b>◄ " + distStr + " ►</b></big></font>"; // filmOS Orange
-        String enterBtn = "<font color='#00FF00'><b>[ENTER]</b></font>"; // Green
-        String upBtn = "<font color='#00FF00'><b>[UP]</b></font>"; // Green
+        String wheelText = "<font color='#00FFFF'><b>rear scroll wheel</b></font>"; 
+        String enterBtn = "<font color='#00FF00'><b>[ENTER]</b></font>"; 
+        String upBtn = "<font color='#00FF00'><b>[UP]</b></font>"; 
         
         String instructions = "";
         
-        if (calibStep == 1) {
+        if (calibStep == 0) {
+            String sliderHtml = "<font color='#E6320F'><big><b>◄ " + (int)detectedFocalLength + "mm ►</b></big></font>";
+            instructions = "<font color='#FFFFFF'><small>STEP 0: Manual Lens Detected.</small><br>";
+            instructions += "<small>Use " + wheelText + " or D-Pad to set Focal Length: </small> " + sliderHtml + "<br>";
+            instructions += "<small>Press " + enterBtn + " to confirm.</small></font>";
+        } else if (calibStep == 1) {
             instructions = "<font color='#FFFFFF'><small>STEP 1: Turn lens ring to hard stop (MIN FOCUS).</small><br>";
             instructions += "<small>Use " + wheelText + " to dial distance: </small> " + sliderHtml + "<br>";
             instructions += "<small>Press " + enterBtn + " to lock min point.</small></font>";
