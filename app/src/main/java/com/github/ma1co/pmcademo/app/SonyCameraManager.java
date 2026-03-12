@@ -31,7 +31,7 @@ public class SonyCameraManager {
         void onApertureChanged();
         void onIsoChanged();
         void onFocusPositionChanged(float ratio);
-        void onFocalLengthChanged(float focalLengthMm);
+        void onFocalLengthChanged(float focalLengthMm); 
     }
 
     private CameraEventListener listener;
@@ -48,13 +48,24 @@ public class SonyCameraManager {
         return cameraEx; 
     }
 
+    // --- NEW: Safe one-time check for Prime Lenses on boot ---
+    public float getInitialFocalLength() {
+        if (camera != null) {
+            try {
+                return camera.getParameters().getFocalLength();
+            } catch (Exception e) {
+                Log.e("filmOS", "Could not read initial focal length.");
+            }
+        }
+        return 0.0f; // 0.0 indicates a dumb manual lens
+    }
+
     public void open(SurfaceHolder holder) {
         if (cameraEx == null) {
             try {
                 cameraEx = CameraEx.open(0, null);
                 camera = cameraEx.getNormalCamera();
                 
-                // CRITICAL FIX: Let the camera take photos natively without UI lockups
                 cameraEx.startDirectShutter();
                 CameraEx.AutoPictureReviewControl apr = new CameraEx.AutoPictureReviewControl();
                 cameraEx.setAutoPictureReviewControl(apr);
@@ -85,7 +96,6 @@ public class SonyCameraManager {
                 camera.setPreviewDisplay(holder);
                 camera.startPreview();
                 
-                // Force SINGLE drive mode so the shutter doesn't rapid-fire
                 try {
                     Camera.Parameters params = camera.getParameters();
                     CameraEx.ParametersModifier pm = cameraEx.createParametersModifier(params);
@@ -133,55 +143,18 @@ public class SonyCameraManager {
         }
     }
 
-    // --- NEW METHOD FOR LOGCAT RECONNAISSANCE ---
-    public void logLensLive() {
-        if (cameraEx == null || camera == null) return;
-        try {
-            Camera.Parameters p = camera.getParameters();
-            CameraEx.ParametersModifier pm = cameraEx.createParametersModifier(p);
-            
-            // 1. isSupportedLensInfo() belongs to ParametersModifier
-            Boolean supported = (Boolean) pm.getClass().getMethod("isSupportedLensInfo").invoke(pm);
-            
-            if (supported != null && supported) {
-                // 2. getLensInfo() belongs to CameraEx!
-                Object lensInfo = cameraEx.getClass().getMethod("getLensInfo").invoke(cameraEx);
-                if (lensInfo != null) {
-                    String name = (String) lensInfo.getClass().getField("LensName").get(lensInfo);
-                    String type = (String) lensInfo.getClass().getField("LensType").get(lensInfo);
-                    String phase = (String) lensInfo.getClass().getField("PhaseShiftSensor").get(lensInfo);
-                    
-                    // 3. We can just use standard Android API for the current Focal Length!
-                    float currentFocal = p.getFocalLength();
-                    
-                    Log.d("filmOS_Lens", "LENS DATA -> Name: [" + name + "] Type: [" + type + "] Sensor: [" + phase + "] Focal: [" + currentFocal + "mm]");
-                } else {
-                    Log.d("filmOS_Lens", "LENS DATA -> getLensInfo() returned null (Lens Detached?)");
-                }
-            } else {
-                Log.d("filmOS_Lens", "LENS DATA -> LensInfo NOT supported currently (No contacts?)");
-            }
-        } catch (Exception e) {
-            // We expect some fields to potentially be missing on older firmwares, so we catch the error quietly.
-            Log.e("filmOS_Lens", "LENS DATA ERROR: " + e.getMessage());
-        }
-    }
-
     private void setupNativeListeners() {
         cameraEx.setShutterSpeedChangeListener(new CameraEx.ShutterSpeedChangeListener() {
             @Override 
             public void onShutterSpeedChange(CameraEx.ShutterSpeedInfo i, CameraEx c) {
-                if (listener != null) {
-                    listener.onShutterSpeedChanged();
-                }
+                if (listener != null) listener.onShutterSpeedChanged();
             }
         });
 
         try {
             Class<?> lClass = Class.forName("com.sony.scalar.hardware.CameraEx$ApertureChangeListener");
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                getClass().getClassLoader(), 
-                new Class[]{lClass},
+                getClass().getClassLoader(), new Class[]{lClass},
                 new java.lang.reflect.InvocationHandler() {
                     @Override 
                     public Object invoke(Object p, java.lang.reflect.Method m, Object[] a) {
@@ -193,15 +166,12 @@ public class SonyCameraManager {
                 }
             );
             cameraEx.getClass().getMethod("setApertureChangeListener", lClass).invoke(cameraEx, proxy);
-        } catch (Exception e) {
-            Log.e("filmOS", "Failed to set Aperture proxy: " + e.getMessage());
-        }
+        } catch (Exception e) { }
 
         try {
             Class<?> lClass = Class.forName("com.sony.scalar.hardware.CameraEx$AutoISOSensitivityListener");
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                getClass().getClassLoader(), 
-                new Class[]{lClass},
+                getClass().getClassLoader(), new Class[]{lClass},
                 new java.lang.reflect.InvocationHandler() {
                     @Override 
                     public Object invoke(Object p, java.lang.reflect.Method m, Object[] a) {
@@ -213,15 +183,12 @@ public class SonyCameraManager {
                 }
             );
             cameraEx.getClass().getMethod("setAutoISOSensitivityListener", lClass).invoke(cameraEx, proxy);
-        } catch (Exception e) {
-            Log.e("filmOS", "Failed to set ISO proxy: " + e.getMessage());
-        }
+        } catch (Exception e) { }
 
         try {
             Class<?> lClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocusDriveListener");
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                getClass().getClassLoader(), 
-                new Class[]{lClass},
+                getClass().getClassLoader(), new Class[]{lClass},
                 new java.lang.reflect.InvocationHandler() {
                     @Override 
                     public Object invoke(Object p, java.lang.reflect.Method m, Object[] a) throws Throwable {
@@ -238,30 +205,27 @@ public class SonyCameraManager {
                 }
             );
             cameraEx.getClass().getMethod("setFocusDriveListener", lClass).invoke(cameraEx, proxy);
-        } catch (Exception e) {
-            Log.e("filmOS", "Failed to set Focus proxy: " + e.getMessage());
-        }
+        } catch (Exception e) { }
 
-        // --- ADD TO THE END OF setupNativeListeners() ---
         try {
             Class<?> lClass = Class.forName("com.sony.scalar.hardware.CameraEx$FocalLengthChangeListener");
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                getClass().getClassLoader(), 
-                new Class[]{lClass},
+                getClass().getClassLoader(), new Class[]{lClass},
                 new java.lang.reflect.InvocationHandler() {
                     @Override 
                     public Object invoke(Object p, java.lang.reflect.Method m, Object[] a) {
-                        if (m.getName().equals("onFocalLengthChanged")) {
-                            Log.d("filmOS_Lens", "HARDWARE EVENT: Focal Length Zoomed/Changed to " + a[0] + "mm");
+                        if (m.getName().equals("onFocalLengthChanged") && a.length > 0) {
+                            if (listener != null) {
+                                // Divide hardware's 10x value by 10 to get standard mm (e.g. 250 -> 25.0)
+                                int focal10x = (Integer) a[0];
+                                listener.onFocalLengthChanged(focal10x / 10.0f);
+                            }
                         }
                         return null;
                     }
                 }
             );
             cameraEx.getClass().getMethod("setFocalLengthChangeListener", lClass).invoke(cameraEx, proxy);
-        } catch (Exception e) {
-            Log.e("filmOS", "Failed to set FocalLength proxy: " + e.getMessage());
-        }
+        } catch (Exception e) { }
     }
-    
 }
