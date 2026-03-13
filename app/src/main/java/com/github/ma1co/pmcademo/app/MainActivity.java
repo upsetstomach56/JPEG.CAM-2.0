@@ -459,10 +459,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (!isNativeLensAttached) {
                 // MANUAL LENS: Auto-generate ghost profile and equip immediately!
                 tempCalPoints = lensManager.generateManualDummyProfile();
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, true); // true = Manual
                 
                 availableLenses = lensManager.getAvailableLenses();
-                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture);
+                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, true);
                 currentLensIndex = availableLenses.indexOf(newFilename);
                 if (currentLensIndex == -1) currentLensIndex = 0;
                 lensManager.loadProfileFromFile(newFilename);
@@ -530,10 +530,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (calibStep == 2) {
                 tempCalPoints.add(new LensProfileManager.CalPoint(1.0f, 999.0f));
                 
-                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
+                lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints, false); // false = Electronic
                 
                 availableLenses = lensManager.getAvailableLenses();
-                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture);
+                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture, false);
                 currentLensIndex = availableLenses.indexOf(newFilename);
                 if (currentLensIndex == -1) currentLensIndex = 0;
                 lensManager.loadProfileFromFile(newFilename);
@@ -647,7 +647,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 updateCalibrationUI();
             }
-            return; // Consume the keypress
+            return; // Consume the keypress either way
         }
 
         if (isPlaybackMode) { showPlaybackImage(playbackIndex - 1); } 
@@ -1429,7 +1429,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvFocusMode != null) {
             if ("auto".equals(fm)) tvFocusMode.setText("AF-S"); 
             else if (cachedIsManualFocus) {
-                String lName = lensManager != null ? lensManager.getCurrentLensName() : "UNMAPPED";
+                // --- PRO FORMATTED LENS DISPLAY ---
+                String rawName = lensManager != null ? lensManager.getCurrentLensName() : "Unmapped Lens";
+                String lName = LensProfileManager.formatDisplayName(rawName);
                 tvFocusMode.setText("MF [" + lName + "]"); 
             }
             else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C"); 
@@ -1484,7 +1486,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 Log.d("filmOS_Lens", "Boot: Native Lens Detected: " + initFocal + "mm");
                 
-                // Force AF-S for electronic lenses
                 if (cameraManager.getCamera() != null) {
                     try {
                         Camera c = cameraManager.getCamera();
@@ -1538,7 +1539,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     }
                     Log.d("filmOS_Lens", "Native Lens Zoomed: " + focalLengthMm + "mm");
                     
-                    // If swapped from manual, auto-switch to AF-S
                     if (wasManual && cameraManager != null && cameraManager.getCamera() != null) {
                         try {
                             Camera c = cameraManager.getCamera();

@@ -44,10 +44,35 @@ public class LensProfileManager {
         return dir;
     }
 
-    public static String generateFilename(float focalLength, float maxAperture) {
+    // --- NEW: Prefix generator (M for Manual, E for Electronic) ---
+    public static String generateFilename(float focalLength, float maxAperture, boolean isManual) {
         int focalInt = (int) focalLength;
         int apInt = Math.round(maxAperture * 10.0f); 
-        return focalInt + "mm" + apInt + ".txt"; // Using .txt to bypass Sony OS restrictions
+        String prefix = isManual ? "M" : "E";
+        return prefix + focalInt + "mm" + apInt + ".txt"; 
+    }
+
+    // --- NEW: Formats M50mm18.txt into "50mm f/1.8" for the HUD ---
+    public static String formatDisplayName(String filename) {
+        try {
+            if (filename == null || filename.equals("Unmapped Lens")) return "UNMAPPED";
+            String name = filename.toLowerCase().replace(".txt", "");
+            
+            // Strip the M or E prefix
+            if (name.startsWith("m") || name.startsWith("e")) {
+                name = name.substring(1);
+            }
+            
+            int mmIndex = name.indexOf("mm");
+            if (mmIndex != -1) {
+                String focal = name.substring(0, mmIndex + 2); // e.g. "50mm"
+                String apStr = name.substring(mmIndex + 2);    // e.g. "18"
+                float ap = Float.parseFloat(apStr) / 10.0f;    // e.g. 1.8
+                return focal + " f/" + ap;                     // "50mm f/1.8"
+            }
+        } catch (Exception e) {}
+        
+        return filename.replace(".txt", "").toUpperCase();
     }
 
     public List<CalPoint> generateManualDummyProfile() {
@@ -73,18 +98,17 @@ public class LensProfileManager {
         return lenses;
     }
 
-    public void saveProfileToFile(float focalLength, float maxAperture, List<CalPoint> points) {
+    public void saveProfileToFile(float focalLength, float maxAperture, List<CalPoint> points, boolean isManual) {
         File dir = getLensesDir();
         if (!dir.exists() && !dir.mkdirs()) {
             Log.e("filmOS_Lens", "CRITICAL: Could not create LENSES directory.");
             return;
         }
 
-        String filename = generateFilename(focalLength, maxAperture);
+        String filename = generateFilename(focalLength, maxAperture, isManual);
         File outFile = new File(dir, filename);
 
         try {
-            // Using FileOutputStream mirroring native byte writing for safety
             FileOutputStream fos = new FileOutputStream(outFile);
             
             fos.write(("FOCAL:" + focalLength + "\n").getBytes());
@@ -140,7 +164,7 @@ public class LensProfileManager {
 
             this.currentFocalLength = loadedFocal;
             this.currentMaxAperture = loadedAperture;
-            this.currentLensName = filename.replace(".txt", "");
+            this.currentLensName = filename; // We keep the raw M/E filename so we can check it later
             this.activePoints = loadedPoints;
             this.hasActiveProfile = true;
             
@@ -160,6 +184,11 @@ public class LensProfileManager {
 
     public boolean hasActiveProfile() {
         return hasActiveProfile && activePoints.size() >= 2;
+    }
+    
+    // --- NEW: Checks if the currently loaded profile is a Manual "M" profile ---
+    public boolean isCurrentProfileManual() {
+        return currentLensName != null && currentLensName.toUpperCase().startsWith("M");
     }
 
     public List<CalPoint> getCurrentPoints() {
