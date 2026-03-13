@@ -6,8 +6,8 @@ import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -24,8 +24,6 @@ public class LensProfileManager {
         }
     }
 
-    private File lensesDir;
-    
     // Active State
     public float currentFocalLength = 50.0f;
     public float currentMaxAperture = 2.8f;
@@ -34,14 +32,24 @@ public class LensProfileManager {
     private boolean hasActiveProfile = false;
 
     public LensProfileManager(Context context) {
-        // Reverted to EXACTLY match your working GRADED folder logic
-        lensesDir = new File(Environment.getExternalStorageDirectory(), "LENSES");
-        if (!lensesDir.exists()) {
-            lensesDir.mkdirs();
+        // Constructor left intentionally blank to avoid stale SD card references on boot.
+    }
+    
+    // Dynamically fetches the root exactly like GRADED does
+    private File getLensesDir() {
+        File dir = new File(Environment.getExternalStorageDirectory(), "LENSES");
+        if (!dir.exists()) {
+            dir.mkdirs();
         }
+        return dir;
     }
 
-    // --- NEW: Generates a dummy math profile for manual lenses ---
+    public static String generateFilename(float focalLength, float maxAperture) {
+        int focalInt = (int) focalLength;
+        int apInt = Math.round(maxAperture * 10.0f); // Math.round prevents 1.8 from truncating to 17
+        return focalInt + "mm" + apInt + ".lens";
+    }
+
     public List<CalPoint> generateManualDummyProfile() {
         List<CalPoint> ghostPoints = new ArrayList<CalPoint>();
         ghostPoints.add(new CalPoint(0.0f, 0.3f)); // Virtual Near
@@ -52,8 +60,9 @@ public class LensProfileManager {
     
     public List<String> getAvailableLenses() {
         List<String> lenses = new ArrayList<String>();
-        if (lensesDir != null && lensesDir.exists() && lensesDir.listFiles() != null) {
-            for (File f : lensesDir.listFiles()) {
+        File dir = getLensesDir();
+        if (dir.exists() && dir.listFiles() != null) {
+            for (File f : dir.listFiles()) {
                 if (f.getName().toLowerCase().endsWith(".lens")) {
                     lenses.add(f.getName());
                 }
@@ -64,31 +73,26 @@ public class LensProfileManager {
     }
 
     public void saveProfileToFile(float focalLength, float maxAperture, List<CalPoint> points) {
-        if (lensesDir == null || (!lensesDir.exists() && !lensesDir.mkdirs())) {
-            Log.e("filmOS_Lens", "CRITICAL: Could not access LENSES directory to save.");
-            return;
-        }
-
-        int focalInt = (int) focalLength;
-        int apInt = (int) (maxAperture * 10); 
-        String filename = focalInt + "mm" + apInt + ".lens";
-        
-        File outFile = new File(lensesDir, filename);
+        File dir = getLensesDir();
+        String filename = generateFilename(focalLength, maxAperture);
+        File outFile = new File(dir, filename);
 
         try {
-            FileWriter writer = new FileWriter(outFile);
-            writer.write("FOCAL:" + focalLength + "\n");
-            writer.write("APERTURE:" + maxAperture + "\n");
+            // Using FileOutputStream mirroring native byte writing (much safer on Sony OS)
+            FileOutputStream fos = new FileOutputStream(outFile);
+            
+            fos.write(("FOCAL:" + focalLength + "\n").getBytes());
+            fos.write(("APERTURE:" + maxAperture + "\n").getBytes());
             
             StringBuilder ptsBuilder = new StringBuilder();
             for (int i = 0; i < points.size(); i++) {
                 ptsBuilder.append(points.get(i).ratio).append(",").append(points.get(i).distance);
                 if (i < points.size() - 1) ptsBuilder.append(";");
             }
-            writer.write("POINTS:" + ptsBuilder.toString() + "\n");
+            fos.write(("POINTS:" + ptsBuilder.toString() + "\n").getBytes());
             
-            writer.flush();
-            writer.close();
+            fos.flush();
+            fos.close();
             Log.d("filmOS_Lens", "Saved lens profile to SD Card: " + outFile.getAbsolutePath());
         } catch (Exception e) {
             Log.e("filmOS_Lens", "Failed to save lens file: " + e.getMessage());
@@ -96,8 +100,8 @@ public class LensProfileManager {
     }
 
     public void loadProfileFromFile(String filename) {
-        if (lensesDir == null) return;
-        File inFile = new File(lensesDir, filename);
+        File dir = getLensesDir();
+        File inFile = new File(dir, filename);
         if (!inFile.exists()) {
             clearCurrentProfile();
             return;

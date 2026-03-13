@@ -462,7 +462,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
                 
                 availableLenses = lensManager.getAvailableLenses();
-                String newFilename = (int)detectedFocalLength + "mm" + (int)(detectedMaxAperture * 10) + ".lens";
+                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture);
                 currentLensIndex = availableLenses.indexOf(newFilename);
                 if (currentLensIndex == -1) currentLensIndex = 0;
                 lensManager.loadProfileFromFile(newFilename);
@@ -533,7 +533,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 lensManager.saveProfileToFile(detectedFocalLength, detectedMaxAperture, tempCalPoints);
                 
                 availableLenses = lensManager.getAvailableLenses();
-                String newFilename = (int)detectedFocalLength + "mm" + (int)(detectedMaxAperture * 10) + ".lens";
+                String newFilename = LensProfileManager.generateFilename(detectedFocalLength, detectedMaxAperture);
                 currentLensIndex = availableLenses.indexOf(newFilename);
                 if (currentLensIndex == -1) currentLensIndex = 0;
                 lensManager.loadProfileFromFile(newFilename);
