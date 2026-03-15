@@ -36,25 +36,46 @@ public class HttpServer extends NanoHTTPD {
         File root = Environment.getExternalStorageDirectory();
 
         try {
-            if (Method.POST.equals(session.getMethod()) && uri.equals("/api/upload_lut")) {
+            // Updated to catch both the old LUT endpoint and a generic /upload endpoint
+            if (Method.POST.equals(session.getMethod()) && (uri.equals("/api/upload_lut") || uri.equals("/api/upload"))) {
                 FileOutputStream out = null;
+                File tempFile = null;
+                File destFile = null;
+                
                 try {
                     Map<String, String> headers = session.getHeaders();
                     String fileName = headers.get("x-file-name");
                     
-                    if (fileName == null || (!fileName.toLowerCase().endsWith(".cube") && !fileName.toLowerCase().endsWith(".cub"))) {
-                        return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Invalid filename\"}");
+                    if (fileName == null) {
+                        return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Missing filename\"}");
+                    }
+
+                    // --- THE SMART ROUTER LOGIC ---
+                    String lowerName = fileName.toLowerCase();
+                    String targetFolderName = "";
+                    
+                    if (lowerName.endsWith(".cube") || lowerName.endsWith(".cub")) {
+                        targetFolderName = "LUTS";
+                    } else if (lowerName.endsWith(".txt") || lowerName.endsWith(".lens")) {
+                        targetFolderName = "LENSES";
+                    } else {
+                        // Reject files we don't know how to handle
+                        return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{\"error\":\"Unsupported file type\"}");
                     }
 
                     String contentLengthStr = headers.get("content-length");
                     int contentLength = contentLengthStr != null ? Integer.parseInt(contentLengthStr) : 0;
 
-                    File lutDir = new File(root, "LUTS");
-                    if (!lutDir.exists()) lutDir.mkdirs();
-                    File destFile = new File(lutDir, fileName);
+                    File targetDir = new File(root, targetFolderName);
+                    if (!targetDir.exists()) targetDir.mkdirs();
+                    
+                    // --- THE TROJAN HORSE DISGUISE ---
+                    // Save as .tmp so Sony's MediaScanner completely ignores the incoming stream
+                    tempFile = new File(targetDir, "upload_" + System.currentTimeMillis() + ".tmp");
+                    destFile = new File(targetDir, fileName);
 
                     InputStream in = session.getInputStream();
-                    out = new FileOutputStream(destFile);
+                    out = new FileOutputStream(tempFile);
                     
                     byte[] buffer = new byte[8192];
                     int read;
@@ -67,10 +88,24 @@ public class HttpServer extends NanoHTTPD {
                         out.write(buffer, 0, read);
                         totalRead += read;
                     }
+                    
                     out.flush();
+                    out.close(); // Force release the hardware lock immediately
+                    out = null;
+
+                    // --- THE SWITCH ---
+                    if (tempFile.exists()) {
+                        if (destFile.exists()) destFile.delete(); // Clear out old file if overwriting
+                        boolean success = tempFile.renameTo(destFile);
+                        if (!success) {
+                            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"OS blocked rename operation\"}");
+                        }
+                    }
+
                     return newFixedLengthResponse(Response.Status.OK, "application/json", "{\"status\":\"success\"}");
                 } catch (Exception e) {
-                    return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Upload failed\"}");
+                    if (tempFile != null && tempFile.exists()) tempFile.delete(); // Clean up garbage files on fail
+                    return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{\"error\":\"Upload stream failed\"}");
                 } finally {
                     try { if (out != null) out.close(); } catch (Exception e) {}
                 }
@@ -127,6 +162,7 @@ public class HttpServer extends NanoHTTPD {
                     }
                     
                     BitmapFactory.Options opts = new BitmapFactory.Options();
+                    // Keep inSampleSize at 8 for speedy web dashboard loading
                     opts.inSampleSize = 8;
                     opts.inPurgeable = true; 
                     Bitmap bm = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
