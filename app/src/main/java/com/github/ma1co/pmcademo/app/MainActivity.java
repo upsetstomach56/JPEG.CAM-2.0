@@ -1388,10 +1388,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tabHeaderLayout.setGravity(Gravity.CENTER);
         tabHeaderLayout.setPadding(0, 0, 0, 10);
         
-        tvTabRTL = createTabHeader("[ RTL ]");
-        tvTabSettings = createTabHeader("[ SETTINGS ]");
-        tvTabNetwork = createTabHeader("[ NETWORK ]");
-        tvTabSupport = createTabHeader("[ SUPPORT ]"); // <-- New Tab
+        tvTabRTL = createTabHeader("RTL");
+        tvTabSettings = createTabHeader("SETTINGS");
+        tvTabNetwork = createTabHeader("NETWORK");
+        tvTabSupport = createTabHeader("SUPPORT"); // <-- New Tab
         
         tabHeaderLayout.addView(tvTabRTL);
         tabHeaderLayout.addView(tvTabSettings);
@@ -1509,9 +1509,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView createTabHeader(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextSize(22);
+        tv.setTextSize(16); // Shrunk from 22 to fit 4 tabs beautifully
         tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setPadding(15, 0, 15, 0);
+        tv.setGravity(Gravity.CENTER); // Center the text inside its column
+        tv.setPadding(0, 0, 0, 10);
+        
+        // THE MAGIC TRICK: weight = 1.0f forces the 4 tabs to share the screen space equally
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        tv.setLayoutParams(lp);
+        
         return tv;
     }
 
