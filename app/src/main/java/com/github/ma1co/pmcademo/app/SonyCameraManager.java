@@ -167,18 +167,6 @@ public class SonyCameraManager {
             camera = null;
         }
     }
-        
-        // 3. Safely release the hardware
-        if (cameraEx != null) {
-            try {
-                cameraEx.release();
-            } catch (Exception e) {
-                Log.e("filmOS", "Error releasing CameraEx: " + e.getMessage());
-            }
-            cameraEx = null;
-            camera = null;
-        }
-    }
 
     private void setupNativeListeners() {
         cameraEx.setShutterSpeedChangeListener(new CameraEx.ShutterSpeedChangeListener() {
