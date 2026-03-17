@@ -115,6 +115,16 @@ public class SonyCameraManager {
     }
 
     public void close() {
+        // 1. First, gently stop any active hardware operations
+        if (camera != null) {
+            try {
+                camera.cancelAutoFocus();
+            } catch (Exception e) {
+                Log.e("filmOS", "Failed to cancel autofocus on close.");
+            }
+        }
+
+        // 2. Restore the original standard Sony parameters
         if (camera != null && origSceneMode != null) {
             try {
                 Camera.Parameters p = camera.getParameters();
@@ -130,14 +140,25 @@ public class SonyCameraManager {
                 if (origWbShiftMode != null) p.set("white-balance-shift-mode", origWbShiftMode);
                 if (origWbShiftLb != null) p.set("white-balance-shift-lb", origWbShiftLb);
                 if (origWbShiftCc != null) p.set("white-balance-shift-cc", origWbShiftCc);
+                
                 camera.setParameters(p);
+                Log.d("filmOS", "Successfully restored standard Sony parameters.");
+                
+                // FIX: This is the final IPC payload. We MUST give the BIONZ daemon
+                // time to digest these standard settings before calling release().
+                Thread.sleep(300);
             } catch (Exception e) {
                 Log.e("filmOS", "Failed to restore parameters: " + e.getMessage());
             }
         }
         
+        // 3. Safely release the hardware
         if (cameraEx != null) {
-            cameraEx.release();
+            try {
+                cameraEx.release();
+            } catch (Exception e) {
+                Log.e("filmOS", "Error releasing CameraEx: " + e.getMessage());
+            }
             cameraEx = null;
             camera = null;
         }
