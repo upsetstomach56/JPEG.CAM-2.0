@@ -534,6 +534,25 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             launchHudMode(0);
             return;
         }
+
+        // LAUNCH TONE & STYLE HUD (Page 2, Rows 1-3)
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 2 && menuSelection >= 1 && menuSelection <= 3) {
+            launchHudMode(3, menuSelection - 1);
+            return;
+        }
+
+        // LAUNCH TOY CAMERA HUD (Page 4, Rows 1-2)
+        // Must have Picture Effect set to "toy-camera" to access
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 4 && (menuSelection == 1 || menuSelection == 2) && "toy-camera".equals(p.pictureEffect)) {
+            launchHudMode(5, menuSelection - 1);
+            return;
+        }
+
+        // LAUNCH EDGE SHADING HUD (Page 4, Rows 4-5)
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 4 && (menuSelection == 4 || menuSelection == 5)) {
+            launchHudMode(4, menuSelection - 4);
+            return;
+        }
         
         if (isCalibrating && calibStep == 0) {
             calibStep = 10; 
@@ -783,9 +802,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override
     public void onRightPressed() {
         if (isHudActive) {
-            if (currentHudMode == 2) handleWbAdjustment(1, 0); // Right is Amber (+1)
+            if (currentHudMode == 2) handleWbAdjustment(1, 0); 
             else {
-                int maxSlots = (currentHudMode == 0) ? 8 : 5; 
+                int maxSlots = 0;
+                if (currentHudMode == 0) maxSlots = 8; // Matrix (9 boxes)
+                else if (currentHudMode == 1) maxSlots = 5; // 6-Axis (6 boxes)
+                else if (currentHudMode == 3) maxSlots = 2; // Tone & Style (3 boxes)
+                else if (currentHudMode == 4 || currentHudMode == 5) maxSlots = 1; // Edge/Toy (2 boxes)
+                
                 hudSelection = Math.min(maxSlots, hudSelection + 1);
                 updateHudUI();
             }
@@ -1322,6 +1346,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             for (int i=0; i<6; i++) {
                 values[i] = depths[i] == 0 ? "0" : String.format("%+d", depths[i]);
             }
+        } else if (currentHudMode == 3) { // MODE 3: TONE & STYLE (3 Slots)
+            activeCells = 3;
+            labels = new String[]{"CON", "SAT", "SHP"};
+            int[] vals = {p.contrast, p.saturation, p.sharpness};
+            for (int i=0; i<3; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
+            
+        } else if (currentHudMode == 4) { // MODE 4: EDGE SHADING (2 Slots)
+            activeCells = 2;
+            labels = new String[]{"SHD RED", "SHD BLU"};
+            int[] vals = {p.shadingRed, p.shadingBlue};
+            for (int i=0; i<2; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
+            
+        } else if (currentHudMode == 5) { // MODE 5: TOY CAMERA (2 Slots)
+            activeCells = 2;
+            labels = new String[]{"T-TONE", "T-VIG"};
+            String tTone = p.peToyCameraTone != null ? p.peToyCameraTone.toUpperCase() : "NORMAL";
+            if (tTone.equals("NORMAL")) tTone = "NORM"; 
+            else if (tTone.equals("MAGENTA")) tTone = "MAG";
+            values[0] = tTone;
+            values[1] = p.vignetteHardware == 0 ? "0" : String.format("%+d", p.vignetteHardware);
         }
 
         // 2. PAINT THE SCREEN
@@ -1372,6 +1416,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else if (hudSelection == 3) p.colorDepthCyan = Math.max(-7, Math.min(7, p.colorDepthCyan + dir));
             else if (hudSelection == 4) p.colorDepthMagenta = Math.max(-7, Math.min(7, p.colorDepthMagenta + dir));
             else if (hudSelection == 5) p.colorDepthYellow = Math.max(-7, Math.min(7, p.colorDepthYellow + dir));
+        } else if (currentHudMode == 3) { // MODE 3: TONE MATH
+            if (hudSelection == 0) p.contrast = Math.max(-3, Math.min(3, p.contrast + dir));
+            else if (hudSelection == 1) p.saturation = Math.max(-3, Math.min(3, p.saturation + dir));
+            else if (hudSelection == 2) p.sharpness = Math.max(-3, Math.min(3, p.sharpness + dir));
+            
+        } else if (currentHudMode == 4) { // MODE 4: EDGE SHADING MATH
+            if (hudSelection == 0) p.shadingRed = Math.max(-7, Math.min(7, p.shadingRed + dir));
+            else if (hudSelection == 1) p.shadingBlue = Math.max(-7, Math.min(7, p.shadingBlue + dir));
+            
+        } else if (currentHudMode == 5) { // MODE 5: TOY CAMERA MATH
+            if (hudSelection == 0) {
+                String[] tones = {"normal", "cool", "warm", "green", "magenta"};
+                int idx = 0; for(int i=0; i<tones.length; i++) if(tones[i].equals(p.peToyCameraTone)) idx = i;
+                p.peToyCameraTone = tones[(idx + dir + tones.length) % tones.length];
+            } else if (hudSelection == 1) {
+                p.vignetteHardware = Math.max(-5, Math.min(5, p.vignetteHardware + dir)); 
+            }
         }
         
         updateHudUI();
@@ -1379,26 +1440,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.postDelayed(applySettingsRunnable, 150);
     }
 
-    private void launchHudMode(int mode) {
+    private void launchHudMode(int mode, int defaultSelection) {
         isHudActive = true;
         currentHudMode = mode;
-        if (mode == 1) hudSelection = Math.max(0, menuSelection - 1);
-        else hudSelection = 0; 
+        hudSelection = defaultSelection; 
         
         menuContainer.setVisibility(View.GONE);
         mainUIContainer.setVisibility(View.VISIBLE);
         setHUDVisibility(View.GONE); 
         
-        // --- ROUTE TO CORRECT OVERLAY ---
         if (mode == 2) {
             hudOverlayContainer.setVisibility(View.GONE);
-            wbGridContainer.setVisibility(View.VISIBLE);
+            if (wbGridContainer != null) wbGridContainer.setVisibility(View.VISIBLE);
         } else {
             hudOverlayContainer.setVisibility(View.VISIBLE);
-            wbGridContainer.setVisibility(View.GONE);
+            if (wbGridContainer != null) wbGridContainer.setVisibility(View.GONE);
         }
-        
         updateHudUI();
+    }
+    
+    private void launchHudMode(int mode) { 
+        launchHudMode(mode, 0); 
     }
     
     // --- 3. THE MENU RENDERING (Dependencies Visualized & Dynamic Rows) ---
