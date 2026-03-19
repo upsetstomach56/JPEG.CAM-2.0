@@ -534,6 +534,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isMenuOpen && currentMainTab == 0 && currentPage == 2 && menuSelection == 0) {
             launchHudMode(2); return;
         }
+        // LAUNCH PRO BASE (Page 2, Row 1)
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 2 && menuSelection == 1) {
+            launchHudMode(7); return;
+        }
         // LAUNCH 6-AXIS (Page 2, Row 2)
         if (isMenuOpen && currentMainTab == 0 && currentPage == 2 && menuSelection == 2) {
             launchHudMode(1); return;
@@ -1604,7 +1608,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (currentPage == 1) tvMenuSubtitle.setText("1. Recipe Identity & Base [HW]");
         else if (currentPage == 2) tvMenuSubtitle.setText("2. Advanced Color Engine [HW]");
         else if (currentPage == 3) tvMenuSubtitle.setText("3. Effects & Shading [HW]");
-        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW]");
+        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW] - ADDS PROCESSING TIME!");
         else if (currentPage == 5) tvMenuSubtitle.setText("Global Settings");
         else if (currentPage == 6) tvMenuSubtitle.setText("Web Dashboard Server");
         else if (currentPage == 7) tvMenuSubtitle.setText("Resources & Community");
@@ -1707,7 +1711,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         } else if (currentPage == 5) {
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
-            String[] gLabels = {"Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "JPEG Quality"};
+            String[] gLabels = {"SW Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "SW JPEG Quality"};
             String[] gValues = { qLabels[recipeManager.getQualityIndex()], scn, prefShowFocusMeter ? "ON" : "OFF", prefShowCinemaMattes ? "ON" : "OFF", prefShowGridLines ? "ON" : "OFF", String.valueOf(prefJpegQuality) };
             for (int i = 0; i < 6; i++) { menuLabels[i].setText(gLabels[i]); menuValues[i].setText(gValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
         } else if (currentPage == 6) {
@@ -1727,9 +1731,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 isActive = ("toy-camera".equals(eff) || "soft-focus".equals(eff) || "hdr-art".equals(eff) || "illust".equals(eff) || "watercolor".equals(eff) || "part-color".equals(eff) || "miniature".equals(eff));
             }
             
-            // Page 4: SW Effects Dependencies (FIXED GRAIN SIZE)
+            // Page 4: SW Effects Dependencies
             if (currentMainTab == 0 && currentPage == 4) {
-                if (i == 3) isActive = (p.grain > 0); 
+                if (i == 1) isActive = (p.lutIndex > 0); // Opacity requires a LUT!
+                if (i == 3) isActive = (p.grain > 0);    // Grain Size requires Grain Amt
             }
 
             if (i == menuSelection) {
@@ -2416,6 +2421,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 Log.d("filmOS_Lens", "Boot: Manual Lens Detected");
             }
         }
+        
+        // --- NEW: FORCE HARDWARE TO INGEST THE BOOT RECIPE ---
+        applyHardwareRecipe();
         
         updateMainHUD();
     }
