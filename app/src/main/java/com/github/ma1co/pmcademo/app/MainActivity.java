@@ -1211,15 +1211,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // ==========================================
         if (p.get("picture-profile") != null) p.set("picture-profile", "off");
         
-        // SAFE CREATIVE STYLE (Must be lowercase)
+        // SAFE CREATIVE STYLE & PRO BASE RESOLUTION
+        String safeProMode = prof.proColorMode != null ? prof.proColorMode.toLowerCase() : "off";
         String safeColorMode = prof.colorMode != null ? prof.colorMode.toLowerCase() : "standard";
-        if (p.get("creative-style") != null) p.set("creative-style", safeColorMode);
-        if (p.get("color-mode") != null) p.set("color-mode", safeColorMode);
         
-        // SAFE PRO COLOR BASE (Must be lowercase)
-        if (p.get("pro-color-mode") != null) {
-            String safeProMode = prof.proColorMode != null ? prof.proColorMode.toLowerCase() : "off";
-            p.set("pro-color-mode", safeProMode);
+        if (!"off".equals(safeProMode)) {
+            // If Pro Base is active, force standard Creative Style to yield control
+            if (p.get("creative-style") != null) p.set("creative-style", "standard");
+            if (p.get("color-mode") != null) p.set("color-mode", "standard");
+            if (p.get("pro-color-mode") != null) p.set("pro-color-mode", safeProMode);
+        } else {
+            // Otherwise, use the standard Creative Style and turn off Pro Base
+            if (p.get("creative-style") != null) p.set("creative-style", safeColorMode);
+            if (p.get("color-mode") != null) p.set("color-mode", safeColorMode);
+            if (p.get("pro-color-mode") != null) p.set("pro-color-mode", "off");
         }
 
         // SAFE PICTURE EFFECTS (Matches PARAMS.TXT Exactly)
@@ -1545,7 +1550,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 p.sharpnessGain = Math.max(-50, Math.min(50, p.sharpnessGain + (dir * 5)));
             }
         } else if (currentHudMode == 7) { // MODE 7: PRO BASE MATH
-            String[] modes = {"off", "pro-standard", "pro-vivid", "pro-portrait", "pro-cinema"};
+            String[] modes = {"off", "pro-standard", "pro-vivid", "pro-portrait"};
             int idx = 0; for(int i=0; i<modes.length; i++) if(modes[i].equals(p.proColorMode)) idx = i;
             p.proColorMode = modes[(idx + dir + modes.length) % modes.length];
         } else if (currentHudMode == 8) { // MODE 8: EFFECTS MATH
