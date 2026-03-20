@@ -1432,13 +1432,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else if (currentHudMode == 3) { // MODE 3: TONE & STYLE (3 Slots)
             activeCells = 3;
-            labels = new String[]{"CON", "SAT", "SHP"};
+            labels = new String[]{"CONTRAST", "SATURATION", "SHARPNESS"};
             int[] vals = {p.contrast, p.saturation, p.sharpness};
             for (int i=0; i<3; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
             
         } else if (currentHudMode == 4) { // MODE 4: EDGE SHADING (2 Slots)
             activeCells = 2;
-            labels = new String[]{"SHD RED", "SHD BLU"};
+            labels = new String[]{"SHADE RED", "SHADE BLUE"};
             int[] vals = {p.shadingRed, p.shadingBlue};
             for (int i=0; i<2; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
             
@@ -1449,7 +1449,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             
             if ("toy-camera".equals(eff)) {
                 activeCells = 2;
-                labels = new String[]{"T-TONE", "HW-VIG"};
+                labels = new String[]{"TOY-TONE", "HW-VIGNETTE"};
                 values[0] = genericStr.equals("NORMAL") ? "NORM" : (genericStr.equals("MAGENTA") ? "MAG" : genericStr);
                 values[1] = p.vignetteHardware == 0 ? "0" : String.format("%+d", p.vignetteHardware);
             } else if ("soft-focus".equals(eff) || "hdr-art".equals(eff) || "illust".equals(eff) || "watercolor".equals(eff)) {
@@ -1467,7 +1467,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else if (currentHudMode == 6) { // MODE 6: FOUNDATION
             activeCells = 2;
-            labels = new String[]{"STYLE", "M-CON"};
+            labels = new String[]{"STYLE", "MICRO-CONTRAST"};
             values[0] = p.colorMode != null ? p.colorMode.toUpperCase() : "STD";
             values[1] = p.sharpnessGain == 0 ? "0" : String.format("%+d", p.sharpnessGain);
         } else if (currentHudMode == 7) { // MODE 7: PRO BASE
@@ -1480,7 +1480,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             values[0] = p.pictureEffect != null ? p.pictureEffect.toUpperCase() : "OFF";
         } else if (currentHudMode == 9) { // MODE 9: DRO
             activeCells = 1;
-            labels = new String[]{"DRO"};
+            labels = new String[]{"DYNAMIC RANGE"};
             values[0] = p.dro != null ? p.dro.toUpperCase() : "OFF";
         }
 
