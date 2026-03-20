@@ -46,6 +46,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private RecipeManager recipeManager;
     private ConnectivityManager connectivityManager;
     
+    private Typeface digitalFont; // --- NEW: Cached Custom Font ---
+    
     private ImageProcessor mProcessor;
     private SonyFileScanner mScanner;
 
@@ -260,6 +262,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         availableLenses = lensManager.getAvailableLenses();
         
         recipeManager.loadPreferences();
+        
+        // --- NEW: Load the custom font safely into memory ---
+        try {
+            digitalFont = Typeface.createFromAsset(getAssets(), "fonts/DS-DIGIT.TTF");
+        } catch (Exception e) {
+            Log.e("filmOS", "Could not load custom font. Did you add it to assets/fonts/?");
+            digitalFont = null;
+        }
         
         FrameLayout rootLayout = new FrameLayout(this);
         mSurfaceView = new SurfaceView(this);
@@ -1830,9 +1840,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvTopStatus = new TextView(this); 
         tvTopStatus.setTextColor(Color.WHITE); 
         tvTopStatus.setTextSize(20); 
-        tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvTopStatus.setGravity(Gravity.CENTER); 
-        tvTopStatus.setShadowLayer(4, 0, 0, Color.BLACK);
+        if (digitalFont != null) tvTopStatus.setTypeface(digitalFont);
+        else tvTopStatus.setTypeface(Typeface.DEFAULT_BOLD); 
+        tvTopStatus.setGravity(Gravity.CENTER);
         
         FrameLayout.LayoutParams topParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); 
         topParams.setMargins(0, 15, 0, 0); 
@@ -2062,7 +2072,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             hudValues[i] = new TextView(this);
             hudValues[i].setTextColor(Color.WHITE);
             hudValues[i].setTextSize(18);
-            hudValues[i].setTypeface(Typeface.DEFAULT_BOLD);
+            if (digitalFont != null) hudValues[i].setTypeface(digitalFont);
+            else hudValues[i].setTypeface(Typeface.DEFAULT_BOLD);
             
             hudCells[i].addView(hudLabels[i]);
             hudCells[i].addView(hudValues[i]);
@@ -2120,7 +2131,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // Live Coordinates Text (e.g., A2, G1)
         wbValueText = new TextView(this);
         wbValueText.setTextColor(Color.rgb(230, 50, 15));
-        wbValueText.setTypeface(Typeface.DEFAULT_BOLD);
+        if (digitalFont != null) wbValueText.setTypeface(digitalFont);
+        else wbValueText.setTypeface(Typeface.DEFAULT_BOLD);
         wbValueText.setTextSize(16);
         FrameLayout.LayoutParams pVal = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.RIGHT);
         pVal.setMargins(0, 10, 15, 0);
@@ -2154,7 +2166,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView createBottomText() { 
         TextView tv = new TextView(this); 
         tv.setTextSize(26); 
-        tv.setTypeface(Typeface.DEFAULT_BOLD); 
+        if (digitalFont != null) tv.setTypeface(digitalFont);
+        else tv.setTypeface(Typeface.DEFAULT_BOLD); 
         tv.setShadowLayer(4, 0, 0, Color.BLACK); 
         tv.setPadding(20, 0, 20, 0); 
         return tv; 
@@ -2165,7 +2178,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tv.setText(text); 
         tv.setTextColor(Color.WHITE); 
         tv.setTextSize(22); 
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
+        if (digitalFont != null) tv.setTypeface(digitalFont);
+        else tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD); 
         tv.setPadding(25, 15, 25, 15); 
         tv.setBackgroundColor(Color.argb(140, 40, 40, 40)); 
         tv.setGravity(Gravity.CENTER); 
