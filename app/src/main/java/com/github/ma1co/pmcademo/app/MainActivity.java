@@ -317,10 +317,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override 
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
-                // --- FIXED: Trigger processing if Chrome effects are active ---
+                // --- FIXED: Added shadowToe, subtractiveSat, and halation to the trigger ---
                 return isReady && !isProcessing && !isCalibrating && 
                        (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || 
-                        p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0); 
+                        p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
+                        p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0); 
             }
             @Override 
             public void onNewPhotoDetected(final String path) { 
@@ -1620,8 +1621,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (currentPage == 1) tvMenuSubtitle.setText("1. Recipe Identity & Base [HW]");
         else if (currentPage == 2) tvMenuSubtitle.setText("2. Advanced Color Engine [HW]");
         else if (currentPage == 3) tvMenuSubtitle.setText("3. Effects & Shading [HW]");
-        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW]");
-        else if (currentPage == 5) tvMenuSubtitle.setText("5. Analog Physics [SW]"); // NEW
+        else if (currentPage == 4) tvMenuSubtitle.setText("4. LUTs & Textures [SW] - ADDS PROCESSING TIME!");
+        else if (currentPage == 5) tvMenuSubtitle.setText("5. Analog Physics [SW] - ADDS PROCESSING TIME!"); // NEW
         else if (currentPage == 6) tvMenuSubtitle.setText("Global Settings"); // Shifted
         else if (currentPage == 7) tvMenuSubtitle.setText("Web Dashboard Server"); // Shifted
         else if (currentPage == 8) tvMenuSubtitle.setText("Resources & Community"); // Shifted
@@ -1720,7 +1721,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String chromeStr = p.colorChrome == 0 ? "OFF" : (p.colorChrome == 1 ? "WEAK" : "STRONG");
                 String chromeBlueStr = p.chromeBlue == 0 ? "OFF" : (p.chromeBlue == 1 ? "WEAK" : "STRONG");
 
-                String[] rLabels = {"LUT File", "LUT Opacity", "SW Grain Amt", "SW Grain Size", "SW Highlight Roll", "SW Vignette", "SW Color Chrome", "SW Chrome Blue"};
+                String[] rLabels = {"LUT File", "LUT Opacity", "Grain Amt", "Grain Size", "Highlight Roll-Off", "Vignette", "Color Chrome", "Chrome Blue"};
                 String[] rValues = { 
                     recipeManager.getRecipeNames().get(p.lutIndex), 
                     p.opacity + "%", 
