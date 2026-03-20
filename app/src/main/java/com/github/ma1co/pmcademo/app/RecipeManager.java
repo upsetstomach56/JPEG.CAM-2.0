@@ -134,11 +134,11 @@ public class RecipeManager {
                   .append(p.shadingRed).append(",") // 24
                   .append(p.shadingBlue).append(",") // 25
                   
-                  // --- NEW: Fuji Chrome Effects ---
+                  // --- Fuji Chrome Effects ---
                   .append(p.colorChrome).append(",") // 26
-                  .append(p.chromeBlue).append("\n"); // 27
-
-                  // --- NEW: Analog Physics ---
+                  .append(p.chromeBlue).append(",") // 27
+                  
+                  // --- Analog Physics ---
                   .append(p.shadowToe).append(",") // 28
                   .append(p.subtractiveSat).append(",") // 29
                   .append(p.halation).append("\n"); // 30
