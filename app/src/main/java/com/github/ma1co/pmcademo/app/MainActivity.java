@@ -2072,12 +2072,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             hudCells[i] = new LinearLayout(this);
             hudCells[i].setOrientation(LinearLayout.VERTICAL);
             hudCells[i].setGravity(Gravity.CENTER);
-            hudCells[i].setBackgroundResource(R.drawable.hud_box); // <-- NEW: Applies the LCD Border
+            // Box background removed so the UI can breathe!
             
             hudLabels[i] = new TextView(this);
-            hudLabels[i].setTextColor(Color.DKGRAY); // <-- INCREASED CONTRAST: Darker gray for inactive text
+            hudLabels[i].setTextColor(Color.GRAY); // Restored to a readable, clean Gray
             hudLabels[i].setTextSize(14);
-            hudLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
+            if (digitalFont != null) hudLabels[i].setTypeface(digitalFont);
+            else hudLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             
             hudValues[i] = new TextView(this);
             hudValues[i].setTextColor(Color.WHITE);
