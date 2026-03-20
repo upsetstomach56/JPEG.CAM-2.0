@@ -62,7 +62,7 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
     jint scaleDenom, jint opacity, jint grain, jint grainSize, 
-    jint vignette, jint rollOff, jint jpegQuality) {
+    jint vignette, jint rollOff, jint colorChrome, jint chromeBlue, jint jpegQuality) {
     
     long long start_time = get_time_ms();
     
@@ -332,14 +332,40 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                     outY = (outY * v_m) >> 8;
                 }
 
-                // CHROMA SCALER
+                // --- NEW: FUJI COLOR SCIENCE & CHROMA SCALER ---
+                int cb = row_buf[x+1] - 128;
+                int cr = row_buf[x+2] - 128;
+
+                // Fuji "Color Chrome" (Deepens bright, highly saturated colors)
+                if (colorChrome > 0) {
+                    int saturation = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr); // Fast Absolute Value
+                    if (outY > 150 && saturation > 40) {
+                        outY -= (saturation * colorChrome) >> 2;
+                        if (outY < 0) outY = 0;
+                    }
+                }
+                
+                // Fuji "Chrome FX Blue" (Deepens and enriches skies specifically)
+                if (chromeBlue > 0) {
+                    if (outY > 120 && cb > 20 && cr < 10) { // Sky Detection
+                        outY -= (cb * chromeBlue) >> 1; // Darken luminance
+                        if (outY < 0) outY = 0;
+                        cb += (cb * chromeBlue) >> 3;   // Boost blue saturation
+                    }
+                }
+
+                // Final Chroma Scaler (Preserves Hues if Roll-off or Chrome darkened the image)
                 if (oldY != outY) {
                     int ratio_256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
-                    int cb = row_buf[x+1] - 128;
-                    int cr = row_buf[x+2] - 128;
-                    row_buf[x+1] = (unsigned char)(128 + ((cb * ratio_256) >> 8));
-                    row_buf[x+2] = (unsigned char)(128 + ((cr * ratio_256) >> 8));
+                    cb = (cb * ratio_256) >> 8;
+                    cr = (cr * ratio_256) >> 8;
                 }
+                
+                // Safely clamp and save colors
+                int finalCb = 128 + cb;
+                int finalCr = 128 + cr;
+                row_buf[x+1] = (unsigned char)(finalCb < 0 ? 0 : (finalCb > 255 ? 255 : finalCb));
+                row_buf[x+2] = (unsigned char)(finalCr < 0 ? 0 : (finalCr > 255 ? 255 : finalCr));
                 
                 // 3. RESTORED: YOUR PROVEN ORGANIC GRAIN ALGORITHM
                 if (grain > 0) {

@@ -32,7 +32,7 @@ public class BatteryView extends View {
         int w = getWidth();
         int h = getHeight();
 
-        paint.setColor(Color.WHITE);
+        paint.setColor(Color.rgb(227, 69, 20));
         paint.setStyle(Paint.Style.STROKE);
         
         // Pulled the right edge in slightly so the stroke doesn't clip the canvas boundary

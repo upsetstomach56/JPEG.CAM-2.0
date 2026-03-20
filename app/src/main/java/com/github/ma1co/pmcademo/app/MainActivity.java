@@ -318,7 +318,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             public boolean isReadyToProcess() { 
                 RTLProfile p = recipeManager.getCurrentProfile();
                 // --- FIXED: ADDED COLOR CHROME AND CHROME BLUE TO BYPASS CHECK ---
-                return isReady && !isProcessing && !isCalibrating && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0); 
+                return isReady && !isProcessing && !isCalibrating && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 || p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0);
             }
             @Override 
             public void onNewPhotoDetected(final String path) { 
@@ -1821,11 +1821,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         batteryArea.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         
         tvBattery = new TextView(this); 
-        tvBattery.setTextColor(Color.WHITE); 
+        // --- UPDATED: Set to filmOS Orange ---
+        tvBattery.setTextColor(Color.rgb(227, 69, 20)); 
         tvBattery.setTextSize(14); 
-        tvBattery.setTypeface(Typeface.DEFAULT_BOLD); 
-        tvBattery.setPadding(0, 0, 5, 0); 
-        batteryArea.addView(tvBattery);
+        tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
         
         batteryIcon = new BatteryView(this); 
         batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(28, 12)); 

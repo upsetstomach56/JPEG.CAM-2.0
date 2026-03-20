@@ -92,8 +92,8 @@ public class ImageProcessor {
                     jpegQuality = 90; // HALF RES
                 }
 
-                // FIX: Reverted to using p.grainSize directly so we don't accidentally force Medium grain!
-                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, jpegQuality)) {
+                // Pass colorChrome and chromeBlue into the engine
+                if (mEngine.applyLutToJpeg(original.getAbsolutePath(), outFile.getAbsolutePath(), scale, p.opacity, p.grain * 20, p.grainSize, p.vignette * 20, p.rollOff * 20, p.colorChrome, p.chromeBlue, jpegQuality)) {
                     return "SAVED";
                 }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
