@@ -12,7 +12,6 @@
 #define LOG_TAG "COOKBOOK_NATIVE"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-// --- ADD THIS LINE TO FIX THE ERROR ---
 #define CLAMP(x) ((x) < 0 ? 0 : ((x) > 255 ? 255 : (x)))
 
 std::vector<uint8_t> nativeLut;
@@ -65,7 +64,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath, 
     jint scaleDenom, jint opacity, jint grain, jint grainSize, 
     jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
-    jint shadowToe, jint subtractiveSat, jint halation, jint jpegQuality) { // 14 Args Total
+    jint shadowToe, jint subtractiveSat, jint halation, jint jpegQuality) { 
     
     long long start_time = get_time_ms();
     
@@ -84,7 +83,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     int targetOffset = 0;
     int finalScale = scaleDenom;
 
-    // --- 1. EXIF & DIMENSION SNIPER ---
     unsigned char* header = (unsigned char*)malloc(1048576); 
     if (header) {
         int readLen = fread(header, 1, 1048576, infile);
@@ -113,7 +111,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         free(header);
     }
 
-    // --- 2. DECOMPRESSOR SETUP ---
     bool use_rgb_path = (nativeLutSize > 0 && opacity > 0);
     struct jpeg_decompress_struct cinfo_d; 
     struct jpeg_compress_struct cinfo_c; 
@@ -145,7 +142,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         jpeg_start_decompress(&cinfo_d);
     }
 
-    // --- 3. COMPRESSOR SETUP ---
     cinfo_c.err = jpeg_std_error(&jerr_c.pub); 
     jerr_c.pub.error_exit = my_error_exit;
     if (setjmp(jerr_c.setjmp_buffer)) { jpeg_destroy_compress(&cinfo_c); jpeg_destroy_decompress(&cinfo_d); fclose(infile); fclose(outfile); return JNI_FALSE; }
@@ -162,7 +158,6 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
     if (!exifData.empty()) jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
 
-    // --- 4. ASSETS & LUT PRE-CALCS ---
     int row_stride = cinfo_d.output_width * 3;
     long long cx = cinfo_d.output_width / 2; 
     long long cy_center = cinfo_d.output_height / 2;
@@ -200,13 +195,13 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
         if (use_rgb_path) {
             // ==========================================
-            // PATH A: RGB + LUT + ANALOG PHYSICS
+            // PATH A: RGB + LUT + ANALOG PHYSICS (Fully Restored)
             // ==========================================
             for (int x = 0; x < row_stride; x += 3) {
                 int r = row_buf[x], g = row_buf[x+1], b = row_buf[x+2];
                 int outR = r, outG = g, outB = b;
 
-                // 1. LUT INTERPOLATION
+                // LUT INTERPOLATION (Unchanged)
                 int fX = map[r], fY = map[g], fZ = map[b];
                 int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
                 int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -234,127 +229,177 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 outG = g + (((lG - g) * opac_mapped) >> 8);
                 outB = b + (((lB - b) * opac_mapped) >> 8);
 
-                // --- NEW PHYSICS ---
+                // --- PRO-GRADE PHYSICS ENGINE ---
                 int currentY = (outR*77 + outG*150 + outB*29) >> 8;
                 int targetY = currentY;
+                
+                // 1. Shadow Toe
                 if (shadowToe > 0) {
                     int lift = (shadowToe == 1) ? 35 : 55;
-                    if (targetY < lift) targetY += ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
+                    if (targetY < lift) {
+                        targetY = targetY + ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
+                    }
                 }
-                if (rollOff > 0 && targetY > 200) targetY -= ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
                 
+                // 2. Highlight Roll-Off
+                if (rollOff > 0 && targetY > 200) {
+                    targetY = targetY - ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
+                }
+                
+                // 3. Fuji Chrome & Subtractive Density (Safeties Restored)
                 int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
                 int cr_p = ((112 * outR - 94 * outG - 18 * outB) >> 8);
-                int sat_p = (cb_p < 0 ? -cb_p : cb_p) + (cr_p < 0 ? -cr_p : cr_p);
-                if (colorChrome > 0 && targetY > 60 && sat_p > 30) targetY -= (sat_p * colorChrome * targetY) >> 15;
-                if (chromeBlue > 0 && cb_p > 15 && targetY > 80) targetY -= (cb_p * chromeBlue) >> 2;
-                if (subtractiveSat > 0 && sat_p > 20) targetY -= (sat_p >> (6 - subtractiveSat));
-                if (targetY < 10) targetY = 10;
+                int abs_cb = cb_p < 0 ? -cb_p : cb_p;
+                int abs_cr = cr_p < 0 ? -cr_p : cr_p;
+                int sat_p = abs_cb + abs_cr;
 
+                if (colorChrome > 0 && targetY > 60 && sat_p > 30) {
+                    int factor = (sat_p * colorChrome * targetY) >> 15;
+                    if (factor > 40) factor = 40; // RESTORED CAP
+                    targetY -= factor;
+                }
+                
+                if (chromeBlue > 0 && cb_p > 15 && cr_p < 20 && targetY > 80) { // RESTORED PURPLE REJECTION
+                    targetY -= (cb_p * chromeBlue) >> 2;
+                }
+                
+                if (subtractiveSat > 0 && sat_p > 20) {
+                    targetY -= (sat_p >> (6 - subtractiveSat));
+                }
+                
+                if (targetY < 8) targetY = 8; // Restored safety floor
+
+                // Apply Preserved Hues
                 if (targetY != currentY) {
                     int r256 = (targetY * 256) / (currentY == 0 ? 1 : currentY);
-                    outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
+                    outR = (outR * r256) >> 8; 
+                    outG = (outG * r256) >> 8; 
+                    outB = (outB * r256) >> 8;
+                }
+                
+                // 4. TRUE HALATION (Luminance Tinting)
+                if (halation > 0 && targetY > 200) {
+                    int halo_factor = targetY - 200; 
+                    int h_str = (halation == 1) ? 1 : 2;
+                    outR += (halo_factor * h_str); 
+                    outB -= (halo_factor * h_str) >> 1; 
                 }
 
+                // 5. Vignette
                 if (vignette > 0) {
                     long long d_sq = ((long long)(x/3)-cx)*((long long)(x/3)-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
-                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); if (v_m < 0) v_m = 0;
-                    outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
+                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
+                    if (v_m < 0) v_m = 0;
+                    outR = (outR * v_m) >> 8; 
+                    outG = (outG * v_m) >> 8; 
+                    outB = (outB * v_m) >> 8;
                 }
+                
+                // 6. Organic Grain (Shadow Taper Restored)
                 if (grain > 0) {
-                    int rn = (fast_rand(&seed) & 0xFF) - 128;
-                    int n = (grainSize == 0) ? rn : (grainSize == 1) ? (rn + prev_noise) >> 1 : (rn + prev_noise * 2) / 3;
-                    int m = (targetY < 128) ? targetY : 255 - targetY; if (targetY < 64) m = (m * targetY) >> 6;
-                    int gv = (n * m * grain) >> 15; outR += gv; outG += gv; outB += gv; prev_noise = rn;
+                    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+                    int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                    int mask = (targetY < 128) ? targetY : 255 - targetY; 
+                    if (targetY < 64) mask = (mask * targetY) >> 6; // RESTORED TAPER
+                    
+                    int gv = (noise * mask * grain) >> 15; 
+                    outR += gv; 
+                    outG += gv; 
+                    outB += gv; 
+                    prev_noise = raw_noise;
                 }
-                row_buf[x] = (uint8_t)CLAMP(outR); row_buf[x+1] = (uint8_t)CLAMP(outG); row_buf[x+2] = (uint8_t)CLAMP(outB);
+                
+                row_buf[x] = (uint8_t)CLAMP(outR); 
+                row_buf[x+1] = (uint8_t)CLAMP(outG); 
+                row_buf[x+2] = (uint8_t)CLAMP(outB);
             }
         } else {
             // ==========================================
-            // PATH B: THE YUV EXPRESSWAY
+            // PATH B: THE YUV EXPRESSWAY (Fully Restored)
             // ==========================================
             for (int x = 0, px = 0; x < row_stride; x += 3, ++px) {
-                int oldY = row_buf[x], outY = oldY;
+                int oldY = row_buf[x];
+                int outY = oldY;
+                
+                // 1. Shadow Toe
                 if (shadowToe > 0) {
                     int lift = (shadowToe == 1) ? 35 : 55;
-                    if (outY < lift) outY += ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
+                    if (outY < lift) {
+                        outY = outY + ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
+                    }
                 }
-                if (rollOff > 0) outY = rolloff_lut[outY];
+                
+                // 2. Highlight Roll-Off
+                if (rollOff > 0) {
+                    outY = rolloff_lut[outY];
+                }
+                
+                // 3. Vignette
                 if (vignette > 0) {
                     long long d_sq = ((long long)px - cx) * ((long long)px - cx) + (long long)(abs_y - cy_center) * (abs_y - cy_center);
-                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); outY = (outY * (v_m < 0 ? 0 : v_m)) >> 8;
+                    int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
+                    if (v_m < 0) v_m = 0;
+                    outY = (outY * v_m) >> 8;
                 }
-                int cb = row_buf[x+1] - 128, cr = row_buf[x+2] - 128;
-                int sat = (cb < 0 ? -cb : cb) + (cr < 0 ? -cr : cr);
-                if (colorChrome > 0 && outY > 60 && sat > 30) outY -= (sat * colorChrome * outY) >> 15;
-                if (chromeBlue > 0 && cb > 15 && outY > 80) { outY -= (cb * chromeBlue) >> 2; cr -= (cb * chromeBlue) >> 4; }
-                if (subtractiveSat > 0 && sat > 20) outY -= (sat >> (6 - subtractiveSat));
-                if (outY < 8) outY = 8;
+                
+                // 4. Fuji Chrome & Density (Safeties Restored)
+                int cb = row_buf[x+1] - 128;
+                int cr = row_buf[x+2] - 128;
+                int abs_cb = cb >= 0 ? cb : -cb;
+                int abs_cr = cr >= 0 ? cr : -cr;
+                int sat = abs_cb + abs_cr;
 
+                if (colorChrome > 0 && outY > 60 && sat > 30) {
+                    int factor = (sat * colorChrome * outY) >> 15;
+                    if (factor > 40) factor = 40; // RESTORED CAP
+                    outY -= factor;
+                }
+                
+                if (chromeBlue > 0 && cb > 15 && cr < 20 && outY > 80) { // RESTORED PURPLE REJECTION
+                    int blueDensity = (cb * chromeBlue) >> 2;
+                    outY -= blueDensity;
+                    cr -= (blueDensity >> 1); // RESTORED PROPER HUE SHIFT
+                }
+                
+                if (subtractiveSat > 0 && sat > 20) {
+                    int density = (sat >> (6 - subtractiveSat));
+                    outY -= density;
+                }
+                
+                if (outY < 8) outY = 8; // Safety
+
+                // 5. TRUE HALATION (Luminance Tinting)
+                if (halation > 0 && outY > 200) {
+                    int halo_factor = outY - 200; 
+                    int h_str = (halation == 1) ? 1 : 2;
+                    cr += (halo_factor * h_str); 
+                    cb -= (halo_factor * h_str) >> 1; 
+                }
+
+                // Preserve Hues
                 if (oldY != outY) {
                     int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
-                    cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
+                    cb = (cb * r256) >> 8; 
+                    cr = (cr * r256) >> 8;
                 }
-                row_buf[x+1] = (uint8_t)CLAMP(128+cb); row_buf[x+2] = (uint8_t)CLAMP(128+cr);
+                
+                row_buf[x+1] = (uint8_t)CLAMP(128+cb); 
+                row_buf[x+2] = (uint8_t)CLAMP(128+cr);
+                
+                // 6. Organic Grain (Shadow Taper Restored)
                 if (grain > 0) {
-                    int rn = (fast_rand(&seed) & 0xFF) - 128;
-                    int n = (grainSize == 0) ? rn : (grainSize == 1) ? (rn + prev_noise) >> 1 : (rn + prev_noise * 2) / 3;
-                    int m = (outY < 128) ? outY : 255 - outY; outY += (n * m * grain) >> 15; prev_noise = rn;
+                    int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
+                    int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
+                    int mask = (outY < 128) ? outY : 255 - outY; 
+                    if (outY < 64) mask = (mask * outY) >> 6; // RESTORED TAPER
+                    
+                    outY += (noise * mask * grain) >> 15; 
+                    prev_noise = raw_noise;
                 }
+                
                 row_buf[x] = (uint8_t)CLAMP(outY);
             }
-        } // <--- This is the closing bracket of Path B (the `else` block)
-
-        // --- 6. TRUE HALATION (Organic Additive Light Bleed) ---
-        if (halation > 0) {
-            int halo_energy = 0;
-            // WEAK = Short tight glow (190), STRONG = Long cinematic smear (220)
-            int halo_decay = (halation == 1) ? 190 : 220; 
-            int charge_power = (halation == 1) ? 50 : 90; // Intensity of the red light
-
-            // Pass 1: Left-to-Right Smear
-            for (int x = 0; x < row_stride; x += 3) {
-                int y_est = use_rgb_path ? ((row_buf[x]*77 + row_buf[x+1]*150 + row_buf[x+2]*29) >> 8) : row_buf[x];
-                
-                if (y_est > 235) { 
-                    // Hit a bright core: Charge the light energy
-                    halo_energy = charge_power; 
-                } else if (halo_energy > 0) { 
-                    // Apply the energy as ADDITIVE LIGHT (Lifting brightness + Red)
-                    if (use_rgb_path) {
-                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + halo_energy);         // Add Red Light
-                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (halo_energy >> 2)); // Add slight Green for fiery orange
-                    } else {
-                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + (halo_energy >> 1));   // Lift Brightness (Y)
-                        row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + halo_energy);         // Boost Red (Cr)
-                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (halo_energy >> 2)); // Drop Blue to keep it warm
-                    }
-                    // Decay the light smoothly across the image
-                    halo_energy = (halo_energy * halo_decay) >> 8; 
-                }
-            }
-
-            // Pass 2: Right-to-Left Smear
-            halo_energy = 0;
-            for (int x = row_stride - 3; x >= 0; x -= 3) {
-                int y_est = use_rgb_path ? ((row_buf[x]*77 + row_buf[x+1]*150 + row_buf[x+2]*29) >> 8) : row_buf[x];
-                
-                if (y_est > 235) {
-                    halo_energy = charge_power;
-                } else if (halo_energy > 0) {
-                    if (use_rgb_path) {
-                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + halo_energy); 
-                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] + (halo_energy >> 2)); 
-                    } else {
-                        row_buf[x]   = (uint8_t)CLAMP(row_buf[x] + (halo_energy >> 1));   // Lift Brightness
-                        row_buf[x+2] = (uint8_t)CLAMP(row_buf[x+2] + halo_energy);         // Boost Red
-                        row_buf[x+1] = (uint8_t)CLAMP(row_buf[x+1] - (halo_energy >> 2)); // Drop Blue
-                    }
-                    halo_energy = (halo_energy * halo_decay) >> 8;
-                }
-            }
         }
-
         jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
     }
     
