@@ -2221,56 +2221,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onPause() { 
         super.onPause(); 
         uiHandler.removeCallbacksAndMessages(null); 
-
-        // --- NEW: Save the software PASM state before the app hibernates ---
-        if (cameraManager != null && cameraManager.getCamera() != null) {
-            try {
-                String currentPasm = cameraManager.getCamera().getParameters().getSceneMode();
-                if (currentPasm != null) {
-                    getSharedPreferences("filmOS_Prefs", MODE_PRIVATE).edit().putString("savedPasmMode", currentPasm).apply();
-                }
-            } catch (Exception e) {}
-        }
         
         if (cameraManager != null && cameraManager.getCamera() != null) {
             try {
                 Camera c = cameraManager.getCamera();
                 Camera.Parameters p = c.getParameters();
                 
-                // --- NEW: Restore focus if user hard-exited while menu was open ---
-                if (isMenuOpen && savedFocusMode != null) {
+                // 1. CLEAN FOCUS RESTORE: Put the lens back to exactly how the user had it.
+                if (savedFocusMode != null) {
                     p.setFocusMode(savedFocusMode);
+                } else {
+                    p.setFocusMode("auto"); // Failsafe so stock OS doesn't get stuck
                 }
                 
+                // 2. ZERO OUT HARDWARE HACKS
                 if (p.get("picture-effect") != null) p.set("picture-effect", "off");
                 if (p.get("rgb-matrix-mode") != null) p.set("rgb-matrix-mode", "false");
                 if (p.get("pro-color-mode") != null) p.set("pro-color-mode", "off");
                 if (p.get("sharpness-gain-mode") != null) p.set("sharpness-gain-mode", "false");
                 if (p.get("white-balance-shift-mode") != null) p.set("white-balance-shift-mode", "false");
-                
                 if (p.get("rgb-matrix") != null) p.set("rgb-matrix", "256,0,0,0,256,0,0,0,256");
                 if (p.get("lens-correction-shading-color-red") != null) p.set("lens-correction-shading-color-red", "0");
                 if (p.get("lens-correction-shading-color-blue") != null) p.set("lens-correction-shading-color-blue", "0");
                 
                 if (p.get("color-depth-red") != null) {
-                    p.set("color-depth-red", "0");
-                    p.set("color-depth-green", "0");
-                    p.set("color-depth-blue", "0");
-                    p.set("color-depth-cyan", "0");
-                    p.set("color-depth-magenta", "0");
-                    p.set("color-depth-yellow", "0");
+                    p.set("color-depth-red", "0"); p.set("color-depth-green", "0");
+                    p.set("color-depth-blue", "0"); p.set("color-depth-cyan", "0");
+                    p.set("color-depth-magenta", "0"); p.set("color-depth-yellow", "0");
                 }
                 
-                p.setFocusMode("auto");
-                
                 c.setParameters(p);
-                Log.d("filmOS", "Successfully zeroed out hardware hacks.");
-                
+                Log.d("filmOS", "Successfully zeroed out hardware hacks and restored focus.");
                 Thread.sleep(200);
-            } catch (Exception e) {
-                Log.e("filmOS", "Failed to reset hardware: " + e.getMessage());
-            }
+            } catch (Exception e) {}
         }
+        
+        if (cameraManager != null) cameraManager.close(); 
+        try { unregisterReceiver(sonyCameraReceiver); unregisterReceiver(batteryReceiver); } catch (Exception e) {}
+        if (connectivityManager != null) connectivityManager.stopNetworking(); 
+        if (recipeManager != null) recipeManager.savePreferences(); 
+        setAutoPowerOffMode(true);
+    }
         
         if (cameraManager != null) cameraManager.close(); 
         try { unregisterReceiver(sonyCameraReceiver); unregisterReceiver(batteryReceiver); } catch (Exception e) {}
@@ -2287,7 +2278,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private void setHUDVisibility(int v) { 
         if (tvTopStatus != null) {
-            // FIX: Keep text visible if processing, otherwise obey the 'v' command
+            // FIX: If processing, FORCE visible. Otherwise, obey the display button.
             tvTopStatus.setVisibility(isProcessing ? View.VISIBLE : v); 
         }
         if (llBottomBar != null) llBottomBar.setVisibility(v); 
