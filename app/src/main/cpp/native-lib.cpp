@@ -167,7 +167,8 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     
     unsigned char* row_buf = (unsigned char*)malloc(row_stride);
     JSAMPROW row_pointer[1];
-    // --- FIXED: DYNAMIC SEED ---
+
+    // --- FIXED: DYNAMIC SEED, CAN ACTUAL DELETE I BELIEVE---
     // Uses the exact millisecond the photo was taken so grain is 100% unique every frame
     uint32_t master_seed = (uint32_t)(start_time & 0xFFFFFFFF);
 
@@ -186,14 +187,18 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
         }
     }
 
+    // --- CONTINUOUS GRAIN SETUP ---
+    // Seed it once, and let it roll for the entire image
+    uint32_t seed = (uint32_t)(start_time & 0xFFFFFFFF);
+    if (seed == 0) seed = 98765; // Failsafe: Xorshift math breaks if seed is exactly 0
+    int prev_noise = 0;
+
     // --- 5. MAIN PROCESSING LOOP ---
     while (cinfo_d.output_scanline < cinfo_d.output_height) {
         int abs_y = cinfo_d.output_scanline;
         row_pointer[0] = row_buf;
         jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
 
-        uint32_t seed = master_seed + (abs_y * 1337); 
-        int prev_noise = 0; 
 
         if (use_rgb_path) {
             // ==========================================
