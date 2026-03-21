@@ -398,6 +398,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                         drop = (drop * fade) >> 8;
                     }
                     outY -= drop;
+                    cr -= (drop >> 1); // <--- RESTORED: This pushes the dark blue towards Fuji Teal
                 }
                 
                 if (subtractiveSat > 0 && sat > 20) {
