@@ -636,7 +636,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 updateMainHUD(); 
             }
         } else {
-            if (currentPage == 6) handleConnectionAction(); 
+            if (currentPage == 7) handleConnectionAction(); 
             else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
                 isNamingMode = !isNamingMode;
                 if (isNamingMode) {
@@ -648,7 +648,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
                 renderMenu();
             }
-            else { isMenuEditing = !isMenuEditing; renderMenu(); }
+            else { 
+                isMenuEditing = !isMenuEditing; 
+                renderMenu(); 
+            }
         }
     }
 
