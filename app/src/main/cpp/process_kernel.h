@@ -5,6 +5,18 @@
 
 #define CLAMP(x) ((x) < 0 ? 0 : ((x) > 255 ? 255 : (x)))
 
+// === KERNEL_UI_METADATA ===
+// shadowToe, 0, 2
+// rollOff, 0, 5
+// colorChrome, 0, 2
+// chromeBlue, 0, 2
+// subtractiveSat, 0, 2
+// halation, 0, 2
+// vignette, 0, 5
+// grain, 0, 5
+// grainSize, 0, 2
+// === END_METADATA ===
+
 // Shared Fast Random Generator
 inline uint32_t fast_rand(uint32_t* state) {
     uint32_t x = *state; x ^= x << 13; x ^= x >> 17; x ^= x << 5; *state = x; return x;
@@ -22,9 +34,17 @@ inline void process_pixel_rgb(
     int opac_mapped, const int* map, 
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2) 
 {
+    // --- INTERNAL SCALING ---
+    int s_roll   = rollOff * 20;        // Level 5 -> 100%
+    int s_chrome = colorChrome * 50;    // Level 2 -> 100%
+    int s_blue   = chromeBlue * 50;     // Level 2 -> 100%
+    int s_sat    = subtractiveSat * 50; // Level 2 -> 100%
+    int s_grain  = grain * 20;          // Level 5 -> 100%
+
     int r = r_ref, g = g_ref, b = b_ref;
     int outR = r, outG = g, outB = b;
 
+    // LUT Logic
     int fX = map[r], fY = map[g], fZ = map[b];
     int x0 = fX >> 7, y0 = fY >> 7, z0 = fZ >> 7;
     int x1 = (x0 < lutMax) ? x0 + 1 : lutMax;
@@ -56,33 +76,24 @@ inline void process_pixel_rgb(
     outG = g + (((lG - g) * opac_mapped) >> 8);
     outB = b + (((lB - b) * opac_mapped) >> 8);
 
-    // --- PRO-GRADE PHYSICS ENGINE ---
     int currentY = (outR*77 + outG*150 + outB*29) >> 8;
     int targetY = currentY;
     
-    // 1. Shadow Toe
     if (shadowToe > 0) {
         int lift = (shadowToe == 1) ? 35 : 55;
-        if (targetY < lift) {
-            targetY = targetY + ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
-        }
+        if (targetY < lift) targetY = targetY + ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
     }
     
-    // 2. Highlight Roll-Off
     if (rollOff > 0 && targetY > 200) {
-        targetY = targetY - ((targetY - 200) * (targetY - 200) * rollOff) / 11000;
+        targetY = targetY - ((targetY - 200) * (targetY - 200) * s_roll) / 11000;
     }
     
-    // 3. Fuji Chrome & Density 
     int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
     int cr_p = ((112 * outR - 94 * outG - 18 * outB) >> 8);
-    int abs_cb = cb_p < 0 ? -cb_p : cb_p;
-    int abs_cr = cr_p < 0 ? -cr_p : cr_p;
-    int sat_p = abs_cb + abs_cr;
+    int sat_p = (cb_p < 0 ? -cb_p : cb_p) + (cr_p < 0 ? -cr_p : cr_p);
 
-    // FEATHERED COLOR CHROME
-    if (colorChrome > 0 && sat_p > 15) {
-        int drop = ((sat_p - 15) * colorChrome) >> 2;
+    if (s_chrome > 0 && sat_p > 15) {
+        int drop = ((sat_p - 15) * s_chrome) >> 2;
         if (targetY > 160) {
             int fade = 255 - ((targetY - 160) * 3); 
             if (fade < 0) fade = 0;
@@ -91,9 +102,8 @@ inline void process_pixel_rgb(
         targetY -= drop;
     }
     
-    // FEATHERED CHROME FX BLUE
-    if (chromeBlue > 0 && cb_p > 5 && cr_p < 25) {
-        int drop = (cb_p * chromeBlue) >> 1; 
+    if (s_blue > 0 && cb_p > 5 && cr_p < 25) {
+        int drop = (cb_p * s_blue) >> 1; 
         if (targetY > 160) {
             int fade = 255 - ((targetY - 160) * 3); 
             if (fade < 0) fade = 0;
@@ -107,9 +117,8 @@ inline void process_pixel_rgb(
         targetY -= drop;
     }
     
-    // --- NEW: SMOOTH SUBTRACTIVE SATURATION ---
-    if (subtractiveSat > 0 && sat_p > 20) {
-        int density = ((sat_p - 20) * subtractiveSat) >> 5; 
+    if (s_sat > 0 && sat_p > 20) {
+        int density = ((sat_p - 20) * s_sat) >> 5; 
         if (targetY > 200) {
             int fade = 255 - ((targetY - 200) * 4);
             if (fade < 0) fade = 0;
@@ -118,51 +127,37 @@ inline void process_pixel_rgb(
         targetY -= density;
     }
     
-    if (targetY < 8) targetY = 8; // Safety floor
+    if (targetY < 8) targetY = 8; 
 
-    // Apply Preserved Hues
     if (targetY != currentY) {
         int r256 = (targetY * 256) / (currentY == 0 ? 1 : currentY);
-        outR = (outR * r256) >> 8; 
-        outG = (outG * r256) >> 8; 
-        outB = (outB * r256) >> 8;
+        outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
     }
     
-    // 4. Halation
     if (halation > 0 && targetY > 230) {
-        int halo_factor = targetY - 230; 
         int h_str = (halation == 1) ? 1 : 2;
-        int push = (halo_factor * halo_factor * h_str) >> 4; 
-        outR += push; 
-        outB -= (push >> 1); 
+        int push = ((targetY - 230) * (targetY - 230) * h_str) >> 4; 
+        outR += push; outB -= (push >> 1); 
     }
 
-    // 5. Vignette
     if (vignette > 0) {
         long long d_sq = ((long long)px-cx)*((long long)px-cx) + (long long)(abs_y-cy_center)*(abs_y-cy_center);
         int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
         if (v_m < 0) v_m = 0;
-        outR = (outR * v_m) >> 8; 
-        outG = (outG * v_m) >> 8; 
-        outB = (outB * v_m) >> 8;
+        outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
     }
     
-    // 6. Organic Grain 
-    if (grain > 0) {
+    if (s_grain > 0) {
         int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
         int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
         int mask = (targetY < 128) ? targetY : 255 - targetY; 
         if (targetY < 64) mask = (mask * targetY) >> 6; 
-        int gv = (noise * mask * grain) >> 15; 
-        outR += gv; 
-        outG += gv; 
-        outB += gv; 
+        int gv = (noise * mask * s_grain) >> 15; 
+        outR += gv; outG += gv; outB += gv; 
         prev_noise = raw_noise;
     }
     
-    r_ref = (uint8_t)CLAMP(outR); 
-    g_ref = (uint8_t)CLAMP(outG); 
-    b_ref = (uint8_t)CLAMP(outB);
+    r_ref = (uint8_t)CLAMP(outR); g_ref = (uint8_t)CLAMP(outG); b_ref = (uint8_t)CLAMP(outB);
 }
 
 // ==========================================
@@ -176,23 +171,22 @@ inline void process_pixel_yuv(
     int grain, int grainSize, uint32_t& seed, int& prev_noise,
     const uint8_t* rolloff_lut) 
 {
+    // --- INTERNAL SCALING ---
+    int s_chrome = colorChrome * 50;
+    int s_blue   = chromeBlue * 50;
+    int s_sat    = subtractiveSat * 50;
+    int s_grain  = grain * 20;
+
     int oldY = y_ref;
     int outY = oldY;
     
-    // 1. Shadow Toe
     if (shadowToe > 0) {
         int lift = (shadowToe == 1) ? 35 : 55;
-        if (outY < lift) {
-            outY = outY + ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
-        }
+        if (outY < lift) outY = outY + ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
     }
     
-    // 2. Highlight Roll-Off
-    if (rollOff > 0) {
-        outY = rolloff_lut[outY];
-    }
+    if (rollOff > 0) outY = rolloff_lut[outY];
     
-    // 3. Vignette
     if (vignette > 0) {
         long long d_sq = ((long long)px - cx) * ((long long)px - cx) + (long long)(abs_y - cy_center) * (abs_y - cy_center);
         int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
@@ -200,16 +194,11 @@ inline void process_pixel_yuv(
         outY = (outY * v_m) >> 8;
     }
     
-    // 4. Fuji Chrome & Density 
-    int cb = cb_ref - 128;
-    int cr = cr_ref - 128;
-    int abs_cb = cb >= 0 ? cb : -cb;
-    int abs_cr = cr >= 0 ? cr : -cr;
-    int sat = abs_cb + abs_cr;
+    int cb = cb_ref - 128, cr = cr_ref - 128;
+    int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
 
-    // FEATHERED COLOR CHROME
-    if (colorChrome > 0 && sat > 15) {
-        int drop = ((sat - 15) * colorChrome) >> 2;
+    if (s_chrome > 0 && sat > 15) {
+        int drop = ((sat - 15) * s_chrome) >> 2;
         if (outY > 160) {
             int fade = 255 - ((outY - 160) * 3);
             if (fade < 0) fade = 0;
@@ -218,9 +207,8 @@ inline void process_pixel_yuv(
         outY -= drop;
     }
     
-    // FEATHERED CHROME FX BLUE
-    if (chromeBlue > 0 && cb > 5 && cr < 25) {
-        int drop = (cb * chromeBlue) >> 1; 
+    if (s_blue > 0 && cb > 5 && cr < 25) {
+        int drop = (cb * s_blue) >> 1; 
         if (outY > 160) {
             int fade = 255 - ((outY - 160) * 3); 
             if (fade < 0) fade = 0;
@@ -232,12 +220,11 @@ inline void process_pixel_yuv(
             drop = (drop * fade) >> 8;
         }
         outY -= drop;
-        cr -= (drop >> 1); // Keeps the teal shift
+        cr -= (drop >> 1);
     }
     
-    // --- NEW: SMOOTH SUBTRACTIVE SATURATION ---
-    if (subtractiveSat > 0 && sat > 20) {
-        int density = ((sat - 20) * subtractiveSat) >> 5; 
+    if (s_sat > 0 && sat > 20) {
+        int density = ((sat - 20) * s_sat) >> 5; 
         if (outY > 200) {
             int fade = 255 - ((outY - 200) * 4);
             if (fade < 0) fade = 0;
@@ -246,34 +233,28 @@ inline void process_pixel_yuv(
         outY -= density;
     }
     
-    if (outY < 8) outY = 8; // Safety
+    if (outY < 8) outY = 8;
 
-    // 5. Halation
     if (halation > 0 && outY > 230) {
-        int halo_factor = outY - 230; 
         int h_str = (halation == 1) ? 1 : 2;
-        int push = (halo_factor * halo_factor * h_str) >> 4; 
-        cr += push; 
-        cb -= (push >> 1); 
+        int push = ((outY - 230) * (outY - 230) * h_str) >> 4; 
+        cr += push; cb -= (push >> 1); 
     }
 
-    // Preserve Hues
     if (oldY != outY) {
         int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
-        cb = (cb * r256) >> 8; 
-        cr = (cr * r256) >> 8;
+        cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
     }
     
     cb_ref = (uint8_t)CLAMP(128+cb); 
     cr_ref = (uint8_t)CLAMP(128+cr);
     
-    // 6. Organic Grain
-    if (grain > 0) {
+    if (s_grain > 0) {
         int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
         int noise = (grainSize == 0) ? raw_noise : (grainSize == 1) ? (raw_noise + prev_noise) >> 1 : (raw_noise + prev_noise * 2) / 3;
         int mask = (outY < 128) ? outY : 255 - outY; 
         if (outY < 64) mask = (mask * outY) >> 6; 
-        outY += (noise * mask * grain) >> 15; 
+        outY += (noise * mask * s_grain) >> 15; 
         prev_noise = raw_noise;
     }
     
