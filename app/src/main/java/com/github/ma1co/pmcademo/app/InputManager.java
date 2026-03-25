@@ -42,41 +42,43 @@ public class InputManager {
         }
 
         // --- CORE NAVIGATION & DIALS ---
-        if (sc == ScalarInput.ISV_KEY_DELETE) {
+        // A7II passes standard Android keycodes for the D-pad, so we must check both.
+        if (sc == ScalarInput.ISV_KEY_DELETE || keyCode == KeyEvent.KEYCODE_DEL) {
             listener.onDeletePressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_MENU) {
+        if (sc == ScalarInput.ISV_KEY_MENU || keyCode == KeyEvent.KEYCODE_MENU) {
             listener.onMenuPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_ENTER) {
+        if (sc == ScalarInput.ISV_KEY_ENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
             listener.onEnterPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_UP) {
+        if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             listener.onUpPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_DOWN) {
+        if (sc == ScalarInput.ISV_KEY_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
             listener.onDownPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_LEFT) {
+        if (sc == ScalarInput.ISV_KEY_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
             listener.onLeftPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_RIGHT) {
+        if (sc == ScalarInput.ISV_KEY_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             listener.onRightPressed();
             return true;
         }
 
         // --- DIAL ROTATION ---
-        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) {
+        // Capture BOTH front and rear dials on the A7II to prevent OS-level crashes.
+        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE || sc == ScalarInput.ISV_DIAL_2_CLOCKWISE) {
             listener.onDialRotated(1);
             return true;
         }
-        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW) {
+        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW || sc == ScalarInput.ISV_DIAL_2_COUNTERCW) {
             listener.onDialRotated(-1);
             return true;
         }

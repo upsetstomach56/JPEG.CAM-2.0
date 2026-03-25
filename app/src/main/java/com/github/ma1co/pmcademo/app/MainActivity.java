@@ -2501,6 +2501,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     @Override 
     public void onApertureChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }
+
+    @Override 
+    public void onHardwareStateChanged() { 
+        runOnUiThread(new Runnable() { 
+            public void run() { 
+                // Safely update tvMode and other HUD elements when physical dials move
+                requestHudUpdate(); 
+            } 
+        }); 
+    }
     
     @Override 
     public void onIsoChanged() { runOnUiThread(new Runnable() { public void run() { requestHudUpdate(); } }); }

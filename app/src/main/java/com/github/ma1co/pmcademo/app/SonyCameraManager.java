@@ -32,6 +32,7 @@ public class SonyCameraManager {
         void onIsoChanged();
         void onFocusPositionChanged(float ratio);
         void onFocalLengthChanged(float focalLengthMm); 
+        void onHardwareStateChanged(); // <-- NEW: Catch physical Mode Dial turns
     }
 
     private CameraEventListener listener;
@@ -252,5 +253,24 @@ public class SonyCameraManager {
             );
             cameraEx.getClass().getMethod("setFocalLengthChangeListener", lClass).invoke(cameraEx, proxy);
         } catch (Exception e) { }
+
+        try {
+            Class<?> lClass = Class.forName("com.sony.scalar.hardware.CameraEx$SettingChangedListener");
+            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class[]{lClass},
+                new java.lang.reflect.InvocationHandler() {
+                    @Override 
+                    public Object invoke(Object p, java.lang.reflect.Method m, Object[] a) {
+                        if (m.getName().equals("onChanged") && listener != null) {
+                            // Fires when the physical Mode dial (PASM) is turned on A7-series cameras
+                            listener.onHardwareStateChanged();
+                        }
+                        return null;
+                    }
+                }
+            );
+            cameraEx.getClass().getMethod("setSettingChangedListener", lClass).invoke(cameraEx, proxy);
+        } catch (Exception e) { }
+    }
     }
 }
