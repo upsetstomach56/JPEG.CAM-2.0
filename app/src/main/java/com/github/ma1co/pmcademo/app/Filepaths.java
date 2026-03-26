@@ -7,10 +7,15 @@ import java.util.List;
 
 public class Filepaths {
 
+    // Restored for HttpServer.java
+    public static File getStorageRoot() {
+        return Environment.getExternalStorageDirectory();
+    }
+
     public static List<File> getStorageRoots() {
         ArrayList<File> roots = new ArrayList<File>();
-        roots.add(Environment.getExternalStorageDirectory()); // Primary (Internal/SD0)
-        roots.add(new File("/storage/sdcard1"));              // Physical SD on A7II (SD1)
+        roots.add(getStorageRoot());           // Primary (Internal/SD0)
+        roots.add(new File("/storage/sdcard1")); // Physical SD on A7II (SD1)
         roots.add(new File("/mnt/sdcard"));
         roots.add(new File("/storage/extSdCard"));
         return roots;
@@ -21,7 +26,7 @@ public class Filepaths {
             File dir = new File(root, "JPEGCAM");
             if (dir.exists()) return dir;
         }
-        File defaultDir = new File(Environment.getExternalStorageDirectory(), "JPEGCAM");
+        File defaultDir = new File(getStorageRoot(), "JPEGCAM");
         if (!defaultDir.exists()) defaultDir.mkdirs();
         return defaultDir;
     }
@@ -43,7 +48,7 @@ public class Filepaths {
     public static File getDcimDir() {
         File sd1 = new File("/storage/sdcard1/DCIM");
         if (sd1.exists()) return sd1;
-        return new File(Environment.getExternalStorageDirectory(), "DCIM");
+        return new File(getStorageRoot(), "DCIM");
     }
 
     public static void buildAppStructure() {

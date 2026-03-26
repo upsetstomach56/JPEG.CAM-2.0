@@ -253,7 +253,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         // 1. Identify cameras from the Alpha (ILCE/ILCA) and NEX families
         boolean isMainFamily = uModel.contains("ILCE") || uModel.contains("ILCA") || uModel.contains("NEX");
         
-        // 2. Exclude models known to be "Screen-Only" (No PASM knob)
+        // 2. Exclude models known to be "Screen-Only" (No physical PASM knob)
         boolean isScreenOnly = uModel.contains("5000") || uModel.contains("5100") || 
                                uModel.contains("NEX-3") || uModel.contains("NEX-5") || 
                                uModel.contains("NEX-C3") || uModel.contains("NEX-F3");

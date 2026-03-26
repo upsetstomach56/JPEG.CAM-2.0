@@ -24,25 +24,28 @@ public class RecipeManager {
     public ArrayList<String> getRecipePaths() { return recipePaths; }
     public ArrayList<String> getRecipeNames() { return recipeNames; }
 
+    // Restored for MainActivity.java
+    public RTLProfile getProfile(int index) {
+        return profiles[index];
+    }
+
     public void scanRecipes() { 
         recipePaths.clear(); 
         recipeNames.clear(); 
         recipePaths.add("NONE"); 
         recipeNames.add("NONE"); 
         
-        // Scan every possible storage root for the JPEGCAM/LUTS folder
-        for (java.io.File root : Filepaths.getStorageRoots()) {
-            java.io.File lutDir = new java.io.File(root, "JPEGCAM/LUTS");
+        for (File root : Filepaths.getStorageRoots()) {
+            File lutDir = new File(root, "JPEGCAM/LUTS");
             if (lutDir.exists() && lutDir.isDirectory()) {
                 Log.d("JPEG.CAM", "Scanning: " + lutDir.getAbsolutePath());
-                java.io.File[] files = lutDir.listFiles();
+                File[] files = lutDir.listFiles();
                 if (files != null) {
-                    for (java.io.File f : files) {
+                    for (File f : files) {
                         String u = f.getName().toUpperCase();
                         if (!u.startsWith(".") && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
                             if (!recipePaths.contains(f.getAbsolutePath())) {
                                 recipePaths.add(f.getAbsolutePath());
-                                // Try to find TITLE in the CUBE file, otherwise use filename
                                 String name = u.replace(".CUBE", "").replace(".CUB", "");
                                 try {
                                     BufferedReader br = new BufferedReader(new FileReader(f));
@@ -67,7 +70,7 @@ public class RecipeManager {
 
     public void savePreferences() {
         try {
-            java.io.File backupFile = new java.io.File(Filepaths.getLutDir(), "RTLBAK.TXT");
+            File backupFile = new File(Filepaths.getLutDir(), "RTLBAK.TXT");
             FileOutputStream fos = new FileOutputStream(backupFile);
             StringBuilder sb = new StringBuilder();
             sb.append("quality=").append(qualityIndex).append("\n").append("slot=").append(currentSlot).append("\n");
@@ -85,7 +88,7 @@ public class RecipeManager {
     }
 
     public void loadPreferences() {
-        java.io.File backupFile = new java.io.File(Filepaths.getLutDir(), "RTLBAK.TXT");
+        File backupFile = new File(Filepaths.getLutDir(), "RTLBAK.TXT");
         if (!backupFile.exists()) return;
         try {
             BufferedReader br = new BufferedReader(new FileReader(backupFile));
