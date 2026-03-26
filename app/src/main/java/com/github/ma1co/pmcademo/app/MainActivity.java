@@ -2217,7 +2217,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override
     protected void onResume() {
         super.onResume();
-        if (cameraManager != null) cameraManager.start();
+        // REMOVED: cameraManager.start() which was causing the build error!
         
         // --- PREVENT PASM DIAL CRASH ON A7II ---
         // Register a receiver to swallow Sony's internal hardware state broadcasts
