@@ -13,8 +13,8 @@ public class Filepaths {
 
     public static List<File> getStorageRoots() {
         ArrayList<File> roots = new ArrayList<File>();
-        roots.add(getStorageRoot());           
-        roots.add(new File("/storage/sdcard1")); 
+        roots.add(getStorageRoot());             // Primary (a5100)
+        roots.add(new File("/storage/sdcard1")); // Physical SD (A7II)
         roots.add(new File("/mnt/sdcard"));
         roots.add(new File("/storage/extSdCard"));
         return roots;
@@ -40,24 +40,15 @@ public class Filepaths {
         return def;
     }
 
-    // --- FIX: RETURN THE EXACT SUBDIRECTORY SO FILEOBSERVER SEES NEW PHOTOS ---
+    // UNIVERSAL DCIM LOCATION
     public static File getDcimDir() {
         for (File root : getStorageRoots()) {
             File dcim = new File(root, "DCIM");
             if (dcim.exists() && dcim.isDirectory()) {
-                File[] subdirs = dcim.listFiles();
-                if (subdirs != null) {
-                    for (File s : subdirs) {
-                        // Return the actual '100MSDCF' folder, NOT the 'DCIM' parent
-                        if (s.isDirectory() && (s.getName().contains("MSDCF") || s.getName().contains("ALPHA") || s.getName().contains("SONY"))) {
-                            return s; 
-                        }
-                    }
-                }
+                return dcim; // Return the exact DCIM root, no matter what SD card it's on
             }
         }
-        // Failsafe fallback
-        return new File(getStorageRoot(), "DCIM/100MSDCF"); 
+        return new File(getStorageRoot(), "DCIM"); 
     }
 
     public static File getRecipeDir() { File d = new File(getAppDir(), "RECIPES"); if (!d.exists()) d.mkdirs(); return d; }
