@@ -175,7 +175,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final int DIAL_MODE_FOCUS = 7;
     
     private int mDialMode = DIAL_MODE_RTL;
-    private boolean hasPhysicalPasmDial = false;
 
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
