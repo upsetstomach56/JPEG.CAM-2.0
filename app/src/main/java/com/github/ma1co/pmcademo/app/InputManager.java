@@ -42,31 +42,32 @@ public class InputManager {
         }
 
         // --- CORE NAVIGATION ---
-        if (sc == ScalarInput.ISV_KEY_DELETE) {
+        // A7II sometimes passes Android keycodes instead of Sony scan codes
+        if (sc == ScalarInput.ISV_KEY_DELETE || keyCode == KeyEvent.KEYCODE_DEL) {
             listener.onDeletePressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_MENU) {
+        if (sc == ScalarInput.ISV_KEY_MENU || keyCode == KeyEvent.KEYCODE_MENU) {
             listener.onMenuPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_ENTER) {
+        if (sc == ScalarInput.ISV_KEY_ENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
             listener.onEnterPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_UP) {
+        if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             listener.onUpPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_DOWN) {
+        if (sc == ScalarInput.ISV_KEY_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
             listener.onDownPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_LEFT) {
+        if (sc == ScalarInput.ISV_KEY_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
             listener.onLeftPressed();
             return true;
         }
-        if (sc == ScalarInput.ISV_KEY_RIGHT) {
+        if (sc == ScalarInput.ISV_KEY_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
             listener.onRightPressed();
             return true;
         }

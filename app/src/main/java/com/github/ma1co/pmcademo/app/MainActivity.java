@@ -175,6 +175,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final int DIAL_MODE_FOCUS = 7;
     
     private int mDialMode = DIAL_MODE_RTL;
+    private boolean hasPhysicalPasmDial = false;
 
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
@@ -2455,9 +2456,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
     
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
+
+    @Override 
+    public void onHardwareStateChanged() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                requestHudUpdate();
+            }
+        });
+    }
     
     @Override 
-    public void onCameraReady() { 
+    public void onCameraReady() {
         syncHardwareState();
         
         if (cameraManager != null) {
@@ -2486,7 +2496,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     Log.e("JPEG.CAM", "Failed to restore camera state on boot: " + e.getMessage());
                 }
             }
-        }
 
         // --- FORCE HARDWARE TO INGEST THE BOOT RECIPE ---
         applyHardwareRecipe();

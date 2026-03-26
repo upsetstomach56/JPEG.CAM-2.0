@@ -32,7 +32,7 @@ public class SonyCameraManager {
         void onIsoChanged();
         void onFocusPositionChanged(float ratio);
         void onFocalLengthChanged(float focalLengthMm); 
-        void onHardwareStateChanged(); // <-- NEW: Listen for physical dial turns
+        void onHardwareStateChanged(); // <-- MUST BE HERE
     }
 
     private CameraEventListener listener;

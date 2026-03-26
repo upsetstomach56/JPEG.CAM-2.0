@@ -3,7 +3,6 @@ package com.github.ma1co.pmcademo.app;
 import android.os.Environment;
 import java.io.*;
 import java.util.ArrayList;
-import java.util.List;
 
 public class RecipeManager {
     private RTLProfile[] profiles = new RTLProfile[10];
@@ -35,11 +34,11 @@ public class RecipeManager {
         recipePaths.add("NONE"); 
         recipeNames.add("NONE"); 
         
-        // Scan ALL possible mount points instead of stopping at the first one
+        // Scan ALL possible mounts to catch the A7II's physical SD card (/storage/sdcard1)
         String[] possibleMounts = {
             Environment.getExternalStorageDirectory().getAbsolutePath(),
-            "/storage/sdcard0", // Default for older/basic models
-            "/storage/sdcard1", // Actual SD card on A7S II, A6500, etc.
+            "/storage/sdcard0", 
+            "/storage/sdcard1", 
             "/mnt/sdcard",
             "/mnt/extSdCard",
             "/storage/extSdCard"
@@ -60,11 +59,14 @@ public class RecipeManager {
                             
                             if (rawName.startsWith(".")) continue;
 
-                            if (f.length() > 0 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
-                                // Prevent duplicates if the OS symlinks paths (e.g. sdcard0 and Environment pointing to the same place)
+                            // Must be > 100 bytes and a CUBE file
+                            if (f.length() > 100 && (u.endsWith(".CUB") || u.endsWith(".CUBE"))) {
+                                
+                                // Prevent duplicates if the OS maps multiple paths to the same physical SD card
                                 if (!recipePaths.contains(f.getAbsolutePath())) {
                                     recipePaths.add(f.getAbsolutePath());
                                     
+                                    // Strip extensions safely
                                     String prettyName = u.replace(".CUBE", "").replace(".CUB", "");
                                     
                                     if (prettyName.contains("~")) {
@@ -95,7 +97,7 @@ public class RecipeManager {
     }
 
     private File getLutDir() {
-        // Used primarily for saving preferences. Still stops at the first valid path.
+        // Used primarily for saving preferences. Returns the first valid path it finds.
         String[] possibleMounts = {
             Environment.getExternalStorageDirectory().getAbsolutePath(),
             "/storage/sdcard0",
