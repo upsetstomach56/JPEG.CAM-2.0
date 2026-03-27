@@ -44,6 +44,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
+    private MatrixManager matrixManager;
     private ConnectivityManager connectivityManager;
     
     private Typeface digitalFont; 
@@ -197,27 +198,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private int mDialMode = DIAL_MODE_RTL;
 
-// --- MATRIX PRESET DATA ---
-    private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
-    private final int[][] MATRIX_PRESET_VALUES = {
-        {100, 0, 0, 0, 100, 0, 0, 0, 100},   // Standard
-        {115, 5, 0, 5, 105, 0, 0, 0, 95},    // Golden Hour
-        {95, 0, 0, 0, 110, 5, 0, 15, 105},   // PNW Green
-        {110, -10, 0, -5, 100, 10, 0, 5, 115}, // Cinematic
-        {130, 0, 0, 0, 130, 0, 0, 0, 130},   // Bleach Bypass
-        {0, 140, 0, 100, 0, 0, 0, 0, 100}    // Aerochrome
-    };
-    private final String[] MATRIX_PRESET_NOTES = {
-        "Identity Matrix. Zero color shift.",
-        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.",
-        "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
-        "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
-        "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
-        "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.",
-        "Manual matrix override active. Row-sum balance not guaranteed."
-    };
-
-
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -331,6 +311,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         mSurfaceView.getHolder().addCallback(this);
         mSurfaceView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         rootLayout.addView(mSurfaceView, new FrameLayout.LayoutParams(-1, -1));
+
+        // Near the end of onCreate...
+    matrixManager = new MatrixManager();
+    
+    // Check if the folder is empty. If it is, create the "Factory Defaults"
+    if (matrixManager.getCount() == 0) {
+        matrixManager.saveMatrix("01 STANDARD", new int[]{100, 0, 0, 0, 100, 0, 0, 0, 100}, "Identity Matrix. Zero color shift.");
+        matrixManager.saveMatrix("02 GOLDEN HOUR", new int[]{115, 5, 0, 5, 105, 0, 0, 0, 95}, "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.");
+        matrixManager.saveMatrix("03 PNW GREEN", new int[]{95, 0, 0, 0, 110, 5, 0, 15, 105}, "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.");
+        matrixManager.saveMatrix("04 CINEMATIC", new int[]{110, -10, 0, -5, 100, 10, 0, 5, 115}, "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.");
+        matrixManager.saveMatrix("05 BLEACH BYPASS", new int[]{130, 0, 0, 0, 130, 0, 0, 0, 130}, "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.");
+        matrixManager.saveMatrix("06 AEROCHROME", new int[]{0, 140, 0, 100, 0, 0, 0, 0, 100}, "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.");
+        matrixManager.scanMatrices(); // Refresh the list
+    } else {
+        matrixManager.scanMatrices(); // Just load what's there
+    }
         
         buildUI(rootLayout);
         setContentView(rootLayout);
@@ -1436,23 +1432,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void updateHudUI() {
         RTLProfile p = recipeManager.getCurrentProfile();
-        String tooltip = ""; // Declared at top to prevent "cannot find symbol"
+        String tooltip = ""; 
 
-        // --- MODE 2: WB GRID ---
         if (currentHudMode == 2) {
-            int ab = p.wbShift;   
-            int gm = p.wbShiftGM; 
-            
-            int leftOffset = 153 + (ab * 20);
-            int topOffset = 153 - (gm * 20);
-            
-            FrameLayout.LayoutParams cursorParams = (FrameLayout.LayoutParams) wbCursor.getLayoutParams();
-            cursorParams.setMargins(leftOffset, topOffset, 0, 0);
-            wbCursor.setLayoutParams(cursorParams);
-            
-            String abStr = ab == 0 ? "0" : (ab < 0 ? "B" + Math.abs(ab) : "A" + ab);
-            String gmStr = gm == 0 ? "0" : (gm < 0 ? "M" + Math.abs(gm) : "G" + gm);
-            wbValueText.setText(abStr + ", " + gmStr);
+            // ... (keep your existing WB Grid code here) ...
             return; 
         }
 
@@ -1460,34 +1443,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String[] labels = new String[9];
         String[] values = new String[9];
 
-        // --- MODE 0: ADVANCED MATRIX (With Presets & Balance) ---
         if (currentHudMode == 0) { 
             activeCells = 9;
             labels = new String[]{"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
             
-            // 1. Calculate Live Row Balance (Smart Update Data)
+            // --- NEW: ROW BALANCE MATH ---
             int rBal = p.advMatrix[0] + p.advMatrix[1] + p.advMatrix[2];
             int gBal = p.advMatrix[3] + p.advMatrix[4] + p.advMatrix[5];
             int bBal = p.advMatrix[6] + p.advMatrix[7] + p.advMatrix[8];
             String balText = String.format(" [ R:%d%% | G:%d%% | B:%d%% ]", rBal, gBal, bBal);
 
-            // 2. Identify current preset
-            int currentPresetIdx = 6; // Default to CUSTOM
-            for (int i = 0; i < MATRIX_PRESET_VALUES.length; i++) {
-                if (java.util.Arrays.equals(p.advMatrix, MATRIX_PRESET_VALUES[i])) {
-                    currentPresetIdx = i;
+            // --- THE PRESET IDENTIFICATION LOOP ---
+            String currentName = "CUSTOM";
+            tooltip = "Manual matrix override active.";
+            
+            for (int i = 0; i < matrixManager.getCount(); i++) {
+                if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
+                    currentName = matrixManager.getNames().get(i);
+                    tooltip = matrixManager.getNote(i);
                     break;
                 }
             }
 
-            // 3. Update top status (Orange if Preset Bar is selected)
             if (tvTopStatus != null) {
-                tvTopStatus.setText("MATRIX: " + MATRIX_PRESET_NAMES[currentPresetIdx]);
+                tvTopStatus.setText("MATRIX: " + currentName);
                 tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
             }
+            
+            tooltip += "\n" + balText;
 
-            // 4. Construct Tooltip (Channel description if cell selected, else Preset Note)
-            if (hudSelection == -1) {
+            for (int i=0; i<9; i++) {
+                values[i] = p.advMatrix[i] + "%";
+            }
+        } else if (currentHudMode == 1) {
                 tooltip = MATRIX_PRESET_NOTES[currentPresetIdx] + "\n" + balText;
             } else {
                 String[] t = {
@@ -1602,20 +1590,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         if (currentHudMode == 0) { 
             if (hudSelection == -1) {
-                // CYCLE PRESETS
-                int currentIdx = 6; // Default CUSTOM
-                for (int i = 0; i < MATRIX_PRESET_VALUES.length; i++) {
-                    if (java.util.Arrays.equals(p.advMatrix, MATRIX_PRESET_VALUES[i])) {
+                // --- THE PRESET CYCLING LOGIC ---
+                int currentIdx = -1;
+                for (int i = 0; i < matrixManager.getCount(); i++) {
+                    if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
                         currentIdx = i; break;
                     }
                 }
                 
-                // Move index (wrap around 0-5, skipping 6/Custom when toggling)
-                int nextIdx = (currentIdx + dir + 6) % 6; 
-                System.arraycopy(MATRIX_PRESET_VALUES[nextIdx], 0, p.advMatrix, 0, 9);
-                
+                // Cycle to the next file in the folder
+                int nextIdx = (currentIdx + dir + matrixManager.getCount()) % matrixManager.getCount(); 
+                System.arraycopy(matrixManager.getValues(nextIdx), 0, p.advMatrix, 0, 9);
             } else {
-                // MANUAL ADJUSTMENT (The 9 cells)
+                // Manual 5% step adjustment
                 int step = 5; 
                 int target = p.advMatrix[hudSelection] + (dir * step);
                 p.advMatrix[hudSelection] = Math.max(-200, Math.min(200, target)); 
@@ -1708,7 +1695,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             hudOverlayContainer.setVisibility(View.VISIBLE);
             if (wbGridContainer != null) wbGridContainer.setVisibility(View.GONE);
         }
+        
         updateHudUI();
+        requestHudUpdate(); // <--- ADD THIS: Forces the top bar to reconcile its visibility
     }
     
     private void launchHudMode(int mode) { 
@@ -1790,8 +1779,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 boolean sixIsStd = p.colorDepthRed==0 && p.colorDepthGreen==0 && p.colorDepthBlue==0 && p.colorDepthCyan==0 && p.colorDepthMagenta==0 && p.colorDepthYellow==0;
                 String sixStr = sixIsStd ? "[ STANDARD ]" : "[ CUSTOM ]";
                 
-                boolean mtxIsStd = p.advMatrix[0]==100 && p.advMatrix[1]==0 && p.advMatrix[2]==0 && p.advMatrix[3]==0 && p.advMatrix[4]==100 && p.advMatrix[5]==0 && p.advMatrix[6]==0 && p.advMatrix[7]==0 && p.advMatrix[8]==100;
-                String mtxStr = mtxIsStd ? "[ STANDARD ]" : "[ CUSTOM ]";
+                String mtxName = "CUSTOM";
+                for (int i = 0; i < matrixManager.getCount(); i++) {
+                    if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
+                        mtxName = matrixManager.getNames().get(i);
+                        break;
+                    }
+                }
+                String mtxStr = "[ " + mtxName + " ]";
 
                 String[] rLabels = {"White Balance Shift", "Pro Color Base", "6-Axis Color Depths", "BIONZ RGB Matrix"};
                 String[] rValues = { combinedWb, (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(), sixStr, mtxStr };
@@ -2528,14 +2523,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
-            tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+            // Reduced to only show Recipe Name to avoid overlap/clutter
+            tvTopStatus.setText(customName + "\n" + (isReady ? "READY" : "LOADING.."));
             
             if (mDialMode == DIAL_MODE_RTL) {
                 tvTopStatus.setTextColor(Color.WHITE); 
             } else if (isReady) {
-                tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); 
+                tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); // Mint Green
             } else {
-                tvTopStatus.setTextColor(Color.rgb(227, 69, 20)); 
+                tvTopStatus.setTextColor(Color.rgb(227, 69, 20)); // Orange
             }
         }
         
