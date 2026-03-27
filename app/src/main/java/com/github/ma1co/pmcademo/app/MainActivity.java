@@ -1773,7 +1773,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     menuRows[i].setVisibility(View.VISIBLE); 
                 }
             }
-        } else if (currentPage == 6) { // <--- MAKE SURE THIS IS 6 (Was 5)
+        } else if (currentPage == 6) { // <--- MAKE SURE THIS IS 6 (Was 5) 
             itemCount = 6;
             String[] qLabels = {"1/4 RES", "HALF RES", "FULL RES"};
             String[] gLabels = {"SW Global Resolution", "Base Scene", "Manual Focus Meter", "Anamorphic Crop", "Rule of Thirds Grid", "SW JPEG Quality"};
