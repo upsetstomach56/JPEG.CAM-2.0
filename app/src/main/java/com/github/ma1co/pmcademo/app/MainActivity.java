@@ -793,7 +793,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
-            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints());
+            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints(), getCircleOfConfusion());
         } else if (isPlaybackMode) {
             showPlaybackImage(playbackIndex - 1);
         } else {
@@ -857,7 +857,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else if (!isPlaybackMode && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
-            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints());
+            if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints(), getCircleOfConfusion());
         } else if (isPlaybackMode) {
             showPlaybackImage(playbackIndex + 1);
         } else {
@@ -2569,7 +2569,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
                     float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
                     float apToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
-                    focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse);
+                    focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse, getCircleOfConfusion());
                 }
             });
         }
