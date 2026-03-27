@@ -2500,16 +2500,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
         // --- 1. CLEAN DISPLAY CHECK ---
-        // If the user pressed DISP to hide the HUD, we don't need to do any math.
-        // Just hide everything and immediately return to save CPU.
         if (isHudActive) {
-            setHUDVisibility(View.GONE);
+            // Hide the bottom bars and icons, but keep the Top Status bar for Preset names
+            setHUDVisibility(View.GONE); 
+            if (tvTopStatus != null) tvTopStatus.setVisibility(View.VISIBLE); 
+            
             if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             return; 
         } else {
-            // NORMAL STATE: Explicitly force the HUD to reappear after returning from a menu!
-            // (We will selectively hide things again at the bottom if calibrating)
+            // NORMAL STATE: Explicitly force the HUD to reappear
             setHUDVisibility(View.VISIBLE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
         }
