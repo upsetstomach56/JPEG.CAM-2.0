@@ -95,28 +95,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
      // Converts hardware value (e.g., 1024) to a human percentage (e.g., 100)
     private int matrixToPercent(int hardwareValue) {
         return Math.round((hardwareValue / 1024.0f) * 100.0f);
-    }
-
-    // Matrix Preset Data
-    private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
-    private final int[][] MATRIX_PRESET_VALUES = {
-        {100, 0, 0, 0, 100, 0, 0, 0, 100},   // Standard
-        {115, 5, 0, 5, 105, 0, 0, 0, 95},    // Golden Hour
-        {95, 0, 0, 0, 110, 5, 0, 15, 105},   // PNW Green
-        {110, -10, 0, -5, 100, 10, 0, 5, 115}, // Cinematic
-        {130, 0, 0, 0, 130, 0, 0, 0, 130},   // Bleach Bypass
-        {0, 140, 0, 100, 0, 0, 0, 0, 100}    // Aerochrome
-    };
-    private final String[] MATRIX_PRESET_NOTES = {
-        "Identity Matrix. Zero color shift.",
-        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.",
-        "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
-        "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
-        "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
-        "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.",
-        "Manual matrix override active. Row-sum balance not guaranteed."
-    };
-        
+    }      
     // Converts a human percentage (e.g., 100) back to the hardware value (e.g., 1024)
     private int percentToMatrix(int percentValue) {
         return Math.round((percentValue / 100.0f) * 1024.0f);
@@ -217,6 +196,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final int DIAL_MODE_FOCUS = 7;
     
     private int mDialMode = DIAL_MODE_RTL;
+
+// --- MATRIX PRESET DATA ---
+    private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
+    private final int[][] MATRIX_PRESET_VALUES = {
+        {100, 0, 0, 0, 100, 0, 0, 0, 100},   // Standard
+        {115, 5, 0, 5, 105, 0, 0, 0, 95},    // Golden Hour
+        {95, 0, 0, 0, 110, 5, 0, 15, 105},   // PNW Green
+        {110, -10, 0, -5, 100, 10, 0, 5, 115}, // Cinematic
+        {130, 0, 0, 0, 130, 0, 0, 0, 130},   // Bleach Bypass
+        {0, 140, 0, 100, 0, 0, 0, 0, 100}    // Aerochrome
+    };
+    private final String[] MATRIX_PRESET_NOTES = {
+        "Identity Matrix. Zero color shift.",
+        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.",
+        "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
+        "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
+        "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
+        "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.",
+        "Manual matrix override active. Row-sum balance not guaranteed."
+    };
+
 
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
@@ -1436,7 +1436,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void updateHudUI() {
         RTLProfile p = recipeManager.getCurrentProfile();
+        String tooltip = ""; // Declared at top to prevent "cannot find symbol"
 
+        // --- MODE 2: WB GRID ---
         if (currentHudMode == 2) {
             int ab = p.wbShift;   
             int gm = p.wbShiftGM; 
@@ -1458,12 +1460,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         String[] labels = new String[9];
         String[] values = new String[9];
 
+        // --- MODE 0: ADVANCED MATRIX (With Presets & Balance) ---
         if (currentHudMode == 0) { 
             activeCells = 9;
             labels = new String[]{"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
             
-            // 1. Check if current matrix matches a preset
-            int currentPresetIdx = 6; // Default to "CUSTOM"
+            // 1. Calculate Live Row Balance (Smart Update Data)
+            int rBal = p.advMatrix[0] + p.advMatrix[1] + p.advMatrix[2];
+            int gBal = p.advMatrix[3] + p.advMatrix[4] + p.advMatrix[5];
+            int bBal = p.advMatrix[6] + p.advMatrix[7] + p.advMatrix[8];
+            String balText = String.format(" [ R:%d%% | G:%d%% | B:%d%% ]", rBal, gBal, bBal);
+
+            // 2. Identify current preset
+            int currentPresetIdx = 6; // Default to CUSTOM
             for (int i = 0; i < MATRIX_PRESET_VALUES.length; i++) {
                 if (java.util.Arrays.equals(p.advMatrix, MATRIX_PRESET_VALUES[i])) {
                     currentPresetIdx = i;
@@ -1471,85 +1480,96 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             }
 
-            // 2. Update the Top Status text to show the Preset Name and Note
+            // 3. Update top status (Orange if Preset Bar is selected)
             if (tvTopStatus != null) {
                 tvTopStatus.setText("MATRIX: " + MATRIX_PRESET_NAMES[currentPresetIdx]);
                 tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
             }
-            
-            // 3. Update the Tooltip area with the Preset Note
-            tooltip = MATRIX_PRESET_NOTES[currentPresetIdx];
+
+            // 4. Construct Tooltip (Channel description if cell selected, else Preset Note)
+            if (hudSelection == -1) {
+                tooltip = MATRIX_PRESET_NOTES[currentPresetIdx] + "\n" + balText;
+            } else {
+                String[] t = {
+                    "Red sensitivity to real-world Red light (Primary - baseline is 100)", "Pushes Green light into Red channel (baseline is 0)", "Pushes Blue light into Red channel (baseline is 0)",
+                    "Pushes Red light into Green channel (baseline is 0)", "Green sensitivity to real-world Green light (Primary - baseline is 100)", "Pushes Blue light into Green channel (baseline is 0)",
+                    "Pushes Red light into Blue channel (baseline is 0)", "Pushes Green light into Blue channel (baseline is 0)", "Blue sensitivity to real-world Blue light (Primary - baseline is 100)."
+                };
+                tooltip = t[hudSelection] + "\n" + balText;
+            }
 
             for (int i=0; i<9; i++) {
                 values[i] = p.advMatrix[i] + "%";
             }
+
+        // --- ALL OTHER MODES (1, 3-9) ---
         } else if (currentHudMode == 1) { 
             activeCells = 6;
             labels = new String[]{"RED", "GRN", "BLU", "CYN", "MAG", "YEL"};
             int[] depths = {p.colorDepthRed, p.colorDepthGreen, p.colorDepthBlue, p.colorDepthCyan, p.colorDepthMagenta, p.colorDepthYellow};
-            for (int i=0; i<6; i++) {
-                values[i] = depths[i] == 0 ? "0" : String.format("%+d", depths[i]);
-            }
+            for (int i=0; i<6; i++) values[i] = depths[i] == 0 ? "0" : String.format("%+d", depths[i]);
+            tooltip = "Alters the luminance and depth of the target color phase";
+
         } else if (currentHudMode == 3) { 
             activeCells = 3;
             labels = new String[]{"CONTRAST", "SATURATION", "SHARPNESS"};
             int[] vals = {p.contrast, p.saturation, p.sharpness};
             for (int i=0; i<3; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
-            
+            if (hudSelection == 2) tooltip = "Standard hardware sharpness (Micro-Contrast is stronger)";
+
         } else if (currentHudMode == 4) { 
             activeCells = 2;
             labels = new String[]{"SHADE RED", "SHADE BLUE"};
             int[] vals = {p.shadingRed, p.shadingBlue};
             for (int i=0; i<2; i++) values[i] = vals[i] == 0 ? "0" : String.format("%+d", vals[i]);
-            
+            tooltip = "Injects color shifts into the corners to simulate vintage lens tinting";
+
         } else if (currentHudMode == 5) { 
             activeCells = 1;
             String eff = p.pictureEffect != null ? p.pictureEffect : "off";
             String genericStr = p.peToyCameraTone != null ? p.peToyCameraTone.toUpperCase() : "NORM";
-            
             if ("toy-camera".equals(eff)) {
-                activeCells = 2;
-                labels = new String[]{"TOY-TONE", "HW-VIGNETTE"};
+                activeCells = 2; labels = new String[]{"TOY-TONE", "HW-VIGNETTE"};
                 values[0] = genericStr.equals("NORMAL") ? "NORM" : (genericStr.equals("MAGENTA") ? "MAG" : genericStr);
                 values[1] = p.vignetteHardware == 0 ? "0" : String.format("%+d", p.vignetteHardware);
             } else if ("soft-focus".equals(eff) || "hdr-art".equals(eff) || "illust".equals(eff) || "watercolor".equals(eff)) {
-                labels = new String[]{"LEVEL"};
-                values[0] = String.valueOf(p.softFocusLevel);
+                labels = new String[]{"LEVEL"}; values[0] = String.valueOf(p.softFocusLevel);
             } else if ("part-color".equals(eff)) {
-                labels = new String[]{"COLOR"};
-                values[0] = genericStr.equals("NORMAL") ? "RED" : genericStr; 
+                labels = new String[]{"COLOR"}; values[0] = genericStr.equals("NORMAL") ? "RED" : genericStr; 
             } else if ("miniature".equals(eff)) {
-                labels = new String[]{"AREA"};
-                values[0] = genericStr.equals("NORMAL") ? "AUTO" : genericStr;
+                labels = new String[]{"AREA"}; values[0] = genericStr.equals("NORMAL") ? "AUTO" : genericStr;
             } else {
-                labels = new String[]{"EFFECT"};
-                values[0] = "NO PARAMS";
+                labels = new String[]{"EFFECT"}; values[0] = "NO PARAMS";
             }
+
         } else if (currentHudMode == 6) { 
             activeCells = 2;
             labels = new String[]{"STYLE", "MICRO-CONTRAST"};
             values[0] = p.colorMode != null ? p.colorMode.toUpperCase() : "STD";
             values[1] = p.sharpnessGain == 0 ? "0" : String.format("%+d", p.sharpnessGain);
+            if (hudSelection == 1) tooltip = "Aggressive frequency enhancement (Affects film grain texture)";
+
         } else if (currentHudMode == 7) { 
-            activeCells = 1;
-            labels = new String[]{"PRO BASE"};
+            activeCells = 1; labels = new String[]{"PRO BASE"};
             values[0] = p.proColorMode != null ? p.proColorMode.toUpperCase() : "OFF";
+            tooltip = "Under-the-hood color science starting points (Overwrites Standard Styles)";
+
         } else if (currentHudMode == 8) { 
-            activeCells = 1;
-            labels = new String[]{"EFFECT"};
+            activeCells = 1; labels = new String[]{"EFFECT"};
             values[0] = p.pictureEffect != null ? p.pictureEffect.toUpperCase() : "OFF";
+
         } else if (currentHudMode == 9) { 
-            activeCells = 1;
-            labels = new String[]{"DYNAMIC RANGE"};
+            activeCells = 1; labels = new String[]{"DYNAMIC RANGE"};
             values[0] = p.dro != null ? p.dro.toUpperCase() : "OFF";
+            tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         }
 
+        // --- GENERAL UI RENDER LOOP ---
         for (int i = 0; i < 9; i++) {
             if (i < activeCells) {
                 hudCells[i].setVisibility(View.VISIBLE);
                 hudLabels[i].setText(labels[i]);
                 hudValues[i].setText(values[i]);
-                
                 if (i == hudSelection) {
                     hudLabels[i].setTextColor(Color.rgb(227, 69, 20));
                     hudValues[i].setTextColor(Color.rgb(227, 69, 20));
@@ -1560,28 +1580,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 hudCells[i].setVisibility(View.GONE); 
             }
-        }
-
-        String tooltip = "";
-        if (currentHudMode == 0) { 
-            String[] t = {
-                "Red sensitivity to real-world Red light (Primary - baseline is 100)", "Pushes Green light into Red channel (baseline is 0)", "Pushes Blue light into Red channel (baseline is 0)",
-                "Pushes Red light into Green channel (baseline is 0)", "Green sensitivity to real-world Green light (Primary - baseline is 100)", "Pushes Blue light into Green channel (baseline is 0)",
-                "Pushes Red light into Blue channel (baseline is 0)", "Pushes Green light into Blue channel (baseline is 0)", "Blue sensitivity to real-world Blue light (Primary - baseline is 100)."
-            };
-            tooltip = t[hudSelection];
-        } else if (currentHudMode == 1) { 
-            tooltip = "Alters the luminance and depth of the target color phase";
-        } else if (currentHudMode == 3) { 
-            if (hudSelection == 2) tooltip = "Standard hardware sharpness (Micro-Contrast is stronger)";
-        } else if (currentHudMode == 4) { 
-            tooltip = "Injects color shifts into the corners to simulate vintage lens tinting";
-        } else if (currentHudMode == 6) { 
-            if (hudSelection == 1) tooltip = "Aggressive frequency enhancement (Affects film grain texture)";
-        } else if (currentHudMode == 7) { 
-            tooltip = "Under-the-hood color science starting points (Overwrites Standard Styles)";
-        } else if (currentHudMode == 9) { 
-            tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         }
         
         if (hudTooltipText != null) {
