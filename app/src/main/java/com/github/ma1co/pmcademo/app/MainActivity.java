@@ -1826,7 +1826,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     menuLabels[i].setText(rLabels[i]); 
                     menuValues[i].setText(rValues[i]); 
                     menuRows[i].setVisibility(View.VISIBLE); 
-                } else if (currentPage == 3) {
+                }
+            } else if (currentPage == 3) {
                 itemCount = 3;
                 
                 String paramStr = "N/A";
