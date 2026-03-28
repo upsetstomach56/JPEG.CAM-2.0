@@ -131,6 +131,22 @@ public class RecipeManager {
                 p.advMatrix = new int[]{100, 0, 0, 0, 100, 0, 0, 0, 100};
             }
 
+            // --- THE LUT VALIDATION FALLBACK ---
+            // Verify that the specified LUT actually exists on the SD card
+            if (p.lutName != null && !p.lutName.equalsIgnoreCase("OFF") && !p.lutName.isEmpty()) {
+                File lutDir = new File(Filepaths.getAppDir(), "LUTS");
+                // Note: Adjust the ".cube" extension here if your app uses .png or something else for LUTs!
+                File expectedLut = new File(lutDir, p.lutName + ".cube"); 
+                
+                if (!expectedLut.exists()) {
+                    android.util.Log.w("JPEG.CAM", "Missing LUT: " + p.lutName + ". Falling back to OFF.");
+                    p.lutName = "OFF"; 
+                    
+                    // Optional: Append a warning to the profile name so the user sees it in the menu
+                    p.profileName = p.profileName + " (NO LUT)";
+                }
+            }
+
         } catch (Exception e) {
             android.util.Log.e("JPEG.CAM", "Failed to parse JSON: " + filename);
             p.profileName = "ERROR";
