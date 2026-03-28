@@ -137,7 +137,7 @@ public class RecipeManager {
 
     private RTLProfile loadProfileFromFile(String filename, int slotNumber) {
         File file = new File(recipeDir, filename);
-        RTLProfile p = new RTLProfile(slotNumber - 1); // Pass internal 0-9 index
+        RTLProfile p = new RTLProfile(slotNumber - 1); 
         
         if (!file.exists()) {
             p.profileName = "SLOT " + slotNumber;
@@ -154,13 +154,13 @@ public class RecipeManager {
             JSONObject json = new JSONObject(new String(data, "UTF-8"));
             
             p.profileName = json.optString("profileName", "RECIPE");
-            p.lutName = json.optString("lutName", "OFF");
             
-            // Bridge JSON Name to UI Index
-            p.lutIndex = recipeNames.indexOf(p.lutName);
+            // Bridge JSON Name to UI Index using a local string
+            String loadedLutName = json.optString("lutName", "OFF");
+            p.lutIndex = recipeNames.indexOf(loadedLutName);
             if (p.lutIndex == -1) p.lutIndex = 0; // Fallback to OFF
 
-            p.lutOpacity = json.optInt("lutOpacity", 100);
+            p.opacity = json.optInt("lutOpacity", 100); // Fixed variable name
             p.shadowToe = json.optInt("shadowToe", 0);
             p.rollOff = json.optInt("rollOff", 0);
             p.colorChrome = json.optInt("colorChrome", 0);
@@ -199,9 +199,10 @@ public class RecipeManager {
             }
 
             // LUT Validation Fallback
-            if (p.lutName != null && !p.lutName.equalsIgnoreCase("OFF") && p.lutIndex == 0) {
-                Log.w("JPEG.CAM", "Missing LUT data for: " + p.lutName);
-                p.lutName = "OFF"; 
+            if (!loadedLutName.equalsIgnoreCase("OFF") && p.lutIndex == 0) {
+                Log.w("JPEG.CAM", "Missing LUT data for: " + loadedLutName);
+                // We don't need to overwrite p.lutName since it doesn't exist.
+                // The index safely defaults to 0 (OFF).
             }
 
         } catch (Exception e) {
@@ -213,18 +214,17 @@ public class RecipeManager {
 
     private void saveProfileToFile(File file, RTLProfile p) {
         try {
-            // Translate D-Pad Index back to String Name for JSON
+            // Translate D-Pad Index back to String Name for JSON locally
+            String lutNameToSave = "OFF";
             if (p.lutIndex >= 0 && p.lutIndex < recipeNames.size()) {
-                p.lutName = recipeNames.get(p.lutIndex);
-            } else {
-                p.lutName = "OFF";
+                lutNameToSave = recipeNames.get(p.lutIndex);
             }
 
             StringBuilder sb = new StringBuilder();
             sb.append("{\n");
             sb.append("  \"profileName\": \"").append(p.profileName.replace("\"", "\\\"")).append("\",\n");
-            sb.append("  \"lutName\": \"").append(p.lutName.replace("\"", "\\\"")).append("\",\n");
-            sb.append("  \"lutOpacity\": ").append(p.opacity).append(",\n"); // Using p.opacity from your old code
+            sb.append("  \"lutName\": \"").append(lutNameToSave.replace("\"", "\\\"")).append("\",\n");
+            sb.append("  \"lutOpacity\": ").append(p.opacity).append(",\n");
             sb.append("  \"shadowToe\": ").append(p.shadowToe).append(",\n");
             sb.append("  \"rollOff\": ").append(p.rollOff).append(",\n");
             sb.append("  \"colorChrome\": ").append(p.colorChrome).append(",\n");
@@ -272,8 +272,33 @@ public class RecipeManager {
         }
     }
 
+    public void loadPreferences() {
+        File prefsFile = new File(recipeDir, "GLOBAL_PREFS.TXT");
+        if (prefsFile.exists()) {
+            try {
+                BufferedReader br = new BufferedReader(new FileReader(prefsFile));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                }
+                br.close();
+            } catch (Exception e) {}
+        }
+    }
+
     public void savePreferences() {
-        // Saves the current live profile directly into its assigned Vault file
+        // Save the global slot and quality settings
+        try {
+            File prefsFile = new File(recipeDir, "GLOBAL_PREFS.TXT");
+            FileOutputStream fos = new FileOutputStream(prefsFile);
+            fos.write(("quality=" + qualityIndex + "\nslot=" + currentSlot + "\n").getBytes());
+            fos.close();
+        } catch (Exception e) {
+            Log.e("JPEG.CAM", "Failed to save global prefs.");
+        }
+
+        // Save the current live profile directly into its assigned Vault file
         String currentFilename = activeFilenames.get(currentSlot);
         File file = new File(recipeDir, currentFilename);
         saveProfileToFile(file, loadedProfiles[currentSlot]);
