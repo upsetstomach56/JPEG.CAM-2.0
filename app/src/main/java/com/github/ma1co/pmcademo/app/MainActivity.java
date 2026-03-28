@@ -568,6 +568,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (isProcessing) return;
 
         if (isHudActive) {
+            // --- ON-CAMERA CUSTOM MATRIX SAVER ---
+            // Intercept Enter key if we are on the top bar of the Matrix HUD
+            if (currentHudMode == 0 && hudSelection == -1) {
+                saveCurrentCustomMatrix();
+                return; // Stop here! Do not close the HUD.
+            }
+            
+            // --- STANDARD HUD EXIT ---
             isHudActive = false;
             hudOverlayContainer.setVisibility(View.GONE);
             if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
@@ -1725,6 +1733,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         updateHudUI();
         uiHandler.removeCallbacks(applySettingsRunnable); 
         uiHandler.postDelayed(applySettingsRunnable, 150);
+    }
+
+    // --- ON-CAMERA CUSTOM MATRIX SAVER ---
+    private void saveCurrentCustomMatrix() {
+        if (matrixManager == null) return;
+        
+        RTLProfile p = recipeManager.getCurrentProfile();
+        
+        // 1. Find the next available "CUSTOM ##" number
+        int nextId = 1;
+        for (String name : matrixManager.getNames()) {
+            if (name.startsWith("CUSTOM ")) {
+                try {
+                    int id = Integer.parseInt(name.substring(7).trim());
+                    if (id >= nextId) nextId = id + 1;
+                } catch (Exception e) { }
+            }
+        }
+        
+        // 2. Format the new name (e.g., "CUSTOM 01")
+        String newName = String.format("CUSTOM %02d", nextId);
+        
+        // 3. Save to SD Card using our bulletproof MatrixManager
+        matrixManager.saveMatrix(newName, p.advMatrix, "Saved directly from camera UI.");
+        
+        // 4. Reload the SD Card so the new file is immediately available
+        matrixManager.scanMatrices();
+        
+        // 5. Force the UI to refresh and snap to the new file via Reverse Lookup
+        updateHudUI(); 
     }
 
     private void launchHudMode(int mode, int defaultSelection) {
