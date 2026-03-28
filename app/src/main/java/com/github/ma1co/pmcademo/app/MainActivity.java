@@ -41,13 +41,13 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback, 
     SonyCameraManager.CameraEventListener, InputManager.InputListener, ConnectivityManager.StatusUpdateListener {
 
-    private SonyCameraManager cameraManager;
+    rivate SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
     private MatrixManager matrixManager; // <-- NEW
     private ConnectivityManager connectivityManager;
     
-    private int activeMatrixIndex = 0; // <-- NEW: Tracks which JSON we are viewing
+    private int activeMatrixIndex = 0; // <-- NEW: Tracks which JSON file we are viewing
     
     private Typeface digitalFont; 
     
@@ -200,6 +200,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private int mDialMode = DIAL_MODE_RTL;
 
+// --- MATRIX PRESET DATA ---
+    private final String[] MATRIX_PRESET_NAMES = {"STANDARD", "GOLDEN HOUR", "PNW GREEN", "CINEMATIC", "BLEACH BYPASS", "AEROCHROME", "CUSTOM"};
+    private final int[][] MATRIX_PRESET_VALUES = {
+        {100, 0, 0, 0, 100, 0, 0, 0, 100},   // Standard
+        {115, 5, 0, 5, 105, 0, 0, 0, 95},    // Golden Hour
+        {95, 0, 0, 0, 110, 5, 0, 15, 105},   // PNW Green
+        {110, -10, 0, -5, 100, 10, 0, 5, 115}, // Cinematic
+        {130, 0, 0, 0, 130, 0, 0, 0, 130},   // Bleach Bypass
+        {0, 140, 0, 100, 0, 0, 0, 0, 100}    // Aerochrome
+    };
+    private final String[] MATRIX_PRESET_NOTES = {
+        "Identity Matrix. Zero color shift.",
+        "Broadens the yellow spectrum. Pro Tip: If skin looks too yellow, drop R-G to 2%.",
+        "Fuji-style vintage teals. Pairs best with an Amber (A2) White Balance shift.",
+        "Professional Teal/Orange separation. Uses negative values to 'clean' the Red channel.",
+        "High color density. WARNING: May clip highlights. Use -0.7 EV on camera.",
+        "False-color Infrared swap. Turns foliage (Green) into candy-apple Red.",
+        "Manual matrix override active. Row-sum balance not guaranteed."
+    };
+
+
     private BroadcastReceiver sonyCameraReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -265,6 +286,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     };
 
+    // --- FACTORY BURN SYSTEM ---
+    private void factoryBurnMatrices() {
+        if (matrixManager != null && matrixManager.getCount() == 0) {
+            matrixManager.saveMatrix("01 STANDARD", new int[]{100, 0, 0, 0, 100, 0, 0, 0, 100}, "Identity Matrix. Zero color shift.");
+            matrixManager.saveMatrix("02 GOLDEN HOUR", new int[]{115, 5, 0, 5, 105, 0, 0, 0, 95}, "Broadens yellow spectrum. Drop R-G to 5% if too yellow.");
+            matrixManager.saveMatrix("03 PNW GREEN", new int[]{95, 0, 0, 0, 110, 5, 0, 15, 105}, "Fuji-style vintage teals. Pairs best with Amber (A2) shift.");
+            matrixManager.saveMatrix("04 CINEMATIC", new int[]{110, -10, 0, -5, 100, 10, 0, 5, 115}, "Teal/Orange separation. Uses negative values to clean Reds.");
+            matrixManager.saveMatrix("05 BLEACH BYPASS", new int[]{130, 0, 0, 0, 130, 0, 0, 0, 130}, "High density. WARNING: May clip highlights. Use -0.7 EV.");
+            matrixManager.saveMatrix("06 AEROCHROME", new int[]{0, 140, 0, 100, 0, 0, 0, 0, 100}, "False-color Infrared swap. Turns Green foliage Red.");
+            matrixManager.scanMatrices(); // Reload list after saving
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -296,27 +330,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         recipeManager = new RecipeManager();
         matrixManager = new MatrixManager(); // <-- NEW
         matrixManager.scanMatrices();        // <-- NEW
+        factoryBurnMatrices();               // <-- NEW: Generate defaults if empty!
         connectivityManager = new ConnectivityManager(this, this);
 
         lensManager = new LensProfileManager(this);
         availableLenses = lensManager.getAvailableLenses();
         
         recipeManager.loadPreferences();
-
-        // Initialize Matrix Manager and check for factory presets
-        matrixManager = new MatrixManager();
-        if (matrixManager.getCount() == 0) {
-            // "Factory Burn": Create the files on the first run only
-            matrixManager.saveMatrix("01 STANDARD", new int[]{100, 0, 0, 0, 100, 0, 0, 0, 100}, "Identity Matrix. Zero color shift.");
-            matrixManager.saveMatrix("02 GOLDEN HOUR", new int[]{115, 5, 0, 5, 105, 0, 0, 0, 95}, "Broadens yellow spectrum. Drop R-G to 5% if too yellow.");
-            matrixManager.saveMatrix("03 PNW GREEN", new int[]{95, 0, 0, 0, 110, 5, 0, 15, 105}, "Fuji-style vintage teals. Pairs best with Amber (A2) shift.");
-            matrixManager.saveMatrix("04 CINEMATIC", new int[]{110, -10, 0, -5, 100, 10, 0, 5, 115}, "Teal/Orange separation. Uses negative values to clean Reds.");
-            matrixManager.saveMatrix("05 BLEACH BYPASS", new int[]{130, 0, 0, 0, 130, 0, 0, 0, 130}, "High density. WARNING: May clip highlights. Use -0.7 EV.");
-            matrixManager.saveMatrix("06 AEROCHROME", new int[]{0, 140, 0, 100, 0, 0, 0, 0, 100}, "False-color Infrared swap. Turns Green foliage Red.");
-            matrixManager.scanMatrices(); // Reload list after saving
-        } else {
-            matrixManager.scanMatrices(); // Just load existing user files
-        }
         
         try {
             digitalFont = Typeface.createFromAsset(getAssets(), "fonts/digital-7.ttf");
@@ -689,8 +709,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleWbAdjustment(0, 1); 
             } else {
                 hudSelection--;
+                
+                // --- NAVIGATION WRAP LOGIC ---
+                // Matrix mode (0) allows selection to go up to -1 (The Preset Bar)
                 int minIdx = (currentHudMode == 0) ? -1 : 0;
+                
                 if (hudSelection < minIdx) {
+                    // Wrap to the bottom based on how many cells are in the current mode
                     if (currentHudMode == 0) hudSelection = 8;
                     else if (currentHudMode == 1) hudSelection = 5;
                     else if (currentHudMode == 3) hudSelection = 2;
@@ -701,6 +726,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
             return;
         }
+        
         if (isProcessing || waitingForProfileChoice) return;
         
         if (isCalibrating) {
@@ -744,19 +770,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleWbAdjustment(0, -1); 
             } else {
                 hudSelection++;
+                
+                // Determine the max index for the current mode
                 int maxIdx = 0;
                 if (currentHudMode == 0) maxIdx = 8;
                 else if (currentHudMode == 1) maxIdx = 5;
                 else if (currentHudMode == 3) maxIdx = 2;
                 else if (currentHudMode == 4 || currentHudMode == 6) maxIdx = 1;
 
+                // --- NAVIGATION WRAP LOGIC ---
                 if (hudSelection > maxIdx) {
+                    // If Matrix mode, wrap back to the Preset Bar (-1). Others wrap to 0.
                     hudSelection = (currentHudMode == 0) ? -1 : 0;
                 }
                 updateHudUI();
             }
             return;
         }
+        
         if (isProcessing) return;
         
         if (waitingForProfileChoice) {
@@ -1453,7 +1484,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             activeCells = 9;
             labels = new String[]{"R-R", "G-R", "B-R", "R-G", "G-G", "B-G", "R-B", "G-B", "B-B"};
             
-            // 1. Calculate Live Row Balance (Smart Update Data)
+            // 1. Calculate Live Row Balance
             int rBal = p.advMatrix[0] + p.advMatrix[1] + p.advMatrix[2];
             int gBal = p.advMatrix[3] + p.advMatrix[4] + p.advMatrix[5];
             int bBal = p.advMatrix[6] + p.advMatrix[7] + p.advMatrix[8];
@@ -1474,32 +1505,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 }
             }
 
-            // 3. Update top status header
+            // 3. Update top status header (FIX: Explicitly set VISIBLE to prevent vanishing bug)
             if (tvTopStatus != null) {
                 tvTopStatus.setText("MATRIX: " + currentName);
-                tvTopStatus.setVisibility(View.VISIBLE);
+                tvTopStatus.setVisibility(View.VISIBLE); // <--- THE BUG FIX
                 tvTopStatus.setTextColor(hudSelection == -1 ? Color.rgb(227, 69, 20) : Color.WHITE);
             }
             
             // 4. Update Description Tooltip based on selection
             if (hudSelection == -1) {
-                tooltip = "FILE: " + matrixNote;
+                tooltip = "FILE: " + matrixNote + "\n" + balText;
             } else {
                 String[] t = {
-                    "Red sensitivity to Red light (Primary - baseline 100)", "Pushes Green light into Red channel (baseline 0)", "Pushes Blue light into Red channel (baseline 0)",
-                    "Pushes Red light into Green channel (baseline 0)", "Green sensitivity to Green light (Primary - baseline 100)", "Pushes Blue light into Green channel (baseline 0)",
-                    "Pushes Red light into Blue channel (baseline 0)", "Pushes Green light into Blue channel (baseline 0)", "Blue sensitivity to Blue light (Primary - baseline 100)."
+                    "Red sensitivity to real-world Red light (Primary - baseline is 100)", "Pushes Green light into Red channel (baseline is 0)", "Pushes Blue light into Red channel (baseline is 0)",
+                    "Pushes Red light into Green channel (baseline is 0)", "Green sensitivity to real-world Green light (Primary - baseline is 100)", "Pushes Blue light into Green channel (baseline is 0)",
+                    "Pushes Red light into Blue channel (baseline is 0)", "Pushes Green light into Blue channel (baseline is 0)", "Blue sensitivity to real-world Blue light (Primary - baseline is 100)."
                 };
-                // Safety net: Ensure we never exceed the array length
                 if (hudSelection >= 0 && hudSelection < t.length) {
-                    tooltip = t[hudSelection];
+                    tooltip = t[hudSelection] + "\n" + balText;
                 }
             }
-            
-            // Safely append the live balance math to whatever tooltip we just generated
-            tooltip += "\n" + balText;
 
-            for (int i=0; i<9; i++) values[i] = p.advMatrix[i] + "%";
+            for (int i=0; i<9; i++) {
+                values[i] = p.advMatrix[i] + "%";
+            }
             
         // --- ALL OTHER MODES (1, 3-9) ---
         } else if (currentHudMode == 1) { 
@@ -1604,24 +1633,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 // --- CYCLE SD CARD MATRICES ---
                 if (matrixManager != null && matrixManager.getCount() > 0) {
                     activeMatrixIndex += dir;
-                    if (activeMatrixIndex < 0) activeMatrixIndex = matrixManager.getCount() - 1;
-                    if (activeMatrixIndex >= matrixManager.getCount()) activeMatrixIndex = 0;
+                    
+                    // FIX: Bulletproof wrapping for rapid, multi-click dial spins
+                    while (activeMatrixIndex < 0) activeMatrixIndex += matrixManager.getCount();
+                    activeMatrixIndex = activeMatrixIndex % matrixManager.getCount();
                     
                     int[] loadedVals = matrixManager.getValues(activeMatrixIndex);
-                    // Safely copy the JSON values into the live camera profile
                     for(int i = 0; i < 9; i++) {
                         p.advMatrix[i] = loadedVals[i];
                     }
                 }
             } else {
-                // --- NORMAL MATH ADJUSTMENT ---
-                int step = 25; 
-                boolean isDiagonal = (hudSelection == 0 || hudSelection == 4 || hudSelection == 8);
-                int base = isDiagonal ? 1024 : 0;
-                int offset = p.advMatrix[hudSelection] - base;
-                int target = Math.round((float)(offset + (dir * step)) / step) * step; 
-                int finalVal = base + target;
-                p.advMatrix[hudSelection] = Math.max(-1024, Math.min(isDiagonal ? 2048 : 1024, finalVal));
+                // --- MANUAL MATH ADJUSTMENT ---
+                int step = 5; 
+                int target = p.advMatrix[hudSelection] + (dir * step);
+                p.advMatrix[hudSelection] = Math.max(-200, Math.min(200, target)); 
             }
         } else if (currentHudMode == 1) {
             if (hudSelection == 0) p.colorDepthRed = Math.max(-7, Math.min(7, p.colorDepthRed + dir));
@@ -1790,25 +1816,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String gmStr = p.wbShiftGM == 0 ? "0" : (p.wbShiftGM < 0 ? "M" + Math.abs(p.wbShiftGM) : "G" + p.wbShiftGM);
                 String combinedWb = "[ " + abStr + ", " + gmStr + " ]"; 
 
-                // --- NEW: DYNAMIC MATRIX NAME ---
-                String mtxName = "CUSTOM";
-                for (int i = 0; i < matrixManager.getCount(); i++) {
-                    if (java.util.Arrays.equals(p.advMatrix, matrixManager.getValues(i))) {
-                        mtxName = matrixManager.getNames().get(i);
-                        break;
-                    }
-                }
-
                 boolean sixIsStd = p.colorDepthRed==0 && p.colorDepthGreen==0 && p.colorDepthBlue==0 && p.colorDepthCyan==0 && p.colorDepthMagenta==0 && p.colorDepthYellow==0;
                 String sixStr = sixIsStd ? "[ STANDARD ]" : "[ CUSTOM ]";
+                
+                boolean mtxIsStd = p.advMatrix[0]==100 && p.advMatrix[1]==0 && p.advMatrix[2]==0 && p.advMatrix[3]==0 && p.advMatrix[4]==100 && p.advMatrix[5]==0 && p.advMatrix[6]==0 && p.advMatrix[7]==0 && p.advMatrix[8]==100;
+                String mtxStr = mtxIsStd ? "[ STANDARD ]" : "[ CUSTOM ]";
 
                 String[] rLabels = {"White Balance Shift", "Pro Color Base", "6-Axis Color Depths", "BIONZ RGB Matrix"};
-                String[] rValues = { combinedWb, (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(), sixStr, "[ " + mtxName + " ]" };
-                for (int i = 0; i < 4; i++) { 
-                    menuLabels[i].setText(rLabels[i]); 
-                    menuValues[i].setText(rValues[i]); 
-                    menuRows[i].setVisibility(View.VISIBLE); 
-                }
+                String[] rValues = { combinedWb, (p.proColorMode != null ? p.proColorMode : "OFF").toUpperCase(), sixStr, mtxStr };
+                for (int i = 0; i < 4; i++) { menuLabels[i].setText(rLabels[i]); menuValues[i].setText(rValues[i]); menuRows[i].setVisibility(View.VISIBLE); }
+                
             } else if (currentPage == 3) {
                 itemCount = 3;
                 
@@ -2511,37 +2528,46 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void updateMainHUD() {
         if (cameraManager == null || cameraManager.getCamera() == null) return;
         
-        // 1. Check HUD Visibility
+        // --- 1. CLEAN DISPLAY CHECK ---
         if (isHudActive) {
+            // Hide the bottom bars and icons, but keep the Top Status bar for Preset names
             setHUDVisibility(View.GONE); 
             if (tvTopStatus != null) tvTopStatus.setVisibility(View.VISIBLE); 
+            
             if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
             return; 
         } else {
+            // NORMAL STATE: Explicitly force the HUD to reappear
             setHUDVisibility(View.VISIBLE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
         }
         
-        // 2. Define Hardware Parameters (Fixes 'symbol p' error)
+        // --- 2. GATHER HARDWARE DATA ---
         Camera c = cameraManager.getCamera(); 
         Camera.Parameters p = c.getParameters(); 
         CameraEx.ParametersModifier pm = cameraManager.getCameraEx().createParametersModifier(p);
+        
         RTLProfile prof = recipeManager.getCurrentProfile(); 
-
-        // 3. Simple Top Status (Recipe Name only to avoid overlap)
+        String name = recipeManager.getRecipeNames().get(prof.lutIndex);
+        String displayName = name.length() > 15 ? name.substring(0, 12) + "..." : name;
+        
         String customName = prof.profileName != null ? prof.profileName.trim() : ("RECIPE " + (recipeManager.getCurrentSlot() + 1));
         if (customName.isEmpty()) customName = "RECIPE " + (recipeManager.getCurrentSlot() + 1);
         
+        // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
-            tvTopStatus.setText(customName + "\n" + (isReady ? "READY" : "LOADING.."));
+            tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
             
-            if (mDialMode == DIAL_MODE_RTL) tvTopStatus.setTextColor(Color.WHITE); 
-            else if (isReady) tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); 
-            else tvTopStatus.setTextColor(Color.rgb(227, 69, 20)); 
+            if (mDialMode == DIAL_MODE_RTL) {
+                tvTopStatus.setTextColor(Color.WHITE); 
+            } else if (isReady) {
+                tvTopStatus.setTextColor(Color.rgb(0, 230, 118)); 
+            } else {
+                tvTopStatus.setTextColor(Color.rgb(227, 69, 20)); 
+            }
         }
-
-        // 4. Update Hardware Icons (M/A/S/P)
+        
         String sm = p.getSceneMode(); 
         if (tvMode != null) {
             if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
@@ -2551,47 +2577,72 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else tvMode.setText(sm != null ? sm.toUpperCase() : "SCN");
         }
         
-        // 5. Update Exposure Values
-        syncHardwareState();
         cachedAperture = pm.getAperture() / 100.0f;
         Pair<Integer, Integer> ss = pm.getShutterSpeed(); 
         
-        if (tvValAperture != null) tvValAperture.setText(String.format("f%.1f", (cachedIsManualFocus && lensManager.isCurrentProfileManual()) ? virtualAperture : cachedAperture));
+        if (tvValAperture != null) {
+            if (cachedIsManualFocus && lensManager != null && lensManager.isCurrentProfileManual()) {
+                tvValAperture.setText(String.format("f%.1f", virtualAperture)); 
+            } else {
+                tvValAperture.setText(String.format("f%.1f", cachedAperture)); 
+            }
+        }
+        
         if (tvValShutter != null) tvValShutter.setText(ss.first == 1 && ss.second != 1 ? ss.first + "/" + ss.second : ss.first + "\"");
         if (tvValIso != null) tvValIso.setText(pm.getISOSensitivity() == 0 ? "ISO AUTO" : "ISO " + pm.getISOSensitivity());
         if (tvValEv != null) tvValEv.setText(String.format("%+.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
         
-        // 6. Highlight active dial
+        if (tvReview != null) {
+            tvReview.setBackgroundColor(mDialMode == DIAL_MODE_REVIEW ? Color.WHITE : Color.argb(140, 40, 40, 40));
+            tvReview.setTextColor(mDialMode == DIAL_MODE_REVIEW ? Color.BLACK : Color.rgb(227, 69, 20));
+        }
+
         if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? Color.WHITE : Color.rgb(227, 69, 20));
         if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? Color.WHITE : Color.rgb(227, 69, 20));
         if (tvValIso != null) tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? Color.WHITE : Color.rgb(227, 69, 20));
         if (tvValEv != null) tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? Color.WHITE : Color.rgb(227, 69, 20));
         if (tvMode != null) tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? Color.WHITE : Color.rgb(227, 69, 20));
         
-        // 7. Focus Mode Display
         String fm = p.getFocusMode();
         cachedIsManualFocus = "manual".equals(fm);
+        
         if (tvFocusMode != null) {
             if ("auto".equals(fm)) tvFocusMode.setText("AF-S"); 
             else if (cachedIsManualFocus) {
                 String rawName = lensManager != null ? lensManager.getCurrentLensName() : "Unmapped Lens";
-                tvFocusMode.setText("MF [" + LensProfileManager.formatDisplayName(rawName) + "]"); 
+                String lName = LensProfileManager.formatDisplayName(rawName);
+                tvFocusMode.setText("MF [" + lName + "]"); 
             }
+            else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C"); 
             else tvFocusMode.setText(fm != null ? fm.toUpperCase() : "AF");
+            
             tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? Color.WHITE : Color.rgb(227, 69, 20));
         }
         
-        // 8. Focus Meter Update
+        // --- 4. UPDATE FOCUS METER ---
         if (focusMeter != null) {
             boolean shouldShow = prefShowFocusMeter && cachedIsManualFocus;
             focusMeter.setVisibility(shouldShow ? View.VISIBLE : View.GONE);
             if (shouldShow) {
-                float focal = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
-                List<LensProfileManager.CalPoint> pts = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
-                float ratio = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
-                float ap = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
-                focusMeter.update(ratio, ap, focal, isCalibrating, pts, getCircleOfConfusion());
+                float focalToUse = isCalibrating ? detectedFocalLength : (lensManager != null ? lensManager.getCurrentFocalLength() : 50.0f);
+                List<LensProfileManager.CalPoint> ptsToUse = isCalibrating ? tempCalPoints : (lensManager != null ? lensManager.getCurrentPoints() : null);
+                
+                float ratioToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualFocusRatio : cachedFocusRatio;
+                float apToFeed = (lensManager != null && lensManager.isCurrentProfileManual() && !isCalibrating) ? virtualAperture : cachedAperture;
+                
+                focusMeter.update(ratioToFeed, apToFeed, focalToUse, isCalibrating, ptsToUse, getCircleOfConfusion());
             }
+        }
+        
+        if (gridLines != null) gridLines.setVisibility(prefShowGridLines ? View.VISIBLE : View.GONE); 
+        if (cinemaMattes != null) cinemaMattes.setVisibility(prefShowCinemaMattes ? View.VISIBLE : View.GONE);
+
+        // --- 5. CALIBRATION OVERRIDES ---
+        // Overrides the "Normal State" visibility if we are currently mapping a lens.
+        if (isCalibrating || waitingForProfileChoice) {
+            setHUDVisibility(View.GONE);
+            if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
+            if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.VISIBLE);
         }
     }
 

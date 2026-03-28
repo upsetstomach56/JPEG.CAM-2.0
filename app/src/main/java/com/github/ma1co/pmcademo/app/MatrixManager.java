@@ -65,7 +65,7 @@ public class MatrixManager {
 
             File file = new File(matrixDir, name.replace(" ", "_") + ".json");
             FileOutputStream fos = new FileOutputStream(file);
-            fos.write(json.toString(2).getBytes("UTF-8"));
+            fos.write(json.toString().getBytes("UTF-8"));
             fos.close();
         } catch (Exception e) {
             android.util.Log.e("JPEG.CAM", "Save failed: " + e.getMessage());
