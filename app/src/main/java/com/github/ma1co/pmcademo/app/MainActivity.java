@@ -1377,7 +1377,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (hasPhysicalPasmDial) return; // <-- NEW: Prevent software override on A7II!
             
             List<String> valid = new ArrayList<String>(); 
-            String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "shutter-speed-priority", "manual-exposure"};
+            String[] desired = {"program-auto", "aperture-priority", "shutter-priority", "shutter-speed", "manual-exposure","auto"};
             List<String> supported = p.getSupportedSceneModes();
             if (supported != null) {
                 for (String s : desired) if (supported.contains(s)) valid.add(s); 
@@ -2794,8 +2794,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvMode != null) {
             if ("manual-exposure".equals(sm)) tvMode.setText("M"); 
             else if ("aperture-priority".equals(sm)) tvMode.setText("A"); 
-            else if ("shutter-priority".equals(sm) || "shutter-speed-priority".equals(sm)) tvMode.setText("S"); 
+            else if ("shutter-priority".equals(sm) || "shutter-speed".equals(sm)) tvMode.setText("S"); 
             else if ("program-auto".equals(sm)) tvMode.setText("P");
+            else if ("auto".equals(sm)) tvMode.setText("AUTO");
             else tvMode.setText(sm != null ? sm.toUpperCase() : "SCN");
         }
         
