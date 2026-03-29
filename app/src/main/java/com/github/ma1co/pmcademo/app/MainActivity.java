@@ -2619,8 +2619,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int action = event.getAction();
 
         // --- 1. THE PASM DIAL SHIELD ---
-        if (keyCode == 624 || keyCode == com.github.ma1co.pmcademo.app.ScalarInput.ISV_KEY_MODE_DIAL || 
-           (keyCode >= com.github.ma1co.pmcademo.app.ScalarInput.ISV_KEY_MODE_INVALID && keyCode <= com.github.ma1co.pmcademo.app.ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
+        if (keyCode == 624 || keyCode == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (keyCode >= ScalarInput.ISV_KEY_MODE_INVALID && keyCode <= ScalarInput.ISV_KEY_MODE_CUSTOM3)) {
             
             if (action == android.view.KeyEvent.ACTION_DOWN) {
                 if (!hasPhysicalPasmDial) hasPhysicalPasmDial = true;
@@ -2630,7 +2630,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         // --- 2. THE PLAYBACK BUTTON HIJACK ---
-        if (keyCode == com.github.ma1co.pmcademo.app.ScalarInput.ISV_KEY_PLAY || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
+        if (keyCode == ScalarInput.ISV_KEY_PLAY || keyCode == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
             
             // We only trigger our logic when the user RELEASES the button (ACTION_UP)
             // But we return 'true' for BOTH press and release to swallow it entirely.
