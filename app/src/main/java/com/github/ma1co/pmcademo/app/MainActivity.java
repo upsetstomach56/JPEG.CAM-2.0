@@ -42,11 +42,15 @@ import java.util.List;
 public class MainActivity extends Activity implements SurfaceHolder.Callback, 
     SonyCameraManager.CameraEventListener, InputManager.InputListener, ConnectivityManager.StatusUpdateListener {
 
+    // --- GLOBAL DEBUG FLAG ---
+    // Set to true to see diagnostic Toasts, false for clean public release
+    public static final boolean DEBUG_MODE = false;
+
     private boolean isScrollingMatrices = false;
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
     private RecipeManager recipeManager;
-    private MatrixManager matrixManager; // <-- NEW
+    private MatrixManager matrixManager;
     private ConnectivityManager connectivityManager;
     
     private int activeMatrixIndex = 0; // <-- NEW: Tracks which JSON file we are viewing

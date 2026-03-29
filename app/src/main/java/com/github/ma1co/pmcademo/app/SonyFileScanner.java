@@ -112,13 +112,15 @@ public class SonyFileScanner {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);
                                         
                                         // DIAGNOSTIC 1: Scanner saw the file
-                                        final String fileName = name; 
-                                        mainHandler.post(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                Toast.makeText(mContext, "SCANNER SEEN: " + fileName, Toast.LENGTH_SHORT).show();
-                                            }
-                                        });
+                                        if (MainActivity.DEBUG_MODE) {
+                                            final String fileName = name; 
+                                            mainHandler.post(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    Toast.makeText(mContext, "SCANNER SEEN: " + fileName, Toast.LENGTH_SHORT).show();
+                                                }
+                                            });
+                                        }
 
                                         if (mCallback != null) {
                                             if (mCallback.isReadyToProcess()) {
@@ -126,17 +128,21 @@ public class SonyFileScanner {
                                                 mainHandler.post(new Runnable() {
                                                     @Override public void run() { 
                                                         // DIAGNOSTIC 2: Engine Handoff
-                                                        Toast.makeText(mContext, "ENGINE STARTING...", Toast.LENGTH_SHORT).show();
+                                                        if (MainActivity.DEBUG_MODE) {
+                                                            Toast.makeText(mContext, "ENGINE STARTING...", Toast.LENGTH_SHORT).show();
+                                                        }
                                                         mCallback.onNewPhotoDetected(finalPathToProcess); 
                                                     }
                                                 });
                                             } else {
                                                 // DIAGNOSTIC 3: The Blocked Wall
-                                                mainHandler.post(new Runnable() {
-                                                    @Override public void run() {
-                                                        Toast.makeText(mContext, "BLOCKED: Engine not ready or Recipe OFF", Toast.LENGTH_LONG).show();
-                                                    }
-                                                });
+                                                if (MainActivity.DEBUG_MODE) {
+                                                    mainHandler.post(new Runnable() {
+                                                        @Override public void run() {
+                                                            Toast.makeText(mContext, "BLOCKED: Engine not ready or Recipe OFF", Toast.LENGTH_LONG).show();
+                                                        }
+                                                    });
+                                                }
                                                 Log.w("JPEG.CAM", "Engine blocked processing for: " + name);
                                             }
                                         }
