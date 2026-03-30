@@ -44,7 +44,7 @@ public class RecipeManager {
     public ArrayList<String> getRecipePaths() { return recipePaths; }
     public ArrayList<String> getRecipeNames() { return recipeNames; }
 
-    // --- SMART LUT SCANNER (Universal & Robust) ---
+    // --- SMART LUT SCANNER (Fixed Long Filename Support) ---
     public void scanRecipes() { 
         recipePaths.clear(); 
         recipeNames.clear(); 
@@ -53,55 +53,45 @@ public class RecipeManager {
         
         for (File root : Filepaths.getStorageRoots()) {
             File lutDir = new File(root, "JPEGCAM/LUTS");
-            if (!lutDir.exists() || !lutDir.isDirectory()) continue;
-
-            File[] files = lutDir.listFiles();
-            if (files == null) continue;
-            
-            java.util.Arrays.sort(files); 
-            
-            for (File f : files) {
-                String u = f.getName().toUpperCase();
-                
-                // 1. FILTER: Ignore hidden files, Mac junk (_), and temp files (~)
-                if (u.startsWith(".") || u.startsWith("_") || u.contains("~")) continue;
-
-                // 2. IDENTIFY: Check if it's a supported format
-                boolean isCube = u.endsWith(".CUBE") || u.endsWith(".CUB");
-                boolean isPng = u.endsWith(".PNG");
-
-                if (isCube || isPng) {
-                    String fullPath = f.getAbsolutePath();
-                    
-                    if (!recipePaths.contains(fullPath)) {
-                        recipePaths.add(fullPath);
+            if (lutDir.exists() && lutDir.isDirectory()) {
+                File[] files = lutDir.listFiles();
+                if (files != null) {
+                    java.util.Arrays.sort(files); 
+                    for (File f : files) {
+                        String u = f.getName().toUpperCase();
                         
-                        // Default name is the filename without extension
-                        String cleanName = u.replace(".CUBE", "").replace(".CUB", "").replace(".PNG", "");
-                        
-                        // 3. ENHANCE: If it's a cube, try to grab the internal TITLE
-                        if (isCube) {
-                            try {
-                                BufferedReader br = new BufferedReader(new FileReader(f));
-                                String line;
-                                for(int j = 0; j < 10; j++) {
-                                    line = br.readLine();
-                                    if (line != null && line.toUpperCase().startsWith("TITLE")) {
-                                        String[] pts = line.split("\"");
-                                        if (pts.length > 1) {
-                                            cleanName = pts[1].toUpperCase();
+                        // 1. THE GATEKEEPER: We only skip hidden Mac files (._) or dot files (.)
+                        // REMOVED !u.contains("~") because it was killing long filenames!
+                        if (!u.startsWith(".") && !u.startsWith("_") && 
+                            (u.endsWith(".CUB") || u.endsWith(".CUBE") || u.endsWith(".PNG"))) {
+                            
+                            if (!recipePaths.contains(f.getAbsolutePath())) {
+                                recipePaths.add(f.getAbsolutePath());
+                                
+                                // Generate default menu name
+                                String name = u.replace(".CUBE", "").replace(".CUB", "").replace(".PNG", "");
+                                
+                                // 2. OPTIONAL: If it's a cube, try to read the "TITLE" metadata
+                                if (u.endsWith(".CUBE") || u.endsWith(".CUB")) {
+                                    try {
+                                        BufferedReader br = new BufferedReader(new FileReader(f));
+                                        String line;
+                                        for(int j=0; j<10; j++) {
+                                            line = br.readLine();
+                                            if (line != null && line.toUpperCase().startsWith("TITLE")) {
+                                                String[] pts = line.split("\"");
+                                                if (pts.length > 1) name = pts[1].toUpperCase();
+                                                break;
+                                            }
                                         }
-                                        break; 
-                                    }
+                                        br.close();
+                                    } catch (Exception e) {}
                                 }
-                                br.close();
-                            } catch (Exception e) {
-                                // If reading fails, we keep the clean filename
+                                
+                                // 3. ADD TO MENU
+                                recipeNames.add(name);
                             }
                         }
-                        
-                        // 4. COMMIT: Add the validated file to the menu
-                        recipeNames.add(cleanName);
                     }
                 }
             }
