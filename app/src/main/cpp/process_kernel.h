@@ -17,15 +17,13 @@
 // grainSize, 0, 2
 // === END_METADATA ===
 
-// --- SHARED HELPERS (The Truth) ---
+// --- SHARED HELPERS ---
 
-// Tuned: Level 5 = 60% darkening (Stops the "mask" look)
 inline long long get_vig_coef(int vignette, long long max_dist_sq) {
     int s_vig = vignette * 12; 
     return ((long long)((s_vig * 256) / 100) << 24) / (max_dist_sq > 0 ? max_dist_sq : 1);
 }
 
-// Tuned: Level 5 = 100% Strength
 inline void generate_rolloff_lut(uint8_t* lut, int rollOff) {
     int s_roll = rollOff * 20;
     for (int i = 0; i < 256; i++) {
@@ -39,14 +37,13 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 // ==========================================
-// PATH A: RGB + LUT + ANALOG PHYSICS (ROW OPTIMIZED)
+// PATH A: RGB + LUT + ANALOG PHYSICS
 // ==========================================
 inline void process_row_rgb(
-    uint8_t* row_data, int width, int abs_y, 
-    long long cx, long long cy_center, long long vig_coef,
+    uint8_t* row, int width, int abs_y, long long cx, long long cy_center, long long vig_coef,
     int shadowToe, int rollOff, int colorChrome, int chromeBlue, 
     int subtractiveSat, int halation, int vignette,
-    int grain, int grainSize, uint32_t& seed,
+    int grain, int grainSize, uint32_t& seed, 
     int opac_mapped, const int* map, 
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2) 
 {
@@ -54,25 +51,22 @@ inline void process_row_rgb(
     int s_chrome = colorChrome * 40; 
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
-    
     int s_grain  = grain * 20;
-    if (grainSize == 1) s_grain = (s_grain * 3) >> 1; 
-    if (grainSize == 2) s_grain = (s_grain * 5) >> 2; 
+    if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
+    if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
 
-    // VIGNETTE FORWARD DIFFERENCING (Eliminates X-loop multiplications)
+    // VIGNETTE: Forward Differencing
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
 
-    // HOISTED FBM Y-HASH
+    // GRAIN: FBM Hoisted component
     uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
     uint32_t h_y_base = seed + block_y * 2654435761U;
 
     for (int x = 0; x < width; x++) {
-        int i = x * 3; // 3 bytes per pixel (RGB)
-        int r = row_data[i];
-        int g = row_data[i+1];
-        int b = row_data[i+2];
+        int i = x * 3;
+        int r = row[i], g = row[i+1], b = row[i+2];
 
         // --- LUT CALCS ---
         int fX = map[r], fY = map[g], fZ = map[b];
@@ -106,7 +100,7 @@ inline void process_row_rgb(
         int outG = g + (((lG - g) * opac_mapped) >> 8);
         int outB = b + (((lB - b) * opac_mapped) >> 8);
 
-        // --- FILM DENSITY ---
+        // --- FILM DENSITY & PHYSICS ---
         int currentY = (outR*77 + outG*150 + outB*29) >> 8;
         int targetY = currentY;
         
@@ -114,7 +108,6 @@ inline void process_row_rgb(
             int lift = (shadowToe == 1) ? 35 : 55;
             if (targetY < lift) targetY += ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
         }
-
         if (rollOff > 0 && targetY > 200) targetY -= ((targetY - 200) * (targetY - 200) * s_roll) / 11000;
         
         int cb_p = ((-38 * outR - 74 * outG + 112 * outB) >> 8); 
@@ -127,7 +120,6 @@ inline void process_row_rgb(
             if (drop > (targetY >> 2)) drop = targetY >> 2; 
             targetY -= drop;
         }
-        
         if (s_blue > 0 && cb_p > 5 && cr_p < 25) {
             int drop = (cb_p * s_blue) >> 7; 
             if (targetY > 160) { int fade = 255 - ((targetY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
@@ -135,7 +127,6 @@ inline void process_row_rgb(
             if (drop > (targetY >> 2)) drop = targetY >> 2; 
             targetY -= drop;
         }
-        
         if (s_sat > 0 && sat_p > 20) {
             int density = ((sat_p - 20) * s_sat) >> 8; 
             if (targetY > 200) { int fade = 255 - ((targetY - 200) * 4); if (fade < 0) fade = 0; density = (density * fade) >> 8; }
@@ -151,9 +142,7 @@ inline void process_row_rgb(
         
         if (halation > 0 && targetY > 245) {
             int push = (targetY - 245) * (halation == 1 ? 3 : 6); 
-            outR += push;         
-            outG -= (push >> 2);  
-            outB -= (push >> 1);  
+            outR += push; outG -= (push >> 2); outB -= (push >> 1);  
         }
 
         if (vignette > 0) {
@@ -162,43 +151,36 @@ inline void process_row_rgb(
             outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
         }
         
-        // Step forward differencing variables
-        d_sq += d_sq_step;
-        d_sq_step += 2;
-        
+        // --- GRAIN (FBM RESTORED) ---
         if (s_grain > 0) {
             int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-            int noise;
-            
-            if (grainSize == 0) {
-                noise = raw_noise;
-            } else {
+            int noise = raw_noise;
+            if (grainSize > 0) {
                 uint32_t block_x = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
                 uint32_t h = h_y_base + block_x * 1274126177U;
                 h = (h ^ (h >> 13)) * 374761393U;
                 int block_noise = (h & 0xFF) - 128;
-                noise = (grainSize == 1) ? ((raw_noise + block_noise) >> 1) : ((raw_noise + block_noise * 3) >> 2);
+                if (grainSize == 1) noise = (raw_noise + block_noise) >> 1;
+                else noise = (raw_noise + block_noise * 3) >> 2;
             }
-            
             int mask = (targetY < 128) ? targetY : 255 - targetY; 
             if (targetY < 64) mask = (mask * targetY) >> 6; 
-            
             int gv = (noise * mask * s_grain) >> 15; 
             outR += gv; outG += gv; outB += gv; 
         }
         
-        row_data[i]   = (uint8_t)CLAMP(outR); 
-        row_data[i+1] = (uint8_t)CLAMP(outG); 
-        row_data[i+2] = (uint8_t)CLAMP(outB);
+        row[i] = (uint8_t)CLAMP(outR); row[i+1] = (uint8_t)CLAMP(outG); row[i+2] = (uint8_t)CLAMP(outB);
+        
+        d_sq += d_sq_step;
+        d_sq_step += 2;
     }
 }
 
 // ==========================================
-// PATH B: THE YUV EXPRESSWAY (ROW OPTIMIZED)
+// PATH B: THE YUV EXPRESSWAY
 // ==========================================
 inline void process_row_yuv(
-    uint8_t* row_data, int width, int abs_y, 
-    long long cx, long long cy_center, long long vig_coef,
+    uint8_t* row, int width, int abs_y, long long cx, long long cy_center, long long vig_coef,
     int shadowToe, int rollOff, int colorChrome, int chromeBlue, 
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, uint32_t& seed,
@@ -207,39 +189,34 @@ inline void process_row_yuv(
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
-    
     int s_grain  = grain * 20;
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1; 
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2; 
 
-    // VIGNETTE FORWARD DIFFERENCING 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
 
-    // HOISTED FBM Y-HASH
     uint32_t block_y = (grainSize == 1) ? (abs_y >> 1) : ((abs_y * 21845) >> 16);
     uint32_t h_y_base = seed + block_y * 2654435761U;
 
     for(int x = 0; x < width; x++) {
-        int i = x * 3; // 3 bytes per pixel (YCbCr)
-        int oldY = row_data[i];
+        int i = x * 3;
+        int oldY = row[i];
         int outY = oldY;
         
         if (shadowToe > 0) {
             int lift = (shadowToe == 1) ? 35 : 55;
             if (outY < lift) outY += ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
         }
-        
         if (rollOff > 0) outY = rolloff_lut[outY];
-        
         if (vignette > 0) {
             int v_m = 256 - (int)((d_sq * vig_coef) >> 24); 
             if (v_m < 0) v_m = 0;
             outY = (outY * v_m) >> 8;
         }
         
-        int cb = row_data[i+1] - 128, cr = row_data[i+2] - 128;
+        int cb = row[i+1] - 128, cr = row[i+2] - 128;
         int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
 
         if (s_chrome > 0 && sat > 15) {
@@ -248,7 +225,6 @@ inline void process_row_yuv(
             if (drop > (outY >> 2)) drop = outY >> 2; 
             outY -= drop;
         }
-        
         if (s_blue > 0 && cb > 5 && cr < 25) {
             int drop = (cb * s_blue) >> 7;
             if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
@@ -256,7 +232,6 @@ inline void process_row_yuv(
             if (drop > (outY >> 2)) drop = outY >> 2; 
             outY -= drop; cr -= (drop >> 1);
         }
-        
         if (s_sat > 0 && sat > 20) {
             int density = ((sat - 20) * s_sat) >> 8;
             if (outY > 200) { int fade = 255 - ((outY - 200) * 4); if (fade < 0) fade = 0; density = (density * fade) >> 8; }
@@ -265,11 +240,9 @@ inline void process_row_yuv(
         }
         
         if (outY < 8) outY = 8;
-        
         if (halation > 0 && outY > 245) {
             int push = (outY - 245) * (halation == 1 ? 3 : 6); 
-            cr += push;        
-            cb -= (push >> 1); 
+            cr += push; cb -= (push >> 1); 
         }
 
         if (oldY != outY) {
@@ -277,32 +250,26 @@ inline void process_row_yuv(
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
         
-        // Step forward differencing variables
-        d_sq += d_sq_step;
-        d_sq_step += 2;
-        
         if (s_grain > 0) { 
             int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
-            int noise;
-            
-            if (grainSize == 0) {
-                noise = raw_noise;
-            } else {
+            int noise = raw_noise;
+            if (grainSize > 0) {
                 uint32_t block_x = (grainSize == 1) ? (x >> 1) : ((x * 21845) >> 16);
                 uint32_t h = h_y_base + block_x * 1274126177U;
                 h = (h ^ (h >> 13)) * 374761393U;
                 int block_noise = (h & 0xFF) - 128;
-                noise = (grainSize == 1) ? ((raw_noise + block_noise) >> 1) : ((raw_noise + block_noise * 3) >> 2);
+                if (grainSize == 1) noise = (raw_noise + block_noise) >> 1;
+                else noise = (raw_noise + block_noise * 3) >> 2;
             }
-            
             int mask = (outY < 128) ? outY : 255 - outY; 
-            if (outY < 64) mask = (mask * outY) >> 6;
+            if (outY < 64) mask = (mask * targetY) >> 6;
             outY += (noise * mask * s_grain) >> 15; 
         }
         
-        row_data[i]   = (uint8_t)CLAMP(outY);
-        row_data[i+1] = (uint8_t)CLAMP(128+cb); 
-        row_data[i+2] = (uint8_t)CLAMP(128+cr);
+        row[i] = (uint8_t)CLAMP(outY); row[i+1] = (uint8_t)CLAMP(128+cb); row[i+2] = (uint8_t)CLAMP(128+cr);
+        
+        d_sq += d_sq_step;
+        d_sq_step += 2;
     }
 }
 
