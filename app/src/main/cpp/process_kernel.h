@@ -55,7 +55,7 @@ inline void process_row_rgb(
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
 
-    // VIGNETTE: Forward Differencing
+    // VIGNETTE: Forward Differencing setup
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
     long long d_sq_step = 1 - (2 * (long long)cx);
@@ -100,7 +100,7 @@ inline void process_row_rgb(
         int outG = g + (((lG - g) * opac_mapped) >> 8);
         int outB = b + (((lB - b) * opac_mapped) >> 8);
 
-        // --- FILM DENSITY & PHYSICS ---
+        // --- FILM DENSITY ---
         int currentY = (outR*77 + outG*150 + outB*29) >> 8;
         int targetY = currentY;
         
@@ -151,7 +151,6 @@ inline void process_row_rgb(
             outR = (outR * v_m) >> 8; outG = (outG * v_m) >> 8; outB = (outB * v_m) >> 8;
         }
         
-        // --- GRAIN (FBM RESTORED) ---
         if (s_grain > 0) {
             int raw_noise = (fast_rand(&seed) & 0xFF) - 128;
             int noise = raw_noise;
@@ -262,7 +261,7 @@ inline void process_row_yuv(
                 else noise = (raw_noise + block_noise * 3) >> 2;
             }
             int mask = (outY < 128) ? outY : 255 - outY; 
-            if (outY < 64) mask = (mask * targetY) >> 6;
+            if (outY < 64) mask = (mask * outY) >> 6; // FIXED: outY instead of targetY
             outY += (noise * mask * s_grain) >> 15; 
         }
         
