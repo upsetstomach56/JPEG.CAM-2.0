@@ -57,11 +57,12 @@ public class RecipeManager {
                 File[] files = lutDir.listFiles();
                 if (files != null) {
                     java.util.Arrays.sort(files); 
-                    for (File f : files) {
-                        String u = f.getName().toUpperCase();
-                        
-                        // 1. ADDED .PNG TO THE VIP LIST:
-                        if (!u.startsWith(".") && (u.endsWith(".CUB") || u.endsWith(".CUBE") || u.endsWith(".PNG"))) {
+                    // THE FIX: Add checks for startsWith("_") and contains("~")
+                        if (!u.startsWith(".") && 
+                            !u.startsWith("_") && 
+                            !u.contains("~") && 
+                            (u.endsWith(".CUB") || u.endsWith(".CUBE") || u.endsWith(".PNG"))) {
+                            
                             if (!recipePaths.contains(f.getAbsolutePath())) {
                                 recipePaths.add(f.getAbsolutePath());
                                 
