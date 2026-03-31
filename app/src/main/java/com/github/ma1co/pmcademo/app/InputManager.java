@@ -1,6 +1,8 @@
 package com.github.ma1co.pmcademo.app;
+
 import android.view.KeyEvent;
 import com.sony.scalar.sysutil.ScalarInput;
+
 /**
  * JPEG.CAM Manager: Input Mapping
  * Translates raw Sony hardware scan codes into application commands.
@@ -17,8 +19,8 @@ public class InputManager {
         void onDownPressed();
         void onLeftPressed();
         void onRightPressed();
-       
-        // --- FIX: Replace onDialRotated with our 3 specific dials ---
+        
+        // --- 3-DIAL SETUP RESTORED ---
         void onFrontDialRotated(int direction);
         void onRearDialRotated(int direction);
         void onControlWheelRotated(int direction);
@@ -36,7 +38,7 @@ public class InputManager {
      */
     public boolean handleKeyDown(int keyCode, KeyEvent event) {
         int sc = event.getScanCode();
-       
+        
         // --- S1 SHUTTER (HALF-PRESS) ---
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             listener.onShutterHalfPressed();
@@ -82,16 +84,18 @@ public class InputManager {
         if (sc == ScalarInput.ISV_DIAL_2_CLOCKWISE) { listener.onRearDialRotated(1); return true; }
         if (sc == ScalarInput.ISV_DIAL_2_COUNTERCW) { listener.onRearDialRotated(-1); return true; }
 
-        // --- REAR CONTROL WHEEL & LENS RINGS ---
-        if (sc == ScalarInput.ISV_DIAL_3_CLOCKWISE ||
-            sc == ScalarInput.ISV_DIAL_KURU_CLOCKWISE ||
-            sc == ScalarInput.ISV_RING_CLOCKWISE) {
+        // --- REAR CONTROL WHEEL & LENS RINGS (WITH a6500 HACKS) ---
+        if (sc == ScalarInput.ISV_DIAL_3_CLOCKWISE || 
+            sc == ScalarInput.ISV_DIAL_KURU_CLOCKWISE || 
+            sc == ScalarInput.ISV_RING_CLOCKWISE ||
+            keyCode == 212 /* KEY_WPS_BUTTON (a6500 Hack) */) {
             listener.onControlWheelRotated(1);
             return true;
         }
-        if (sc == ScalarInput.ISV_DIAL_3_COUNTERCW ||
-            sc == ScalarInput.ISV_DIAL_KURU_COUNTERCW ||
-            sc == ScalarInput.ISV_RING_COUNTERCW) {
+        if (sc == ScalarInput.ISV_DIAL_3_COUNTERCW || 
+            sc == ScalarInput.ISV_DIAL_KURU_COUNTERCW || 
+            sc == ScalarInput.ISV_RING_COUNTERCW ||
+            keyCode == 80 /* KEY_CAMERA_FOCUS (a6500 Hack) */) {
             listener.onControlWheelRotated(-1);
             return true;
         }
@@ -99,11 +103,11 @@ public class InputManager {
         // --- PREVENT OS CRASHES FROM MODE DIAL ---
         // A7 series cameras fire these hardware events when the PASM dial is turned.
         // If we don't consume them, the native OS tries to draw the Mode UI over our app and crashes.
-        if (sc == ScalarInput.ISV_KEY_MODE_DIAL ||
-           (sc >= ScalarInput.ISV_KEY_MODE_INVALID && sc <= ScalarInput.ISV_KEY_MODE_CUSTOM3) ||
+        if (sc == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (sc >= ScalarInput.ISV_KEY_MODE_INVALID && sc <= ScalarInput.ISV_KEY_MODE_CUSTOM3) || 
             sc == 624 /* ISV_KEY_MODE_CHANGE */) {
-           
-            // We successfully caught the physical turn!
+            
+            // We successfully caught the physical turn! 
             // We just swallow the event so the OS leaves us alone.
             return true;
         }
@@ -120,14 +124,19 @@ public class InputManager {
             listener.onShutterHalfReleased();
             return true;
         }
-       
+        
         // Ensure Mode Dial releases are also swallowed safely
-        if (sc == ScalarInput.ISV_KEY_MODE_DIAL ||
-           (sc >= ScalarInput.ISV_KEY_MODE_INVALID && sc <= ScalarInput.ISV_KEY_MODE_CUSTOM3) ||
+        if (sc == ScalarInput.ISV_KEY_MODE_DIAL || 
+           (sc >= ScalarInput.ISV_KEY_MODE_INVALID && sc <= ScalarInput.ISV_KEY_MODE_CUSTOM3) || 
             sc == 624) {
             return true;
         }
-       
+
+        // Swallow the fake a6500 Key Up events so they don't trigger native OS functions
+        if (keyCode == 80 || keyCode == 212) {
+            return true;
+        }
+        
         return false;
     }
 }
