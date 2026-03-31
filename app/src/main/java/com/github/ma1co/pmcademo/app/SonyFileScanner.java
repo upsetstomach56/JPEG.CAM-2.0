@@ -1,5 +1,7 @@
 package com.github.ma1co.pmcademo.app;
 
+
+
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -13,39 +15,37 @@ import java.util.Locale;
 public class SonyFileScanner {
     private ScannerCallback mCallback;
     private Context mContext;
-    
+   
     // The Delta Tracker: Remembers every file that existed when the app booted
     private HashSet<String> knownFiles = new HashSet<String>();
-    
+   
     private HandlerThread scannerThread;
     private Handler backgroundHandler;
     private Handler mainHandler;
-    
-    // MADE PUBLIC: So MainActivity's "Sniper Trigger" can wake it up
-    public boolean isPolling = false;
-
+    private boolean isPolling = false;
     public interface ScannerCallback {
+
         void onNewPhotoDetected(String filePath);
-        boolean isReadyToProcess(); 
+
+        boolean isReadyToProcess();
     }
 
     public SonyFileScanner(Context context, ScannerCallback callback) {
         this.mContext = context;
         this.mCallback = callback;
-        this.mainHandler = new Handler(Looper.getMainLooper()); 
-        
+        this.mainHandler = new Handler(Looper.getMainLooper());
+       
         Log.d("JPEG.CAM", "SonyFileScanner initialized. Root: " + Filepaths.getDcimDir().getAbsolutePath());
-        
+       
         scannerThread = new HandlerThread("FileScannerThread");
         scannerThread.start();
         backgroundHandler = new Handler(scannerThread.getLooper());
-        
+       
         // Build the baseline index in the background so it doesn't slow down the app boot
         backgroundHandler.post(new Runnable() {
-            @Override public void run() { 
-                findNewestFile(false); 
-                // FIXED: We DO NOT call start() here anymore! 
-                // We want the SD card to go to sleep immediately after booting.
+            @Override public void run() {
+                findNewestFile(false);
+                start(); // Only start polling AFTER the baseline is built
             }
         });
     }
@@ -72,57 +72,50 @@ public class SonyFileScanner {
         }
     }
 
-    public void scheduleNextPoll() {
+    private void scheduleNextPoll() {
         backgroundHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (isPolling) {
                     findNewestFile(true);
-                    scheduleNextPoll(); 
+                    scheduleNextPoll();
                 }
             }
         }, 1000);
     }
 
     private void findNewestFile(boolean triggerCallback) {
-        File dcimDir = Filepaths.getDcimDir(); 
+        File dcimDir = Filepaths.getDcimDir();
         if (!dcimDir.exists() || !dcimDir.isDirectory()) return;
-
         File[] subDirs = dcimDir.listFiles();
         if (subDirs != null) {
             for (File dir : subDirs) {
                 // BUG FIX: Don't filter by name. Asian/Regional firmwares use varied names.
                 // If it's a directory in DCIM, we check it.
-                if (dir.isDirectory() && !dir.getName().startsWith(".")) { 
+                if (dir.isDirectory() && !dir.getName().startsWith(".")) {
                     File[] files = dir.listFiles();
                     if (files != null) {
                         for (File f : files) {
                             // Use Locale.US to ensure ".JPG" is always interpreted correctly
                             String name = f.getName().toUpperCase(Locale.US);
-                            
+                           
                             if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS") && !name.startsWith("TEMP_")) {
-                                
+                               
                                 String currentFilePath = f.getAbsolutePath();
-                                
+                               
                                 if (!knownFiles.contains(currentFilePath)) {
-                                    
+                                   
                                     // SAFETY CHECK: Ensure the file is finished being written
-                                    if (f.length() < 1024) continue; 
+                                    if (f.length() < 1024) continue;
 
                                     knownFiles.add(currentFilePath);
-                                    
-                                    // ---------------------------------------------------------
-                                    // THE KILL SWITCH
-                                    // We found a new file! Stop hammering the SD card.
-                                    // ---------------------------------------------------------
-                                    isPolling = false; 
-                                    
+                                   
                                     if (triggerCallback) {
                                         Log.d("JPEG.CAM", "NEW FILE DETECTED: " + currentFilePath);
-                                        
+                                       
                                         // DIAGNOSTIC 1: Scanner saw the file
                                         if (MainActivity.DEBUG_MODE) {
-                                            final String fileName = name; 
+                                            final String fileName = name;
                                             mainHandler.post(new Runnable() {
                                                 @Override
                                                 public void run() {
@@ -133,14 +126,14 @@ public class SonyFileScanner {
 
                                         if (mCallback != null) {
                                             if (mCallback.isReadyToProcess()) {
-                                                final String finalPathToProcess = currentFilePath; 
+                                                final String finalPathToProcess = currentFilePath;
                                                 mainHandler.post(new Runnable() {
-                                                    @Override public void run() { 
+                                                    @Override public void run() {
                                                         // DIAGNOSTIC 2: Engine Handoff
                                                         if (MainActivity.DEBUG_MODE) {
                                                             Toast.makeText(mContext, "ENGINE STARTING...", Toast.LENGTH_SHORT).show();
                                                         }
-                                                        mCallback.onNewPhotoDetected(finalPathToProcess); 
+                                                        mCallback.onNewPhotoDetected(finalPathToProcess);
                                                     }
                                                 });
                                             } else {
