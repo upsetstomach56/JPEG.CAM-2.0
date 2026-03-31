@@ -49,42 +49,36 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
         for(size_t i = 0; i < ext.length(); i++) ext[i] = tolower(ext[i]);
     }
 
-    // --- ROUTE A: PNG (HaldCLUT or DaVinci Strip) ---
+    // --- ROUTE A: PNG (Standard Square HaldCLUT or Horizontal Strip) ---
     if (ext == ".png") {
         int w, h, c;
         unsigned char *img_data = stbi_load(file_path, &w, &h, &c, 3);
         if (img_data) {
-            bool valid_format = false;
-            int tiles_per_row = 1;
-
-            // --- FIX: Safe integer math replaces cbrt() for API 10 compatibility ---
-            if (w == h) {
-                // Format 1: Square HaldCLUT (e.g., 512x512)
-                int level = 1;
-                while (level * level * level < w && level < 128) level++;
-                
-                if (level * level * level == w) {
-                    nativeLutSize = level * level;
-                    tiles_per_row = level;
-                    valid_format = true;
-                }
-            } else if (w == h * h) {
-                // Format 2: Horizontal Strip (e.g., 1024x32)
-                nativeLutSize = h;
-                tiles_per_row = nativeLutSize;
-                valid_format = true;
-            }
-
-            if (valid_format && nativeLutSize > 0) {
+            int total_pixels = w * h;
+            int level = 1;
+            
+            // Safe legacy math to determine the 3D size (e.g. 262,144 pixels = level 64)
+            while (level * level * level < total_pixels && level < 128) level++;
+            
+            if (level * level * level == total_pixels) {
+                nativeLutSize = level;
                 int total_bytes = nativeLutSize * nativeLutSize * nativeLutSize * 3;
                 nativeLut.resize(total_bytes);
                 
-                // Unified spatial translator for both Squares and Strips
+                // Dynamically detects if it's a Square or a Strip
+                int tiles_per_row = w / nativeLutSize; 
+                
+                // UNWRAPPER: Translates the 2D PNG into the linear .cube format
                 for (int b = 0; b < nativeLutSize; b++) {
                     int cell_x = b % tiles_per_row;
                     int cell_y = b / tiles_per_row;
                     for (int g = 0; g < nativeLutSize; g++) {
-                        int img_y = cell_y * nativeLutSize + g;
+                        
+                        // NOTE: If colors ever look "inverted" (e.g. green skin), 
+                        // the PNG generator flipped the Y-axis. 
+                        // You can fix it by changing 'g' to '(nativeLutSize - 1 - g)'
+                        int img_y = cell_y * nativeLutSize + g; 
+                        
                         for (int r = 0; r < nativeLutSize; r++) {
                             int img_x = cell_x * nativeLutSize + r;
                             
@@ -97,10 +91,10 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject 
                         }
                     }
                 }
-                LOGD("SUCCESS: JPEGCAM UNIVERSAL PNG MATH APPLIED! LUT Size: %d", nativeLutSize);
+                LOGD("SUCCESS: Loaded and Normalized PNG HaldCLUT size %d", nativeLutSize);
             } else {
-                LOGD("ERROR: Invalid PNG LUT dimensions %dx%d. Safe reject.", w, h);
                 nativeLutSize = 0; 
+                LOGD("ERROR: Invalid PNG pixel count");
             }
             stbi_image_free(img_data);
         }
