@@ -2440,7 +2440,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         qrView.setLayoutParams(qrParams);
 
         TextView tvUrl = new TextView(this);
-        tvUrl.setText("jpegcookbook.com/hub");
+        tvUrl.setText(" "); // removed URL here
         tvUrl.setTextColor(Color.rgb(227, 69, 20));
         tvUrl.setTextSize(18);
         tvUrl.setTypeface(Typeface.DEFAULT_BOLD);

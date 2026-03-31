@@ -18,7 +18,7 @@ public class SonyFileScanner {
     private Handler mainHandler;
     
     public boolean isPolling = false;
-    private int scanAttempts = 0; // The 5-second countdown timer
+    private int scanAttempts = 0; 
 
     public interface ScannerCallback {
         void onNewPhotoDetected(String filePath);
@@ -41,10 +41,7 @@ public class SonyFileScanner {
     }
 
     public void start() {
-        // --- STACKING PROTECTION ---
-        // If a search is already running, kill it and start a fresh 5 seconds
         stop(); 
-        
         isPolling = true;
         scanAttempts = 0; 
         scheduleNextPoll();
@@ -58,12 +55,21 @@ public class SonyFileScanner {
         }
     }
 
+    // --- ADDED THIS METHOD TO FIX LINE 241 ERROR ---
+    public void checkNow() {
+        if (backgroundHandler != null) {
+            backgroundHandler.post(new Runnable() {
+                @Override public void run() { findNewestFile(true); }
+            });
+        }
+    }
+
     public void scheduleNextPoll() {
         backgroundHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (isPolling) {
-                    // --- THE 5-SECOND SAFETY TIMEOUT ---
+                    // 10 attempts at 500ms = 5 seconds total search window
                     if (scanAttempts++ >= 10) {
                         stop();
                         Log.d("JPEG.CAM", "Scanner Timed Out: Going back to sleep.");
@@ -72,8 +78,6 @@ public class SonyFileScanner {
 
                     findNewestFile(true);
                     
-                    // If findNewestFile found a file, it set isPolling=false,
-                    // so we won't loop. Otherwise, we keep looking.
                     if (isPolling) scheduleNextPoll(); 
                 }
             }
