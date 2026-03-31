@@ -19,7 +19,11 @@ public class InputManager {
         void onDownPressed();
         void onLeftPressed();
         void onRightPressed();
-        void onDialRotated(int direction);
+        
+        // --- 3-DIAL SETUP RESTORED ---
+        void onFrontDialRotated(int direction);
+        void onRearDialRotated(int direction);
+        void onControlWheelRotated(int direction);
     }
 
     private InputListener listener;
@@ -57,28 +61,34 @@ public class InputManager {
         }
 
         // --- DIAL ROTATION (Catches Front, Rear, Kuru/Wheel, and Lens Rings) ---
-        // We evaluate dials BEFORE directional pads, because some dials fire D-Pad codes
-        // if the OS hasn't fully suppressed them. We want to catch the raw ISV codes first.
-        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE || 
-            sc == ScalarInput.ISV_DIAL_2_CLOCKWISE || 
-            sc == ScalarInput.ISV_DIAL_3_CLOCKWISE || 
+        // CRITICAL FIX: Evaluate dials BEFORE directional pads to catch a6500 leakage!
+        
+        // 1. FRONT DIAL (INDEX FINGER)
+        if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE) { listener.onFrontDialRotated(1); return true; }
+        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW) { listener.onFrontDialRotated(-1); return true; }
+
+        // 2. REAR DIAL (THUMB)
+        if (sc == ScalarInput.ISV_DIAL_2_CLOCKWISE) { listener.onRearDialRotated(1); return true; }
+        if (sc == ScalarInput.ISV_DIAL_2_COUNTERCW) { listener.onRearDialRotated(-1); return true; }
+
+        // 3. REAR CONTROL WHEEL & LENS RINGS
+        if (sc == ScalarInput.ISV_DIAL_3_CLOCKWISE || 
             sc == ScalarInput.ISV_DIAL_KURU_CLOCKWISE || 
             sc == ScalarInput.ISV_RING_CLOCKWISE ||
             sc == ScalarInput.ISV_RING_LENS_APERTURE_CLOCKWISE) {
-            listener.onDialRotated(1);
+            listener.onControlWheelRotated(1);
             return true;
         }
-        if (sc == ScalarInput.ISV_DIAL_1_COUNTERCW || 
-            sc == ScalarInput.ISV_DIAL_2_COUNTERCW || 
-            sc == ScalarInput.ISV_DIAL_3_COUNTERCW || 
+        if (sc == ScalarInput.ISV_DIAL_3_COUNTERCW || 
             sc == ScalarInput.ISV_DIAL_KURU_COUNTERCW || 
             sc == ScalarInput.ISV_RING_COUNTERCW ||
             sc == ScalarInput.ISV_RING_LENS_APERTURE_COUNTERCW) {
-            listener.onDialRotated(-1);
+            listener.onControlWheelRotated(-1);
             return true;
         }
 
-        // Now we handle the standard D-Pad directions
+        // --- D-PAD DIRECTIONS ---
+        // Evaluated last, so dial turns are safely consumed above
         if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             listener.onUpPressed();
             return true;
