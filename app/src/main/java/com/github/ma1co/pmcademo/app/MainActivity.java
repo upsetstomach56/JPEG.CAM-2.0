@@ -591,43 +591,38 @@ public void onEnterPressed() {
         // --- NEW: VAULT HUD (MODE 10) ---
         if (currentHudMode == 10) {
             if (isNamingMode) {
-                // Finalize Naming & Save Workspace to SD
+                // Finalize Naming & Save to SD
                 isNamingMode = false;
                 String finalName = new String(matrixNameBuffer).trim();
                 if (finalName.isEmpty()) finalName = "CUSTOM";
                 
                 recipeManager.saveSlotToVault(finalName);
-                Toast.makeText(MainActivity.this, "SAVED TO VAULT: " + finalName, Toast.LENGTH_SHORT).show();
-                isHudActive = false; // Exit HUD after saving
+                recipeManager.getCurrentProfile().profileName = finalName; // Update active memory!
+                isHudActive = false; 
             } else {
                 if (hudSelection == 0) {
-                    // ACTION: LOAD SELECTED RECIPE INTO WORKSPACE
                     if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         recipeManager.copyVaultToSlot(vaultItems.get(vaultIndex).filename);
-                        Toast.makeText(MainActivity.this, "LOADED: " + vaultItems.get(vaultIndex).profileName, Toast.LENGTH_SHORT).show();
                     }
-                    isHudActive = false; // Exit HUD after loading
+                    isHudActive = false; 
                 } else if (hudSelection == 1) {
-                    // ACTION: START NAMING MODE FOR SAVE
                     isNamingMode = true;
                     matrixNameBuffer = "CUSTOM      ".toCharArray();
                     nameCursorPos = 0;
                     updateHudUI();
-                    return; // Stay in HUD to continue naming
+                    return; 
                 } else if (hudSelection == 2) {
-                    // ACTION: RESET WORKSPACE
                     recipeManager.resetCurrentSlot();
-                    Toast.makeText(MainActivity.this, "WORKSPACE RESET TO DEFAULTS", Toast.LENGTH_SHORT).show();
-                    isHudActive = false; // Exit HUD after reset
+                    isHudActive = false; 
                 }
             }
             
-            // --- FIXED: CLEANUP AND RESTORE MENU ---
+            // Clean exit without Toasts
             if (!isHudActive) { 
                 hudOverlayContainer.setVisibility(View.GONE);
                 if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(View.GONE);
-                menuContainer.setVisibility(View.VISIBLE); // Bring the menu back!
+                menuContainer.setVisibility(View.VISIBLE); 
                 recipeManager.savePreferences(); 
                 renderMenu(); 
             } else {
@@ -808,7 +803,7 @@ public void onEnterPressed() {
 
     @Override
     public void onUpPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -889,7 +884,7 @@ public void onEnterPressed() {
 
     @Override
     public void onDownPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -973,7 +968,7 @@ public void onEnterPressed() {
 
     @Override
     public void onLeftPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             nameCursorPos -= 1; // Move cursor left
             if (nameCursorPos < 0) nameCursorPos = 0;
             if (nameCursorPos > 11) nameCursorPos = 11;
@@ -1071,7 +1066,7 @@ public void onEnterPressed() {
 
     @Override
     public void onRightPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             nameCursorPos += 1; // Move cursor right
             if (nameCursorPos < 0) nameCursorPos = 0;
             if (nameCursorPos > 11) nameCursorPos = 11;
@@ -1202,7 +1197,7 @@ public void onEnterPressed() {
     @Override 
     public void onControlWheelRotated(int direction) { 
         // --- NEW: INTERCEPT WHEEL TURNS FOR MATRIX NAMING ---
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -1913,24 +1908,39 @@ public void onEnterPressed() {
             values[0] = p.dro != null ? p.dro.toUpperCase() : "OFF";
             tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         } else if (currentHudMode == 10) {
-            // --- NEW: VAULT HUD (WITH RESET) ---
             activeCells = 3;
-            labels = new String[]{"BROWSE VAULT (LOAD)", "SAVE WORKSPACE", "RESET WORKSPACE"};
+            labels = new String[]{"BROWSE VAULT", "SAVE TO VAULT", "RESET SLOT"};
             
             vaultItems = recipeManager.getVaultItems();
             if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
             
             String vName = (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) 
-                           ? "[ EMPTY ]" 
-                           : vaultItems.get(vaultIndex).profileName;
+                           ? "[ EMPTY ]" : vaultItems.get(vaultIndex).profileName;
             
             values[0] = "< " + vName + " >";
             values[1] = "[ RENAME & SAVE ]";
             values[2] = "[ RESTORE DEFAULTS ]";
             
-            if (hudSelection == 0) tooltip = "Scroll wheel to browse. Press ENTER to LOAD into Workspace.";
-            else if (hudSelection == 1) tooltip = "Press ENTER to RENAME and SAVE Workspace to Vault.";
-            else tooltip = "Press ENTER to wipe this Workspace back to default settings.";
+            if (hudSelection == 0) tooltip = "Scroll wheel to browse. Press ENTER to LOAD.";
+            else if (hudSelection == 1) tooltip = "Press ENTER to RENAME and SAVE to Vault.";
+            else tooltip = "Press ENTER to wipe this Slot back to default settings.";
+
+            // --- NEW: TOP BAR NAMING UI FOR MODE 10 ---
+            if (tvTopStatus != null) {
+                if (isNamingMode) {
+                    StringBuilder nameDisplay = new StringBuilder("NAME: ");
+                    for (int i = 0; i < matrixNameBuffer.length; i++) {
+                        if (i == nameCursorPos) nameDisplay.append("[").append(matrixNameBuffer[i]).append("]");
+                        else nameDisplay.append(matrixNameBuffer[i]);
+                    }
+                    tvTopStatus.setText(nameDisplay.toString());
+                    tvTopStatus.setTextColor(Color.YELLOW); 
+                } else {
+                    tvTopStatus.setText("VAULT MANAGER");
+                    tvTopStatus.setTextColor(Color.WHITE);
+                }
+                tvTopStatus.setVisibility(View.VISIBLE);
+            }
         }
 
         // --- GENERAL UI RENDER LOOP ---
@@ -2197,8 +2207,11 @@ public void onEnterPressed() {
                 String tsStr = String.format("[ %+d,  %+d,  %+d ]", p.contrast, p.saturation, p.sharpness);
 
                 // --- NEW: 5-ROW LAYOUT (VAULT HUD UPDATE) ---
-                String[] rLabels = {"Workspace (1-10)", "Recipe Vault Manager", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
-                String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), "[ OPEN HUD ]", fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
+                String activeName = (p.profileName != null && !p.profileName.isEmpty()) ? p.profileName : "UNNAMED";
+                String vaultLabel = "< " + activeName + " >";
+
+                String[] rLabels = {"Recipe Slot (1-10)", "Vault Manager", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
+                String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), vaultLabel, fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
                 
                 for (int i = 0; i < 5; i++) {
                     menuLabels[i].setText(rLabels[i]);

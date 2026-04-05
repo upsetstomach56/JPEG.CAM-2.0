@@ -264,27 +264,34 @@ public class RecipeManager {
     public void scanVault() {
         vaultItems.clear();
         File[] all = recipeDir.listFiles();
+        
+        // Determine what the current slot's raw filename is (e.g., R_SLOT01.TXT)
+        String currentSlotFilename = String.format("R_SLOT%02d.TXT", currentSlot + 1);
+
         if (all != null) {
             for (File f : all) {
                 String n = f.getName().toUpperCase();
-                // Hide system slots and PREFS
-                if (n.endsWith(".TXT") && !n.startsWith("R_SLOT") && !n.equals("PREFS.TXT")) {
-                    String pName = n.replace(".TXT", ""); // Fallback name
-                    try {
-                        // Quick scan into the JSON to extract the pretty profileName
-                        BufferedReader br = new BufferedReader(new FileReader(f));
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                            if (line.contains("\"profileName\"")) {
-                                String[] parts = line.split("\"");
-                                if (parts.length >= 4) pName = parts[3];
-                                break; // Stop reading once we find it
-                            }
+                
+                // Skip system prefs
+                if (!n.endsWith(".TXT") || n.equals("PREFS.TXT")) continue;
+                
+                // Skip scratchpads EXCEPT for the one we are currently in
+                if (n.startsWith("R_SLOT") && !n.equals(currentSlotFilename)) continue;
+
+                String pName = n.replace(".TXT", ""); // Fallback name
+                try {
+                    BufferedReader br = new BufferedReader(new FileReader(f));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        if (line.contains("\"profileName\"")) {
+                            String[] parts = line.split("\"");
+                            if (parts.length >= 4) pName = parts[3];
+                            break; 
                         }
-                        br.close();
-                    } catch (Exception e) {}
-                    vaultItems.add(new VaultItem(f.getName(), pName));
-                }
+                    }
+                    br.close();
+                } catch (Exception e) {}
+                vaultItems.add(new VaultItem(f.getName(), pName));
             }
         }
         if (vaultItems.isEmpty()) {
