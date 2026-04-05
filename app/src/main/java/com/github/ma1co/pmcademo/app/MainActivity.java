@@ -101,7 +101,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private TextView[] hudValues = new TextView[9];
 
     // --- VAULT UI VARIABLES ---
-    private List<String> vaultFiles = new ArrayList<String>();
+    private List<RecipeManager.VaultItem> vaultItems = new ArrayList<RecipeManager.VaultItem>();
     private int vaultIndex = 0;
 
      // --- RGB MATRIX MATH ---
@@ -583,70 +583,104 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override 
-    public void onEnterPressed() {
-        if (isPlaybackMode) { exitPlayback(); return; }
-        if (isProcessing) return;
+public void onEnterPressed() {
+    if (isPlaybackMode) { exitPlayback(); return; }
+    if (isProcessing) return;
 
-        if (isHudActive) {
-            if (currentHudMode == 0 && hudSelection == -1) {
-                RTLProfile p = recipeManager.getCurrentProfile();
-                
-                // --- NEW: DUPLICATE MATH CHECK ---
-                // Before we start naming a new file, check if these numbers already exist
-                if (!isNamingMode) {
-                    for (int i = 0; i < matrixManager.getCount(); i++) {
-                        int[] existing = matrixManager.getValues(i);
-                        boolean isMatch = true;
-                        for (int j = 0; j < 9; j++) {
-                            if (p.advMatrix[j] != existing[j]) { isMatch = false; break; }
-                        }
-                        
-                        if (isMatch) {
-                            // Found it! Tell the user and stop.
-                            String existingName = matrixManager.getNames().get(i);
-                            tvTopStatus.setText("ALREADY SAVED: " + existingName);
-                            tvTopStatus.setTextColor(Color.GREEN);
-                            return; // Exit without opening Naming Mode
-                        }
-                    }
-                }
-
-                // --- PROCEED TO NAMING IF UNIQUE ---
-                isNamingMode = !isNamingMode;
-                if (isNamingMode) {
+    if (isHudActive) {
+        // --- VAULT HUD (MODE 10) ---
+        if (currentHudMode == 10) {
+            if (isNamingMode) {
+                isNamingMode = false;
+                recipeManager.saveSlotToVault(new String(matrixNameBuffer).trim());
+                isHudActive = false; 
+            } else {
+                if (hudSelection == 0) { 
+                    // ACTION: START NAMING (Now the default entry point)
+                    isNamingMode = true;
                     matrixNameBuffer = "CUSTOM      ".toCharArray();
-                    nameCursorPos = 0; // Start at the beginning for total control
-                    updateHudUI(); 
-                } else {
-                    String finalName = new String(matrixNameBuffer).trim();
-                    if (finalName.isEmpty()) finalName = "CUSTOM";
-                    saveCurrentCustomMatrix(finalName);
+                    nameCursorPos = 0;
+                    updateHudUI();
+                    return; 
+                } else if (hudSelection == 1) { 
+                    // ACTION: CONFIRM LOAD
+                    recipeManager.savePreferences(); 
+                    isHudActive = false; 
+                } else if (hudSelection == 2) { 
+                    // ACTION: RESET
+                    recipeManager.resetCurrentSlot();
+                    isHudActive = false; 
                 }
-                return;
             }
-            
-            // --- STANDARD HUD EXIT ---
-            isHudActive = false;
-            hudOverlayContainer.setVisibility(View.GONE);
-            if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
-            if (wbGridContainer != null) wbGridContainer.setVisibility(View.GONE);
-            mainUIContainer.setVisibility(View.GONE);
-            menuContainer.setVisibility(View.VISIBLE);
-            recipeManager.savePreferences();
-            renderMenu(); 
+            if (!isHudActive) { 
+                hudOverlayContainer.setVisibility(View.GONE);
+                mainUIContainer.setVisibility(View.GONE);
+                menuContainer.setVisibility(View.VISIBLE); 
+                renderMenu(); 
+            }
             return;
         }
+
+        // --- EXISTING: RGB MATRIX (MODE 0) ---
+        if (currentHudMode == 0 && hudSelection == -1) {
+            RTLProfile p = recipeManager.getCurrentProfile();
+            
+            // --- NEW: DUPLICATE MATH CHECK ---
+            if (!isNamingMode) {
+                for (int i = 0; i < matrixManager.getCount(); i++) {
+                    int[] existing = matrixManager.getValues(i);
+                    boolean isMatch = true;
+                    for (int j = 0; j < 9; j++) {
+                        if (p.advMatrix[j] != existing[j]) { isMatch = false; break; }
+                    }
+                    
+                    if (isMatch) {
+                        String existingName = matrixManager.getNames().get(i);
+                        tvTopStatus.setText("ALREADY SAVED: " + existingName);
+                        tvTopStatus.setTextColor(Color.GREEN);
+                        return; 
+                    }
+                }
+            }
+
+            isNamingMode = !isNamingMode;
+            if (isNamingMode) {
+                matrixNameBuffer = "CUSTOM      ".toCharArray();
+                nameCursorPos = 0; 
+                updateHudUI(); 
+            } else {
+                String finalName = new String(matrixNameBuffer).trim();
+                if (finalName.isEmpty()) finalName = "CUSTOM";
+                saveCurrentCustomMatrix(finalName);
+            }
+            return;
+        }
+        
+        // --- STANDARD HUD EXIT ---
+        isHudActive = false;
+        hudOverlayContainer.setVisibility(View.GONE);
+        if (hudTooltipText != null) hudTooltipText.setVisibility(View.GONE);
+        if (wbGridContainer != null) wbGridContainer.setVisibility(View.GONE);
+        mainUIContainer.setVisibility(View.GONE);
+        menuContainer.setVisibility(View.VISIBLE);
+        recipeManager.savePreferences();
+        renderMenu(); 
+        return;
+    }
         
         RTLProfile p = recipeManager.getCurrentProfile();
         
         // --- FIXED: Shifted down by +1 to accommodate "Load from Vault" at index 2 ---
-        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 3) {
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
+            launchHudMode(10); return; // NEW: Vault Manager HUD
+        }
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
             launchHudMode(6); return; // Foundation Base
         }
-        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 4) {
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 3) {
             launchHudMode(3); return; // Tone & Style
         }
-        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 5) {
+        if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 4) {
             launchHudMode(9); return; // DRO
         }
         if (isMenuOpen && currentMainTab == 0 && currentPage == 2 && menuSelection == 0) {
@@ -743,42 +777,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             }
         } else {
             if (currentPage == 7) handleConnectionAction(); 
-            // --- ACTION: SAVE TO VAULT (ROW 2) ---
-            else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
-                isNamingMode = !isNamingMode;
-                if (isNamingMode) {
-                    isMenuEditing = true;
-                    nameCursorPos = 0;
-                } else {
-                    isMenuEditing = false;
-                    // When they exit Naming Mode, drop the sandbox into the Vault!
-                    recipeManager.saveSlotToVault(recipeManager.getCurrentProfile().profileName);
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("SAVED TO VAULT: " + recipeManager.getCurrentProfile().profileName);
-                        tvTopStatus.setTextColor(Color.GREEN);
-                    }
-                }
-                renderMenu();
-            }
-            // --- ACTION: LOAD FROM VAULT (ROW 3) ---
-            else if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                if (!isMenuEditing) {
-                    isMenuEditing = true; // Enter "Scroll Mode"
-                } else {
-                    // They hit Enter to confirm the load!
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
-                        recipeManager.copyVaultToSlot(vaultFiles.get(vaultIndex));
-                        isMenuEditing = false; // Exit "Scroll Mode"
-                        if (tvTopStatus != null) {
-                            tvTopStatus.setText("LOADED: " + vaultFiles.get(vaultIndex).replace(".TXT", ""));
-                            tvTopStatus.setTextColor(Color.GREEN);
-                        }
-                    } else {
-                        isMenuEditing = false;
-                    }
-                }
-                renderMenu();
-            }
             else { 
                 // --- NEW: SONY NATIVE ENTER BEHAVIOR ---
                 if (menuSelection == -2) {
@@ -795,7 +793,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onUpPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -815,14 +813,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 hudSelection--;
                 
                 // --- NAVIGATION WRAP LOGIC ---
-                // Matrix mode (0) allows selection to go up to -1 (The Preset Bar)
                 int minIdx = (currentHudMode == 0) ? -1 : 0;
                 
                 if (hudSelection < minIdx) {
                     // Wrap to the bottom based on how many cells are in the current mode
                     if (currentHudMode == 0) hudSelection = 8;
                     else if (currentHudMode == 1) hudSelection = 5;
-                    else if (currentHudMode == 3) hudSelection = 2;
+                    else if (currentHudMode == 3 || currentHudMode == 10) hudSelection = 2; // --- FIXED ---
                     else if (currentHudMode == 4 || currentHudMode == 6) hudSelection = 1;
                     else hudSelection = 0;
                 }
@@ -877,7 +874,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onDownPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -900,12 +897,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 int maxIdx = 0;
                 if (currentHudMode == 0) maxIdx = 8;
                 else if (currentHudMode == 1) maxIdx = 5;
-                else if (currentHudMode == 3) maxIdx = 2;
+                else if (currentHudMode == 3 || currentHudMode == 10) maxIdx = 2; // --- FIXED ---
                 else if (currentHudMode == 4 || currentHudMode == 6) maxIdx = 1;
 
                 // --- NAVIGATION WRAP LOGIC ---
                 if (hudSelection > maxIdx) {
-                    // If Matrix mode, wrap back to the Preset Bar (-1). Others wrap to 0.
                     hudSelection = (currentHudMode == 0) ? -1 : 0;
                 }
                 updateHudUI();
@@ -962,7 +958,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onLeftPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             nameCursorPos -= 1; // Move cursor left
             if (nameCursorPos < 0) nameCursorPos = 0;
             if (nameCursorPos > 11) nameCursorPos = 11;
@@ -1027,9 +1023,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 // --- VAULT SCROLLING (LEFT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         vaultIndex -= 1;
-                        if (vaultIndex < 0) vaultIndex += vaultFiles.size();
+                        if (vaultIndex < 0) vaultIndex += vaultItems.size();
                         renderMenu();
                     }
                 } else {
@@ -1060,7 +1056,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onRightPressed() {
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             nameCursorPos += 1; // Move cursor right
             if (nameCursorPos < 0) nameCursorPos = 0;
             if (nameCursorPos > 11) nameCursorPos = 11;
@@ -1074,7 +1070,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 int maxSlots = 0;
                 if (currentHudMode == 0) maxSlots = 8;
                 else if (currentHudMode == 1) maxSlots = 5;
-                else if (currentHudMode == 3) maxSlots = 2;
+                else if (currentHudMode == 3 || currentHudMode == 10) maxSlots = 2; // --- FIXED: Mode 10 has 3 cells ---
                 else if (currentHudMode == 4 || currentHudMode == 5 || currentHudMode == 6 || currentHudMode == 8) maxSlots = 1;
                 
                 hudSelection = Math.min(maxSlots, hudSelection + 1);
@@ -1118,8 +1114,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else if (isMenuEditing) {
                 // --- VAULT SCROLLING (RIGHT) ---
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
-                        vaultIndex = (vaultIndex + 1) % vaultFiles.size();
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
+                        vaultIndex = (vaultIndex + 1) % vaultItems.size();
                         renderMenu();
                     }
                 } else {
@@ -1191,7 +1187,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override 
     public void onControlWheelRotated(int direction) { 
         // --- NEW: INTERCEPT WHEEL TURNS FOR MATRIX NAMING ---
-        if (isHudActive && currentHudMode == 0 && isNamingMode) {
+        if (isHudActive && (currentHudMode == 0 || currentHudMode == 10) && isNamingMode) {
             char currentChar = matrixNameBuffer[nameCursorPos];
             int idx = CHARSET.indexOf(currentChar);
             if (idx == -1) idx = 0;
@@ -1218,12 +1214,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
                 if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
                         if (direction > 0) {
-                            vaultIndex = (vaultIndex + 1) % vaultFiles.size();
+                            vaultIndex = (vaultIndex + 1) % vaultItems.size();
                         } else {
                             vaultIndex -= 1;
-                            if (vaultIndex < 0) vaultIndex += vaultFiles.size();
+                            if (vaultIndex < 0) vaultIndex += vaultItems.size();
                         }
                         renderMenu();
                     }
@@ -1315,32 +1311,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int sel = menuSelection; 
         
         if (currentPage == 1) { 
-            // Row 1: Recipe Slot
+            // ROW 0: Workspace Slot (1-10)
             if (sel == 0) {
                 if (!isNamingMode) {
                     recipeManager.savePreferences();
                     recipeManager.setCurrentSlot(Math.max(0, Math.min(9, recipeManager.getCurrentSlot() + dir)));
-                    // Note: Ensure triggerLutPreload() is defined or remove if not used
-                    // triggerLutPreload(); 
+                    triggerLutPreload(); // Updates live-view immediately when slot changes
                 }
             }
-            // ROW 3: LOAD FROM VAULT (NEW INDEX 2)
+            // ROW 1: Recipe Vault Manager (Enter-Action only, no L/R adjustment)
+
+            // ROW 2: Foundation Base (Shifted from Row 4)
             else if (sel == 2) {
-                if (!vaultFiles.isEmpty() && !vaultFiles.get(0).equals("NO VAULT RECIPES")) {
-                    vaultIndex += dir;
-                    // Wrap-around logic for the list
-                    while (vaultIndex < 0) vaultIndex += vaultFiles.size();
-                    vaultIndex = vaultIndex % vaultFiles.size();
-                }
-            }
-            // ROW 4: FOUNDATION BASE (SHIFTED FROM 2 TO 3)
-            else if (sel == 3) {
                 String[] styles = {"Standard", "Vivid", "Neutral", "Clear", "Deep", "Light", "Portrait", "Landscape", "Sunset", "Night Scene", "Autumn Leaves", "Black & White", "Sepia"};
                 int idx = 0; for(int i=0; i<styles.length; i++) if(styles[i].equalsIgnoreCase(p.colorMode)) idx = i;
                 p.colorMode = styles[(idx + dir + styles.length) % styles.length];
             }
-            // ROW 6: DRO (SHIFTED FROM 4 TO 5)
-            else if (sel == 5) {
+            
+            // ROW 3: Tone & Style (HUD-Action only, no L/R adjustment)
+
+            // ROW 4: DRO (Shifted from Row 6)
+            else if (sel == 4) {
                 String[] droModes = {"OFF", "AUTO", "LVL 1", "LVL 2", "LVL 3", "LVL 4", "LVL 5"};
                 int idx = 0; 
                 for(int i=0; i < droModes.length; i++) {
@@ -1906,6 +1897,41 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             activeCells = 1; labels = new String[]{"DYNAMIC RANGE"};
             values[0] = p.dro != null ? p.dro.toUpperCase() : "OFF";
             tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
+        } else if (currentHudMode == 10) {
+            activeCells = 3;
+            // --- NEW ORDER: SAVE | BROWSE | RESET ---
+            labels = new String[]{"SAVE / SAVE AS", "BROWSE VAULT", "RESET SLOT"};
+            
+            vaultItems = recipeManager.getVaultItems();
+            if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
+            
+            String vName = (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) 
+                           ? "[ EMPTY ]" : vaultItems.get(vaultIndex).profileName;
+            
+            values[0] = "[ NAME & EXPORT ]";
+            values[1] = "< " + vName + " >";
+            values[2] = "[ RESTORE DEFAULTS ]";
+            
+            if (hudSelection == 0) tooltip = "Press ENTER to RENAME and SAVE this Slot to the Vault.";
+            else if (hudSelection == 1) tooltip = "Scroll wheel to browse. WARNING: LIVE VIEW will overwrite Slot.";
+            else tooltip = "Press ENTER to wipe this Slot back to default settings.";
+
+            // --- TOP BAR NAMING UI ---
+            if (tvTopStatus != null) {
+                if (isNamingMode) {
+                    StringBuilder sb = new StringBuilder("NAME: ");
+                    for (int i = 0; i < matrixNameBuffer.length; i++) {
+                        if (i == nameCursorPos) sb.append("[").append(matrixNameBuffer[i]).append("]");
+                        else sb.append(matrixNameBuffer[i]);
+                    }
+                    tvTopStatus.setText(sb.toString());
+                    tvTopStatus.setTextColor(Color.YELLOW);
+                } else {
+                    tvTopStatus.setText("VAULT MANAGER - SLOT " + (recipeManager.getCurrentSlot() + 1));
+                    tvTopStatus.setTextColor(Color.WHITE);
+                }
+                tvTopStatus.setVisibility(View.VISIBLE);
+            }
         }
 
         // --- GENERAL UI RENDER LOOP ---
@@ -2032,6 +2058,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String[] droModes = {"OFF", "AUTO", "LVL 1", "LVL 2", "LVL 3", "LVL 4", "LVL 5"};
                 int idx = 0; for(int i=0; i < droModes.length; i++) if(droModes[i].equalsIgnoreCase(p.dro)) idx = i;
                 p.dro = droModes[(idx + dir + droModes.length) % droModes.length];
+            }
+        } else if (currentHudMode == 10) {
+            // Wheel browsing now only happens on the MIDDLE cell (Index 1)
+            if (hudSelection == 1 && !vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
+                vaultIndex = (vaultIndex + dir + vaultItems.size()) % vaultItems.size();
+                
+                // REACTIVE PREVIEW (Now safe because you have to click Right to get here)
+                recipeManager.previewVaultToSlot(vaultItems.get(vaultIndex).filename);
+                triggerLutPreload(); 
             }
         }
         
@@ -2161,21 +2196,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 String fndStr = "[ " + (p.colorMode != null ? p.colorMode : "STD").toUpperCase() + " | M-CON " + String.format("%+d", p.sharpnessGain) + " ]";
                 String tsStr = String.format("[ %+d,  %+d,  %+d ]", p.contrast, p.saturation, p.sharpness);
 
-                // --- NEW: FETCH VAULT FILES FOR ROW 3 ---
-                vaultFiles = recipeManager.getVaultFiles();
-                if (vaultIndex >= vaultFiles.size() || vaultIndex < 0) vaultIndex = 0;
-                String vaultDisplay = vaultFiles.isEmpty() || vaultFiles.get(0).equals("NO VAULT RECIPES") 
-                        ? "[ NO FILES ]" 
-                        : "< " + vaultFiles.get(vaultIndex).replace(".TXT", "") + " >";
+                // --- SHOW ACTIVE PROFILE NAME IN MENU ---
+                String activeName = (p.profileName != null && !p.profileName.isEmpty()) ? p.profileName : "UNNAMED";
+                String vaultValue = "< " + activeName + " >";
 
-                // --- NEW: 6-ROW LAYOUT ---
-                String[] rLabels = {"Recipe Slot", "Active Recipe (Save)", "Load from Vault", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
-                String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), displayHtmlName, vaultDisplay, fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
+                String[] rLabels = {"Recipe Slot (1-10)", "Vault Manager", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
+                String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), vaultValue, fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
                 
-                for (int i = 0; i < 6; i++) {
+                for (int i = 0; i < 5; i++) {
                     menuLabels[i].setText(rLabels[i]);
-                    if (i == 1 && (isNamingMode || displayHtmlName.contains("&nbsp;"))) menuValues[i].setText(android.text.Html.fromHtml(rValues[i]));
-                    else menuValues[i].setText(rValues[i].trim());
+                    menuValues[i].setText(rValues[i].trim());
                     menuRows[i].setVisibility(View.VISIBLE);
                 }
             } else if (currentPage == 2) {
@@ -2970,7 +3000,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         // --- 3. UPDATE TEXT FIELDS ---
         if (!isProcessing && tvTopStatus != null) {
-            tvTopStatus.setText(customName + " [" + displayName + "]\n" + (isReady ? "READY" : "LOADING.."));
+            // --- FIXED: Clearer Identity ---
+            int slotNum = recipeManager.getCurrentSlot() + 1;
+            tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + (isReady ? "READY" : "LOADING.."));
             
             if (mDialMode == DIAL_MODE_RTL) {
                 tvTopStatus.setTextColor(Color.WHITE); 
