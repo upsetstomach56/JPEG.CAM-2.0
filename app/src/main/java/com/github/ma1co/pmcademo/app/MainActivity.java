@@ -1242,9 +1242,9 @@ public void onEnterPressed() {
             else handleHudAdjustment(direction);
             return;
         }
+        
         if (isPlaybackMode) { 
             showPlaybackImage(playbackIndex + direction); 
-        } 
         } else if (isMenuOpen) {
             if (isNamingMode) { 
                 handleNamingChange(direction); 
