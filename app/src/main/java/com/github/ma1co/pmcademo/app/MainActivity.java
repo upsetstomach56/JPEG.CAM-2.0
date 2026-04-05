@@ -186,6 +186,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private char[] matrixNameBuffer = "CUSTOM      ".toCharArray();
     
     private boolean isNamingMode = false;
+    private boolean isConfirmingDelete = false; // <-- NEW
     private int nameCursorPos = 0;
     private final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
 
@@ -538,6 +539,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void exitMenu() {
         isMenuOpen = false;
         isNamingMode = false;
+        isConfirmingDelete = false; // <-- NEW
         
         isHudActive = false;
         if (hudOverlayContainer != null) hudOverlayContainer.setVisibility(View.GONE);
@@ -589,29 +591,92 @@ public void onEnterPressed() {
 
     if (isHudActive) {
         // --- VAULT HUD (MODE 10) ---
+        // --- VAULT HUD (MODE 10) ---
         if (currentHudMode == 10) {
             if (isNamingMode) {
                 isNamingMode = false;
-                recipeManager.saveSlotToVault(new String(matrixNameBuffer).trim());
-                isHudActive = false; 
+                String finalName = new String(matrixNameBuffer).trim();
+                recipeManager.saveSlotToVault(finalName);
+                
+                // --- FIX: STAY IN HUD & SNAP TO NEW RECIPE ---
+                vaultItems = recipeManager.getVaultItems(); 
+                for (int i = 0; i < vaultItems.size(); i++) {
+                    if (vaultItems.get(i).profileName.equalsIgnoreCase(finalName)) {
+                        vaultIndex = i; 
+                        break;
+                    }
+                }
+                updateHudUI(); 
+                return;
+                
+            } else if (isConfirmingDelete) {
+                // --- HANDLE CONFIRM/CANCEL ---
+                if (hudSelection == 0) { // CONFIRM
+                    recipeManager.deleteVaultItem(vaultIndex); 
+                    vaultIndex = 0; 
+                    
+                    vaultItems = recipeManager.getVaultItems();
+                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
+                        recipeManager.previewVaultToSlot(vaultItems.get(0).filename);
+                    } else {
+                        recipeManager.resetCurrentSlot();
+                    }
+                    
+                    // --- FIX: FORCE HARDWARE TO UPDATE LIVE ---
+                    triggerLutPreload();
+                    applyHardwareRecipe();
+                    
+                    isConfirmingDelete = false;
+                    hudSelection = 1; 
+                    updateHudUI();
+                    return;
+                } else if (hudSelection == 1) { // CANCEL
+                    isConfirmingDelete = false;
+                    hudSelection = 0; 
+                    updateHudUI();
+                    return;
+                }
             } else {
                 if (hudSelection == 0) { 
-                    // ACTION: START NAMING (Now the default entry point)
                     isNamingMode = true;
-                    matrixNameBuffer = "CUSTOM      ".toCharArray();
+                    RTLProfile activeProfile = recipeManager.getCurrentProfile();
+                    String currentName = (activeProfile != null) ? activeProfile.profileName : "";
+                    
+                    if (currentName != null && !currentName.isEmpty() && !currentName.startsWith("SLOT ")) {
+                        StringBuilder sb = new StringBuilder(currentName);
+                        while(sb.length() < 12) sb.append(" ");
+                        matrixNameBuffer = sb.toString().substring(0, 12).toCharArray();
+                    } else {
+                        matrixNameBuffer = "CUSTOM      ".toCharArray();
+                    }
+                    
                     nameCursorPos = 0;
                     updateHudUI();
                     return; 
                 } else if (hudSelection == 1) { 
-                    // ACTION: CONFIRM LOAD
+                    // ACTION: CONFIRM LOAD (Exits HUD)
                     recipeManager.savePreferences(); 
                     isHudActive = false; 
                 } else if (hudSelection == 2) { 
                     // ACTION: RESET
                     recipeManager.resetCurrentSlot();
-                    isHudActive = false; 
+                    
+                    // --- FIX: FORCE HARDWARE TO UPDATE LIVE & STAY IN HUD ---
+                    triggerLutPreload();
+                    applyHardwareRecipe();
+                    updateHudUI(); 
+                    return; 
+                } else if (hudSelection == 3) {
+                    if (!vaultItems.isEmpty() && !vaultItems.get(vaultIndex).filename.equals("NONE")) {
+                        isConfirmingDelete = true;
+                        hudSelection = 1; 
+                        updateHudUI();
+                        return;
+                    }
                 }
             }
+            
+            // Clean up UI if we exited the HUD (like hitting Confirm Load)
             if (!isHudActive) { 
                 hudOverlayContainer.setVisibility(View.GONE);
                 mainUIContainer.setVisibility(View.GONE);
@@ -672,7 +737,7 @@ public void onEnterPressed() {
         
         // --- FIXED: Shifted down by +1 to accommodate "Load from Vault" at index 2 ---
         if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 1) {
-            launchHudMode(10); return; // NEW: Vault Manager HUD
+            launchHudMode(10); return; // NEW: Recipe Manager HUD
         }
         if (isMenuOpen && currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
             launchHudMode(6); return; // Foundation Base
@@ -813,13 +878,15 @@ public void onEnterPressed() {
                 hudSelection--;
                 
                 // --- NAVIGATION WRAP LOGIC ---
+                // --- NAVIGATION WRAP LOGIC ---
                 int minIdx = (currentHudMode == 0) ? -1 : 0;
                 
                 if (hudSelection < minIdx) {
                     // Wrap to the bottom based on how many cells are in the current mode
                     if (currentHudMode == 0) hudSelection = 8;
                     else if (currentHudMode == 1) hudSelection = 5;
-                    else if (currentHudMode == 3 || currentHudMode == 10) hudSelection = 2; // --- FIXED ---
+                    else if (currentHudMode == 3) hudSelection = 2; 
+                    else if (currentHudMode == 10) hudSelection = 3; // <-- CHANGED to 3
                     else if (currentHudMode == 4 || currentHudMode == 6) hudSelection = 1;
                     else hudSelection = 0;
                 }
@@ -897,7 +964,8 @@ public void onEnterPressed() {
                 int maxIdx = 0;
                 if (currentHudMode == 0) maxIdx = 8;
                 else if (currentHudMode == 1) maxIdx = 5;
-                else if (currentHudMode == 3 || currentHudMode == 10) maxIdx = 2; // --- FIXED ---
+                else if (currentHudMode == 3) maxIdx = 2; 
+                else if (currentHudMode == 10) maxIdx = 3; // <-- CHANGED to 3
                 else if (currentHudMode == 4 || currentHudMode == 6) maxIdx = 1;
 
                 // --- NAVIGATION WRAP LOGIC ---
@@ -1021,16 +1089,7 @@ public void onEnterPressed() {
                 nameCursorPos = Math.max(0, nameCursorPos - 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- VAULT SCROLLING (LEFT) ---
-                if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
-                        vaultIndex -= 1;
-                        if (vaultIndex < 0) vaultIndex += vaultItems.size();
-                        renderMenu();
-                    }
-                } else {
-                    handleMenuChange(-1); // Normal menu editing
-                }
+                handleMenuChange(-1); // Normal menu editing
             } else { // 2. PAGE LEVEL NAVIGATION
                 currentPage--;
                 if (currentPage < 1) currentPage = 8; // Wrap from Page 1 to Page 8
@@ -1070,7 +1129,8 @@ public void onEnterPressed() {
                 int maxSlots = 0;
                 if (currentHudMode == 0) maxSlots = 8;
                 else if (currentHudMode == 1) maxSlots = 5;
-                else if (currentHudMode == 3 || currentHudMode == 10) maxSlots = 2; // --- FIXED: Mode 10 has 3 cells ---
+                else if (currentHudMode == 3) maxSlots = 2; 
+                else if (currentHudMode == 10) maxSlots = 3; // <-- CHANGED to 3
                 else if (currentHudMode == 4 || currentHudMode == 5 || currentHudMode == 6 || currentHudMode == 8) maxSlots = 1;
                 
                 hudSelection = Math.min(maxSlots, hudSelection + 1);
@@ -1112,15 +1172,7 @@ public void onEnterPressed() {
                 nameCursorPos = Math.min(7, nameCursorPos + 1);
                 renderMenu();
             } else if (isMenuEditing) {
-                // --- VAULT SCROLLING (RIGHT) ---
-                if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
-                        vaultIndex = (vaultIndex + 1) % vaultItems.size();
-                        renderMenu();
-                    }
-                } else {
-                    handleMenuChange(1); // Normal menu editing
-                }
+                handleMenuChange(1); // Normal menu editing
             } else { // 2. PAGE LEVEL NAVIGATION
                 currentPage++;
                 if (currentPage > 8) currentPage = 1; // Wrap from Page 8 to Page 1
@@ -1206,27 +1258,15 @@ public void onEnterPressed() {
             else handleHudAdjustment(direction);
             return;
         }
+        
         if (isPlaybackMode) { 
             showPlaybackImage(playbackIndex + direction); 
-        } 
-        else if (isMenuOpen) {
+        } else if (isMenuOpen) {
             if (isNamingMode) { 
                 handleNamingChange(direction); 
             } else if (isMenuEditing) { 
-                if (currentMainTab == 0 && currentPage == 1 && menuSelection == 2) {
-                    if (!vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
-                        if (direction > 0) {
-                            vaultIndex = (vaultIndex + 1) % vaultItems.size();
-                        } else {
-                            vaultIndex -= 1;
-                            if (vaultIndex < 0) vaultIndex += vaultItems.size();
-                        }
-                        renderMenu();
-                    }
-                } else {
-                    handleMenuChange(direction); 
-                }
-            } else { 
+                handleMenuChange(direction); 
+            } else {
                 if (direction > 0) onDownPressed(); 
                 else onUpPressed(); 
             }
@@ -1319,7 +1359,7 @@ public void onEnterPressed() {
                     triggerLutPreload(); // Updates live-view immediately when slot changes
                 }
             }
-            // ROW 1: Recipe Vault Manager (Enter-Action only, no L/R adjustment)
+            // ROW 1: Recipe Recipe Manager (Enter-Action only, no L/R adjustment)
 
             // ROW 2: Foundation Base (Shifted from Row 4)
             else if (sel == 2) {
@@ -1898,23 +1938,47 @@ public void onEnterPressed() {
             values[0] = p.dro != null ? p.dro.toUpperCase() : "OFF";
             tooltip = "Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         } else if (currentHudMode == 10) {
-            activeCells = 3;
-            // --- NEW ORDER: SAVE | BROWSE | RESET ---
-            labels = new String[]{"SAVE / SAVE AS", "BROWSE VAULT", "RESET SLOT"};
-            
-            vaultItems = recipeManager.getVaultItems();
-            if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
-            
-            String vName = (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) 
-                           ? "[ EMPTY ]" : vaultItems.get(vaultIndex).profileName;
-            
-            values[0] = "[ NAME & EXPORT ]";
-            values[1] = "< " + vName + " >";
-            values[2] = "[ RESTORE DEFAULTS ]";
-            
-            if (hudSelection == 0) tooltip = "Press ENTER to RENAME and SAVE this Slot to the Vault.";
-            else if (hudSelection == 1) tooltip = "Scroll wheel to browse. WARNING: LIVE VIEW will overwrite Slot.";
-            else tooltip = "Press ENTER to wipe this Slot back to default settings.";
+            if (isConfirmingDelete) {
+                // --- DELETE CONFIRMATION STATE ---
+                activeCells = 2;
+                labels = new String[]{"ARE YOU SURE?", "CANCEL"};
+                values[0] = "[ CONFIRM DELETE ]";
+                values[1] = "[ GO BACK ]";
+                
+                if (hudSelection == 0) tooltip = "WARNING: This will permanently delete the recipe from the SD card.";
+                else tooltip = "Cancel and return to the Recipe Manager.";
+                
+            } else {
+                // --- STANDARD VAULT STATE ---
+                activeCells = 4;
+                labels = new String[]{"SAVE", "BROWSE", "RESET", "DELETE"};
+                
+                // FIX: Update the global class variable, do NOT create a local variable!
+                vaultItems = recipeManager.getVaultItems();
+                if (vaultIndex >= vaultItems.size() || vaultIndex < 0) vaultIndex = 0;
+                
+                String vName = (vaultItems.isEmpty() || vaultItems.get(0).filename.equals("NONE")) 
+                               ? "EMPTY" : vaultItems.get(vaultIndex).profileName;
+                
+                // Shorten name if it's too long to fit cleanly in the cell
+                if (vName.length() > 10) vName = vName.substring(0, 8) + "..";
+                
+                values[0] = "[ RENAME ]";
+                values[1] = "< " + vName + " >";
+                values[2] = "[ DEFAULT ]";
+                
+                // Only show a valid delete option if we are browsing an actual file, not "NONE"
+                if (!vaultItems.isEmpty() && !vaultItems.get(vaultIndex).filename.equals("NONE")) {
+                    values[3] = "[ TRASH ]";
+                } else {
+                    values[3] = "---";
+                }
+                
+                if (hudSelection == 0) tooltip = "Press ENTER to RENAME and SAVE this Slot to the Vault.";
+                else if (hudSelection == 1) tooltip = "Scroll wheel to browse. WARNING: LIVE VIEW will overwrite Slot.";
+                else if (hudSelection == 2) tooltip = "Press ENTER to wipe this Slot back to default settings.";
+                else if (hudSelection == 3) tooltip = "Permanently delete the currently selected Vault recipe.";
+            }
 
             // --- TOP BAR NAMING UI ---
             if (tvTopStatus != null) {
@@ -1925,10 +1989,10 @@ public void onEnterPressed() {
                         else sb.append(matrixNameBuffer[i]);
                     }
                     tvTopStatus.setText(sb.toString());
-                    tvTopStatus.setTextColor(Color.YELLOW);
+                    tvTopStatus.setTextColor(android.graphics.Color.YELLOW);
                 } else {
-                    tvTopStatus.setText("VAULT MANAGER - SLOT " + (recipeManager.getCurrentSlot() + 1));
-                    tvTopStatus.setTextColor(Color.WHITE);
+                    tvTopStatus.setText("RECIPE MANAGER - SLOT " + (recipeManager.getCurrentSlot() + 1));
+                    tvTopStatus.setTextColor(android.graphics.Color.WHITE);
                 }
                 tvTopStatus.setVisibility(View.VISIBLE);
             }
@@ -2120,6 +2184,7 @@ public void onEnterPressed() {
         isHudActive = true;
         currentHudMode = mode;
         hudSelection = defaultSelection; 
+        isConfirmingDelete = false; // <-- NEW
         
         menuContainer.setVisibility(View.GONE);
         mainUIContainer.setVisibility(View.VISIBLE);
@@ -2200,7 +2265,7 @@ public void onEnterPressed() {
                 String activeName = (p.profileName != null && !p.profileName.isEmpty()) ? p.profileName : "UNNAMED";
                 String vaultValue = "< " + activeName + " >";
 
-                String[] rLabels = {"Recipe Slot (1-10)", "Vault Manager", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
+                String[] rLabels = {"Recipe Slot (1-10)", "Recipe Manager", "Foundation Base", "Tone & Style", "DRO (Dynamic Range)"};
                 String[] rValues = { String.valueOf(recipeManager.getCurrentSlot() + 1), vaultValue, fndStr, tsStr, p.dro != null ? p.dro.toUpperCase() : "OFF" };
                 
                 for (int i = 0; i < 5; i++) {
@@ -2631,7 +2696,7 @@ public void onEnterPressed() {
         
         // --- LOWERED HUD TOOLTIP ---
         FrameLayout.LayoutParams ttParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM); 
-        ttParams.setMargins(0, 0, 0, 100); // Lowered from 205 to hover directly above the pinned HUD
+        ttParams.setMargins(0, 0, 0, 130); // Raised slightly so it doesn't overlap 4-cell HUDs
         mainUIContainer.addView(hudTooltipText, ttParams);
         
         wbGridContainer = new FrameLayout(this);
