@@ -234,8 +234,15 @@ public class ConnectivityManager {
                 filter.addAction("android.net.wifi.p2p.CONNECTION_STATE_CHANGE");
                 context.registerReceiver(p2pReceiver, filter);
 
-                // Power on the main Wi-Fi chip to trigger the P2P state change
-                if (!wifiManager.isWifiEnabled()) wifiManager.setWifiEnabled(true);
+                // FIX: If the Wi-Fi chip is ALREADY awake, bypass the wait and build the group immediately!
+                if (!wifiManager.isWifiEnabled()) {
+                    wifiManager.setWifiEnabled(true);
+                } else {
+                    try {
+                        updateStatus("HOTSPOT", "Building Group...");
+                        createGroupMethod.invoke(p2pManager, p2pChannel, null);
+                    } catch (Exception e) {}
+                }
                 
             } catch (Exception e) {
                 updateStatus("HOTSPOT", "P2P Error: " + e.getMessage());
@@ -250,11 +257,18 @@ public class ConnectivityManager {
 
     public void stopNetworking() {
         if (server != null && server.isAlive()) server.stop();
+        
+        if (wifiReceiver != null) {
+            try { context.unregisterReceiver(wifiReceiver); wifiReceiver = null; } catch (Exception e) {}
+        }
+        
+        // FIX: Force disconnect from any background home networks so the radio is free to broadcast
+        try { wifiManager.disconnect(); } catch (Exception e) {}
+        
         if (isHomeWifiRunning) {
-            try { context.unregisterReceiver(wifiReceiver); } catch (Exception e) {}
-            wifiManager.disconnect(); 
             isHomeWifiRunning = false;
         }
+        
         if (isHotspotRunning) {
             // Gen 2 Cleanup
             try { context.unregisterReceiver(directStateReceiver); } catch (Exception e) {}
