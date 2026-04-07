@@ -143,22 +143,39 @@ public class ConnectivityManager {
         context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
         context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
 
-        // Wait for hardware to have power before requesting the Hotspot service
-        if (wifiManager.isWifiEnabled()) {
-            triggerDirectManager(); 
-        } else {
-            updateStatus("HOTSPOT", "Waking Hardware...");
-            wifiReceiver = new BroadcastReceiver() {
-                @Override 
-                public void onReceive(Context c, Intent intent) {
-                    if (intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN) == WifiManager.WIFI_STATE_ENABLED) {
-                        triggerDirectManager(); 
+        // FORCE HARDWARE POWER: A7II/A6500 require this before the service will even exist
+        if (!wifiManager.isWifiEnabled()) wifiManager.setWifiEnabled(true);
+
+        // PERSISTENT LOAD: Run a background check to find the service once it boots
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int attempts = 0;
+                while (isHotspotRunning && directManager == null && attempts < 10) {
+                    // Try the standard name and the proprietary name
+                    directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+                    if (directManager == null) directManager = (DirectManager) context.getSystemService("sony:wifi:direct");
+                    
+                    if (directManager == null) {
+                        try { Thread.sleep(500); } catch (Exception e) {} // Wait 0.5s and try again
+                        attempts++;
                     }
                 }
-            };
-            context.registerReceiver(wifiReceiver, new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION));
-            wifiManager.setWifiEnabled(true);
-        }
+
+                // Once found (or timed out), update the UI on the main thread
+                ((android.app.Activity)context).runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (directManager != null) {
+                            directManager.setDirectEnabled(true);
+                        } else {
+                            updateStatus("HOTSPOT", "Hardware Error: Try Again");
+                            isHotspotRunning = false;
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private void triggerDirectManager() {
