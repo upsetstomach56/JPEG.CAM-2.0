@@ -116,6 +116,23 @@ public class ConnectivityManager {
         isHotspotRunning = true;
         updateStatus("HOTSPOT", "Starting Hotspot...");
         
+        // GEN 3/4 FIX (A7II, A6500): Turn on Wi-Fi power BEFORE asking for the service
+        if (!wifiManager.isWifiEnabled()) {
+            wifiManager.setWifiEnabled(true);
+        }
+        
+        // LAZY LOAD: Now that power is on, fetch the service 
+        if (directManager == null) {
+            directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
+        }
+
+        // If it is STILL null, the hardware is physically busy
+        if (directManager == null) {
+            updateStatus("HOTSPOT", "Hardware Busy: Try Again");
+            isHotspotRunning = false;
+            return;
+        }
+
         directStateReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -143,18 +160,19 @@ public class ConnectivityManager {
         context.registerReceiver(directStateReceiver, new IntentFilter(DirectManager.DIRECT_STATE_CHANGED_ACTION));
         context.registerReceiver(groupCreateSuccessReceiver, new IntentFilter(DirectManager.GROUP_CREATE_SUCCESS_ACTION));
 
+        // Start the broadcast
         if (wifiManager.isWifiEnabled()) {
-            if (directManager != null) directManager.setDirectEnabled(true);
+            directManager.setDirectEnabled(true);
         } else {
+            // Fallback just in case the chip is slow to report it's awake
             wifiReceiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context context, Intent intent) {
                     if (intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN) == WifiManager.WIFI_STATE_ENABLED) {
-                        if (directManager != null) directManager.setDirectEnabled(true);
+                        directManager.setDirectEnabled(true);
                     }
                 }
             };
             context.registerReceiver(wifiReceiver, new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION));
-            wifiManager.setWifiEnabled(true);
         }
     }
 
