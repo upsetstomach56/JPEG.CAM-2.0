@@ -8,6 +8,7 @@ import android.net.NetworkInfo;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.Handler;
 
 import com.sony.wifi.direct.DirectConfiguration;
 import com.sony.wifi.direct.DirectManager;
@@ -30,6 +31,9 @@ public class ConnectivityManager {
     private BroadcastReceiver directStateReceiver;
     private BroadcastReceiver groupCreateSuccessReceiver;
     private BroadcastReceiver groupCreateFailureReceiver;
+
+    private Handler wifiPollHandler;
+    private Runnable wifiPollRunnable;
 
     private boolean isHomeWifiRunning = false;
     private boolean isHotspotRunning = false;
@@ -71,48 +75,46 @@ public class ConnectivityManager {
         isHomeWifiRunning = true;
         updateStatus("WIFI", "Connecting to Router...");
         
-        wifiReceiver = new BroadcastReceiver() {
-            int attempts = 0; 
+        // Ensure Wi-Fi is physically enabled
+        if (!wifiManager.isWifiEnabled()) {
+            wifiManager.setWifiEnabled(true);
+        } else {
+            wifiManager.reconnect();
+        }
+
+        wifiPollHandler = new Handler();
+        wifiPollRunnable = new Runnable() {
+            int attempts = 0;
             @Override
-            public void onReceive(Context context, Intent intent) {
+            public void run() {
                 if (!isHomeWifiRunning) return;
-                String action = intent.getAction();
-                
-                if (WifiManager.WIFI_STATE_CHANGED_ACTION.equals(action)) {
-                    if (intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN) == WifiManager.WIFI_STATE_ENABLED) {
-                        wifiManager.reconnect(); 
+
+                NetworkInfo info = connManager.getNetworkInfo(android.net.ConnectivityManager.TYPE_WIFI);
+                if (info != null && info.isConnected()) {
+                    WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                    int ip = wifiInfo.getIpAddress();
+                    if (ip != 0) {
+                        String ipAddress = String.format("%d.%d.%d.%d", (ip & 0xff), (ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
+                        updateStatus("WIFI", "http://" + ipAddress + ":" + HttpServer.PORT);
+                        startServer();
+                        setAutoPowerOffMode(false); 
+                        return; // Successfully connected, stop polling
                     }
-                } else if (android.net.ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
-                    NetworkInfo info = connManager.getNetworkInfo(android.net.ConnectivityManager.TYPE_WIFI);
-                    if (info != null && info.isConnected()) {
-                        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-                        int ip = wifiInfo.getIpAddress();
-                        if (ip != 0) {
-                            String ipAddress = String.format("%d.%d.%d.%d", (ip & 0xff), (ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
-                            updateStatus("WIFI", "http://" + ipAddress + ":" + HttpServer.PORT);
-                            startServer();
-                            setAutoPowerOffMode(false); 
-                        }
-                    } else {
-                        attempts++;
-                        if (attempts > 30) {
-                            updateStatus("WIFI", "Timed out.");
-                            stopNetworking();
-                        } else {
-                            updateStatus("WIFI", "Searching for network...");
-                        }
-                    }
+                }
+
+                attempts++;
+                if (attempts > 15) { // 30 seconds total (15 attempts * 2 seconds)
+                    updateStatus("WIFI", "Timed out.");
+                    stopNetworking();
+                } else {
+                    updateStatus("WIFI", "Searching... (" + attempts + "/15)");
+                    wifiPollHandler.postDelayed(this, 2000); // Poll again in 2 seconds
                 }
             }
         };
-        
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION);
-        filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
-        context.registerReceiver(wifiReceiver, filter);
-        
-        if (!wifiManager.isWifiEnabled()) wifiManager.setWifiEnabled(true);
-        else wifiManager.reconnect();
+
+        // Start the polling loop
+        wifiPollHandler.postDelayed(wifiPollRunnable, 2000);
     }
 
     public void startHotspot() {
@@ -120,17 +122,17 @@ public class ConnectivityManager {
         isHotspotRunning = true;
         updateStatus("HOTSPOT", "Starting Hotspot...");
 
-        // Ensure Wi-Fi is enabled first
-        if (!wifiManager.isWifiEnabled()) {
-            wifiManager.setWifiEnabled(true);
-        }
-
         // --- GEN 2 LOGIC (A5100) ---
         if (directManager == null) {
             directManager = (DirectManager) context.getSystemService(DirectManager.WIFI_DIRECT_SERVICE);
         }
 
         if (directManager != null) {
+            // Ensure Wi-Fi is enabled first for Gen 2 DirectManager
+            if (!wifiManager.isWifiEnabled()) {
+                wifiManager.setWifiEnabled(true);
+            }
+
             directStateReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
@@ -177,6 +179,12 @@ public class ConnectivityManager {
         // --- GEN 3 LOGIC (A7II, A6500) FALLBACK ---
         // If DirectManager is completely absent, use pure Android Reflection to force standard AP Tethering
         try {
+            // THE FIX: Gen 3 hardware cannot be a Client and a Hotspot simultaneously.
+            // We MUST turn the client radio off before starting the Access Point via reflection.
+            if (wifiManager.isWifiEnabled()) {
+                wifiManager.setWifiEnabled(false);
+            }
+
             Method setWifiApEnabled = wifiManager.getClass().getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
             boolean success = (Boolean) setWifiApEnabled.invoke(wifiManager, null, true);
             
@@ -216,6 +224,13 @@ public class ConnectivityManager {
     public void stopNetworking() {
         if (server != null && server.isAlive()) server.stop();
         
+        // Stop the Wi-Fi polling handler if it's running
+        if (wifiPollHandler != null && wifiPollRunnable != null) {
+            wifiPollHandler.removeCallbacks(wifiPollRunnable);
+            wifiPollHandler = null;
+            wifiPollRunnable = null;
+        }
+
         // Safely kill all receivers to prevent camera crashes
         unregisterReceiverSafe(wifiReceiver);
         wifiReceiver = null;
