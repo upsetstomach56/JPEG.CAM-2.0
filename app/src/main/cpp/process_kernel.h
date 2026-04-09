@@ -42,23 +42,32 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 // ==========================================
-// TRUE 2D EMULSION SIMULATION V4 (Nuclear Diagnostic)
+// TRUE 2D EMULSION SIMULATION V5 (Final Tuning)
 //
-// Replaces IIR with a fixed Radius-10 Box Blur.
-// THICK mode blurs 100% of Luma and Chroma to prove it is running.
+// Uses a 21-row symmetric buffer to apply a circular dye-cloud blur.
+// Tuned for arm's-length visibility while maintaining structural detail.
+//
+// Chroma: Wide circular 11x11 blur (mimics dye clouds).
+// Luma: Tight 3x3 core blur (mimics silver-halide roll-off).
 // ==========================================
 inline void apply_emulsion_v2(
     unsigned char** rows, uint8_t* out_row, int width, bool is_yuv, int emulsion)
 {
     if (emulsion == 0 || width < 1) return;
 
-    // FIXED RADIUS 10: 21x21 window centered on rows[10]
-    const int radius = 10;
-    const int diameter = 21;
-    const int samples = diameter * diameter;
+    // RADIUS: 5 pixels at FULL 24MP (6000px)
+    int radius = (width * 5) / 6000;
+    if (radius < 1) radius = 1;
+    if (radius > 10) radius = 10;
+    
+    int diameter = radius * 2 + 1;
+    int samples = diameter * diameter;
 
-    // MAXED WEIGHTS: Level 2 (THICK) is 100% blurred. This will look like a heavy mist.
-    int mix = (emulsion == 1) ? 128 : 255;
+    // BLEND WEIGHTS (Final Tuned)
+    // Level 1 (STD): Color bleeds ~5px, Luma stays sharp (5% softening)
+    // Level 2 (THICK): Color bleeds ~5px, Luma gets subtle bite removal (15% softening)
+    int chroma_mix = (emulsion == 1) ? 160 : 230; 
+    int luma_mix   = (emulsion == 1) ? 15  : 45;
 
     // HEAP ALLOCATION
     int* vsum_r = (int*)malloc(width * sizeof(int));
@@ -70,10 +79,10 @@ inline void apply_emulsion_v2(
         return;
     }
 
-    // Vertical Summation (Pass 1)
     for (int x = 0; x < width; x++) {
         int r_acc = 0, g_acc = 0, b_acc = 0;
-        for (int y = 0; y <= 20; y++) {
+        // Circular window centered on rows[10]
+        for (int y = 10 - radius; y <= 10 + radius; y++) {
             r_acc += (int)rows[y][x*3];
             g_acc += (int)rows[y][x*3+1];
             b_acc += (int)rows[y][x*3+2];
@@ -81,7 +90,6 @@ inline void apply_emulsion_v2(
         vsum_r[x] = r_acc; vsum_g[x] = g_acc; vsum_b[x] = b_acc;
     }
 
-    // Horizontal Summation (Pass 2) + Output
     for (int x = 0; x < width; x++) {
         int r_hsum = 0, g_hsum = 0, b_hsum = 0;
         for (int i = -radius; i <= radius; i++) {
@@ -98,10 +106,29 @@ inline void apply_emulsion_v2(
 
         int r_o = rows[10][x*3], g_o = rows[10][x*3+1], b_o = rows[10][x*3+2];
 
-        // Mix 100% of the blur back if THICK. This will be unmistakably blurry.
-        out_row[x*3]   = (uint8_t)CLAMP((r_o * (255 - mix) + blur_r * mix) / 255);
-        out_row[x*3+1] = (uint8_t)CLAMP((g_o * (255 - mix) + blur_g * mix) / 255);
-        out_row[x*3+2] = (uint8_t)CLAMP((b_o * (255 - mix) + blur_b * mix) / 255);
+        if (is_yuv) {
+            // YUV: R=Y, G=Cb, B=Cr
+            // Tight 3x3 Luma Blur for the base
+            int y_sum3 = 0;
+            for(int ix=-1; ix<=1; ix++) {
+                int xi = x+ix; if(xi<0) xi=0; else if(xi>=width) xi=width-1;
+                y_sum3 += (int)rows[9][xi*3] + (int)rows[10][xi*3] + (int)rows[11][xi*3];
+            }
+            int y_blur3 = y_sum3 / 9;
+
+            int finalY  = (r_o * (256 - luma_mix)   + y_blur3 * luma_mix) / 256;
+            int finalCb = (g_o * (256 - chroma_mix) + blur_g  * chroma_mix) / 256;
+            int finalCr = (b_o * (256 - chroma_mix) + blur_b  * chroma_mix) / 256;
+
+            out_row[x*3]   = (uint8_t)CLAMP(finalY);
+            out_row[x*3+1] = (uint8_t)CLAMP(finalCb);
+            out_row[x*3+2] = (uint8_t)CLAMP(finalCr);
+        } else {
+            // RGB: Balanced channel softening
+            out_row[x*3]   = (uint8_t)CLAMP((r_o * (256 - chroma_mix) + blur_r * chroma_mix) / 256);
+            out_row[x*3+1] = (uint8_t)CLAMP((g_o * (256 - chroma_mix) + blur_g * chroma_mix) / 256);
+            out_row[x*3+2] = (uint8_t)CLAMP((b_o * (256 - chroma_mix) + blur_b * chroma_mix) / 256);
+        }
     }
 
     free(vsum_r); free(vsum_g); free(vsum_b);
