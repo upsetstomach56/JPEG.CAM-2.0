@@ -325,8 +325,9 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
 
         // Optical Bloom & Halation pre-pass
         if (bloom > 0 || halation > 0) {
+            // Fix: Added scaleDenom to dynamically scale the IIR blur radius
             apply_bloom_halation(rows, rows[21], cinfo_d.output_width, abs_y, !use_rgb_path, bloom, halation, seed, 
-                                 work_0, work_1, work_2, work_h, h_line);
+                                 work_0, work_1, work_2, work_h, h_line, scaleDenom);
         }
 
         if (use_rgb_path) {
@@ -337,7 +338,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, seed,
-                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2
+                opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2, scaleDenom
             );
         } else {
             // ==========================================
@@ -347,7 +348,7 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
                 rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
                 shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
                 grain, grainSize, seed,
-                rolloff_lut
+                rolloff_lut, scaleDenom
             );
         }
 
