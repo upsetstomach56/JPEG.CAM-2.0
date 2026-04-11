@@ -66,7 +66,7 @@ inline void apply_bloom_halation(
 
     if (!work_0 || !work_h) return;
 
-    // 2. Vertical Summation: Extracting Pure Light Maps
+    // 2. Vertical Summation: Extracting Pure Light Maps (High Precision)
     for (int x = 0; x < width; x++) {
         long long s0 = 0, sh = 0;
         for (int y = 0; y <= 20; y++) {
@@ -83,11 +83,13 @@ inline void apply_bloom_halation(
                 sh += (lum - 210) * 5 * w; 
             }
         }
-        work_0[x] = (int)(s0 / 121); // work_0 is now a soft Luma Map
-        work_h[x] = (int)(sh / 121); // work_h is now a dense Highlight Map
+        // Fix: Do NOT divide by 121 here. Store the raw massive number (up to ~30k) 
+        // to give the IIR blur maximum floating-point-like precision.
+        work_0[x] = (int)s0; 
+        work_h[x] = (int)sh; 
     }
 
-    // 3. Horizontal IIR Blur (Spreading the light maps)
+    // 3. Horizontal IIR Blur (Spreading the high-precision light maps)
     if (bloom > 0) {
         int a0 = work_0[0];
         for (int x = 1; x < width; x++) {
@@ -122,13 +124,16 @@ inline void apply_bloom_halation(
         int v0_o = rows[10][x*3], v1_o = rows[10][x*3+1], v2_o = rows[10][x*3+2];
         int orig_y = is_yuv ? v0_o : ((v0_o*77 + v1_o*150 + v2_o*29)/256);
 
+        // Fix: Now we divide the blurred, high-precision map back down to 0-255 visual ranges
+        int blur_y = work_0[x] / 121;
+        int halation_y = work_h[x] / 121;
+
         // Bloom Bleed: How much brighter is the glow map than the original pixel?
-        int b_bleed = work_0[x] - orig_y;
+        int b_bleed = blur_y - orig_y;
         if (b_bleed < 0) b_bleed = 0;
 
         // Halation Core Protection: Fade out the red dye if the base pixel is bright white.
-        // This ensures Halation only lives on the edges/shadows, leaving the core pure white.
-        int h_eff = (work_h[x] * h_mix) / 256;
+        int h_eff = (halation_y * h_mix) / 256;
         h_eff = (h_eff * (255 - orig_y)) / 256; 
 
         if (is_yuv) {
