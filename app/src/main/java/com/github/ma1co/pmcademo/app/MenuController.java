@@ -245,11 +245,12 @@ public class MenuController {
         host.onMenuOpened();
         host.closeHud();
         isOpen      = true;
+        
+        // We always cancel editing/naming modes so the user doesn't get stuck,
+        // but we leave currentMainTab, currentPage, and selection alone!
         isEditing   = false;
         isNaming    = false;
-        currentMainTab = 0;
-        currentPage    = 1;
-        selection      = 0;
+        
         container.setVisibility(View.VISIBLE);
         host.getMainUIContainer().setVisibility(View.GONE);
         render();
