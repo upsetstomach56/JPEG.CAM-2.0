@@ -164,25 +164,34 @@ public class ConnectivityManager {
         stopNetworking();
         isHotspotRunning = true;
 
-        // Both Gen 2 and Gen 3 require the Wi-Fi physical antenna to be powered ON 
-        // to broadcast their P2P / Wi-Fi Direct network.
         waitForHardwareAndExecute(true, new Runnable() {
             @Override
             public void run() {
                 if (!isHotspotRunning) return;
                 updateStatus("HOTSPOT", "Starting Hotspot...");
 
+                // ---------------------------------------------------------
                 // PATH 1: Try Gen 2 DirectManager (a5100)
+                // Fix: Check Activity context first, then Application Context
+                // ---------------------------------------------------------
                 Object dm = null;
-                try { dm = context.getApplicationContext().getSystemService("wifi_direct"); } catch (Throwable t) {}
+                try { dm = context.getSystemService("wifi_direct"); } catch (Throwable t) {}
+                if (dm == null) {
+                    try { dm = context.getApplicationContext().getSystemService("wifi_direct"); } catch (Throwable t) {}
+                }
                 if (dm != null) {
-                    startHotspotGen2();
+                    startHotspotGen2(dm);
                     return;
                 }
 
-                // PATH 2: Try Gen 3 Standard Android WifiP2pManager (a7ii / a6500)
+                // ---------------------------------------------------------
+                // PATH 2: Try Gen 3 Standard Android WifiP2pManager (a7ii/a6500)
+                // ---------------------------------------------------------
                 Object p2p = null;
-                try { p2p = context.getApplicationContext().getSystemService("wifip2p"); } catch (Throwable t) {}
+                try { p2p = context.getSystemService("wifip2p"); } catch (Throwable t) {}
+                if (p2p == null) {
+                    try { p2p = context.getApplicationContext().getSystemService("wifip2p"); } catch (Throwable t) {}
+                }
                 if (p2p != null) {
                     startHotspotGen3(p2p);
                     return;
@@ -194,10 +203,8 @@ public class ConnectivityManager {
         });
     }
 
-    private void startHotspotGen2() {
-        if (directManager == null) {
-            directManager = (DirectManager) context.getApplicationContext().getSystemService("wifi_direct");
-        }
+    private void startHotspotGen2(Object dm) {
+        directManager = (DirectManager) dm;
 
         directStateReceiver = new BroadcastReceiver() {
             @Override
@@ -255,7 +262,6 @@ public class ConnectivityManager {
 
     private void startHotspotGen3(final Object p2pManager) {
         try {
-            // We use Reflection here so it safely compiles on API 10 SDKs (which don't know what WifiP2pManager is)
             final Class<?> p2pClass = Class.forName("android.net.wifi.p2p.WifiP2pManager");
             final Class<?> channelClass = Class.forName("android.net.wifi.p2p.WifiP2pManager$Channel");
             final Class<?> actionListenerClass = Class.forName("android.net.wifi.p2p.WifiP2pManager$ActionListener");
@@ -264,7 +270,7 @@ public class ConnectivityManager {
             Method initialize = p2pClass.getMethod("initialize", Context.class, android.os.Looper.class, Class.forName("android.net.wifi.p2p.WifiP2pManager$ChannelListener"));
             final Object channel = initialize.invoke(p2pManager, context, context.getMainLooper(), null);
 
-            Object actionListener = java.lang.reflect.Proxy.newProxyInstance(
+            final Object actionListener = java.lang.reflect.Proxy.newProxyInstance(
                     context.getClassLoader(),
                     new Class<?>[]{actionListenerClass},
                     new java.lang.reflect.InvocationHandler() {
@@ -282,8 +288,6 @@ public class ConnectivityManager {
                                                     if (group != null) {
                                                         Method getPassphrase = group.getClass().getMethod("getPassphrase");
                                                         String pass = (String) getPassphrase.invoke(group);
-                                                        
-                                                        // Note: Android P2P defaults to 192.168.49.1, but some Sony firmware overrides to 122.1
                                                         updateStatus("HOTSPOT", "PW: " + pass + " (192.168.49.1)");
                                                         setAutoPowerOffMode(false);
                                                     } else {
@@ -305,9 +309,32 @@ public class ConnectivityManager {
                     }
             );
 
-            // Trigger the Wi-Fi Direct Group Owner creation
-            Method createGroup = p2pClass.getMethod("createGroup", channelClass, actionListenerClass);
-            createGroup.invoke(p2pManager, channel, actionListener);
+            final Method createGroup = p2pClass.getMethod("createGroup", channelClass, actionListenerClass);
+            final Method removeGroup = p2pClass.getMethod("removeGroup", channelClass, actionListenerClass);
+
+            // FIX FOR ERROR 2 (BUSY): Force the framework to remove any hanging P2P groups
+            // created by Sony background tasks. Once the remove attempt completes (success or fail),
+            // wait half a second for the hardware buffer to flush, then cleanly create the new group.
+            Object removeListener = java.lang.reflect.Proxy.newProxyInstance(
+                    context.getClassLoader(),
+                    new Class<?>[]{actionListenerClass},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                            new Handler(context.getMainLooper()).postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        createGroup.invoke(p2pManager, channel, actionListener);
+                                    } catch (Exception e) {}
+                                }
+                            }, 500);
+                            return null;
+                        }
+                    }
+            );
+
+            removeGroup.invoke(p2pManager, channel, removeListener);
 
         } catch (Exception e) {
             updateStatus("HOTSPOT", "P2P Reflection Error: " + e.getMessage());
@@ -343,12 +370,10 @@ public class ConnectivityManager {
         }
 
         if (isHotspotRunning) {
-            // Teardown Gen 2 P2P
             try { if (directManager != null) directManager.setDirectEnabled(false); } catch (Exception e) {}
-
-            // Teardown Gen 3 P2P
             try {
-                Object p2pManager = context.getApplicationContext().getSystemService("wifip2p");
+                Object p2pManager = context.getSystemService("wifip2p");
+                if (p2pManager == null) p2pManager = context.getApplicationContext().getSystemService("wifip2p");
                 if (p2pManager != null) {
                     Class<?> p2pClass = Class.forName("android.net.wifi.p2p.WifiP2pManager");
                     Class<?> channelClass = Class.forName("android.net.wifi.p2p.WifiP2pManager$Channel");
