@@ -917,9 +917,18 @@ public void onEnterPressed() {
                     lensManager.clearCurrentProfile();
                 }
             } else {
+                // NEW: Clear inherited focus areas so Sony doesn't reject the AF-S/AF-C change
+                if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+                
                 p.setFocusMode(nextVirtual);
             }
-            try { c.setParameters(p); } catch (Exception e) {}
+            
+            try { 
+                c.setParameters(p); 
+            } catch (Exception e) {
+                android.util.Log.e("JPEG.CAM", "Failed to set focus mode: " + e.getMessage());
+            }
         }
         updateMainHUD(); 
     }
@@ -1460,16 +1469,28 @@ public void onEnterPressed() {
                 try {
                     Camera c = cameraManager.getCamera();
                     Camera.Parameters p = c.getParameters();
+                    
+                    // --- NEW: CLEAN FOCUS INHERITANCE ---
+                    // Sony hardware silently rejects AF mode changes if an incompatible
+                    // Focus Area (like Flexible Spot) was inherited from the native OS.
+                    if (p.getMaxNumFocusAreas() > 0) p.setFocusAreas(null);
+                    if (p.get("sony-focus-area") != null) p.set("sony-focus-area", "wide");
+                    c.setParameters(p); // Apply clean slate immediately
+                    
                     cachedIsManualFocus = "manual".equals(p.getFocusMode());
                     
-                    // UNIVERSAL SENSOR DETECTION: Full frame cameras support APS-C crop mode switching.
-                    isFullFrame = "true".equals(p.get("apsc-mode-supported"));
+                    // --- NEW: DYNAMIC SENSOR DETECTION ---
+                    // Full frame cameras support APS-C crop mode switching. We must check
+                    // both the hardware capability AND the active crop state to get the true CoC.
+                    boolean hardwareIsFullFrame = "true".equals(p.get("apsc-mode-supported"));
+                    boolean isCropActive = "on".equals(p.get("sony-apsc-mode"));
+                    isFullFrame = hardwareIsFullFrame && !isCropActive;
+                    
                     android.util.Log.e("JPEG.CAM", "Sensor size detected as: " + (isFullFrame ? "FULL FRAME" : "APS-C"));
                 } catch (Exception e) {
                     android.util.Log.e("JPEG.CAM", "Boot sync failed: " + e.getMessage());
                 }
             }
-        }
         
         applyHardwareRecipe();
         

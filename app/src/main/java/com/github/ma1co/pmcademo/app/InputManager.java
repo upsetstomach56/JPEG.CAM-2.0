@@ -46,7 +46,7 @@ public class InputManager {
         // --- S1 SHUTTER (HALF-PRESS) ---
         if (sc == ScalarInput.ISV_KEY_S1_1 && event.getRepeatCount() == 0) {
             listener.onShutterHalfPressed();
-            return true;
+            return false; // <-- CHANGED: Let the Sony OS process the native AF/AE Lock!
         }
 
         // --- CORE NAVIGATION ---
@@ -121,7 +121,7 @@ public class InputManager {
         int sc = event.getScanCode();
         if (sc == ScalarInput.ISV_KEY_S1_1) {
             listener.onShutterHalfReleased();
-            return true;
+            return false; // <-- CHANGED: Let the Sony OS know the shutter was released
         }
 
         // DELETED: Omni-Button release interceptor block.
