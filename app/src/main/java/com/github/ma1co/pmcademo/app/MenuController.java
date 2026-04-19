@@ -509,7 +509,11 @@ public class MenuController {
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
             
             // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom
-            else if (sel == 6) p.bloom = Math.max(0, Math.min(6, p.bloom + dir)); // <--- CHANGED max to 6
+            else if (sel == 6) {
+                int logicalIdx = getLogicalBloomIndex(p.bloom);
+                logicalIdx = Math.max(0, Math.min(6, logicalIdx + dir));
+                p.bloom = BLOOM_LOGICAL_TO_INTERNAL[logicalIdx];
+            }
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
@@ -644,7 +648,7 @@ public class MenuController {
                 setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
                 
                 String[] bloomLbls = {"OFF", "Local 1/8", "Full 1/8", "Local 1/4", "Full 1/4", "Local 1/2", "Full 1/2"};
-                setRow(6, "Diffusion", bloomLbls[Math.max(0, Math.min(6, p.bloom))]);
+                setRow(6, "Diffusion", bloomLbls[getLogicalBloomIndex(p.bloom)]);
             }
         }
         if (currentPage == 6) {
@@ -749,6 +753,17 @@ public class MenuController {
         if (page == 6) return 1;
         if (page == 7) return 2;
         return 3;
+    }
+
+    private TextView tvStatusText;
+
+    private static final int[] BLOOM_LOGICAL_TO_INTERNAL = {0, 5, 6, 1, 2, 3, 4};
+
+    private int getLogicalBloomIndex(int internalBloom) {
+        for (int i = 0; i < BLOOM_LOGICAL_TO_INTERNAL.length; i++) {
+            if (BLOOM_LOGICAL_TO_INTERNAL[i] == internalBloom) return i;
+        }
+        return 0;
     }
 
     private TextView makeTabHeader(Context ctx, String text) {

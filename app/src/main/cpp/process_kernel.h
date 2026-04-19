@@ -67,22 +67,22 @@ inline void apply_bloom_halation(
     // 1. Resolution-Aware Alphas & Intensities
     int alpha, b_mix;
     
-    if (bloom == 1) {        // Local 1/8 (Tight radius, extremely subtle mix)
+    if (bloom == 5) {        // Local 1/8 (Tight radius, extremely subtle mix)
         alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
         b_mix = 45;
-    } else if (bloom == 2) { // Full 1/8 (Wide radius, extremely subtle mix)
+    } else if (bloom == 6) { // Full 1/8 (Wide radius, extremely subtle mix)
         alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
         b_mix = 45;
-    } else if (bloom == 3) { // Local 1/4 (Tight radius, subtle mix)
+    } else if (bloom == 1) { // Local 1/4 (Tight radius, subtle mix)
         alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
         b_mix = 90;
-    } else if (bloom == 4) { // Full 1/4 (Wide radius, subtle mix)
+    } else if (bloom == 2) { // Full 1/4 (Wide radius, subtle mix)
         alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
         b_mix = 90;
-    } else if (bloom == 5) { // Local 1/2 (Tight radius, heavy mix)
+    } else if (bloom == 3) { // Local 1/2 (Tight radius, heavy mix)
         alpha = (scaleDenom == 4) ? 180 : ((scaleDenom == 2) ? 210 : 230);
         b_mix = 160;
-    } else if (bloom == 6) { // Full 1/2 (Wide radius, heavy mix)
+    } else if (bloom == 4) { // Full 1/2 (Wide radius, heavy mix)
         alpha = (scaleDenom == 4) ? 230 : ((scaleDenom == 2) ? 245 : 252);
         b_mix = 160;
     } else {
