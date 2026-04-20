@@ -99,7 +99,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean isReady = false;
     private int displayState = 0; 
     
-    private boolean prefShowFocusMeter = true;
+
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
@@ -587,7 +587,7 @@ public void onEnterPressed() {
                     setHUDVisibility(View.GONE);
                     if (focusMeter != null) focusMeter.setVisibility(View.VISIBLE);
                 }
-                return true;
+                return; // FIXED: Changed from 'return true' to just 'return'
             } else {
                 // <--- CHANGED: Replaced HUD hiding with Dial Lock toggle
                 isDialLocked = !isDialLocked;
