@@ -592,7 +592,9 @@ public void onEnterPressed() {
     }
 
     @Override
-    public void onUpPressed() {
+    public boolean onUpPressed() {
+        if (isMagnifierActive) return false;
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
             int pos = menuController.getNameCursorPos();
@@ -602,21 +604,24 @@ public void onEnterPressed() {
             if (idx >= MenuController.CHARSET.length()) idx = 0;
             buf[pos] = MenuController.CHARSET.charAt(idx);
             hudController.update();
-            return;
+            return true;
         }
         
-        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleUp(); return; }
+        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleUp(); return true; }
         
-        if (isProcessing || calibController.isWaiting()) return;
+        if (isProcessing || calibController.isWaiting()) return true;
         
-        if (calibController.handleUp()) return;
+        if (calibController.handleUp()) return true;
 
-        if (menuController.isOpen()) { menuController.handleUp(); return; }
+        if (menuController.isOpen()) { menuController.handleUp(); return true; }
         navigateHomeSpatial(ScalarInput.ISV_KEY_UP);
+        return true;
     }
 
     @Override
-    public void onDownPressed() {
+    public boolean onDownPressed() {
+        if (isMagnifierActive) return false;
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
             int pos = menuController.getNameCursorPos();
@@ -626,32 +631,35 @@ public void onEnterPressed() {
             if (idx < 0) idx = MenuController.CHARSET.length() - 1;
             buf[pos] = MenuController.CHARSET.charAt(idx);
             hudController.update();
-            return;
+            return true;
         }
         
-        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleDown(); return; }
+        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleDown(); return true; }
         
-        if (isProcessing) return;
+        if (isProcessing) return true;
         
-        if (calibController.handleDown()) return;
+        if (calibController.handleDown()) return true;
 
-        if (menuController.isOpen()) { menuController.handleDown(); return; }
+        if (menuController.isOpen()) { menuController.handleDown(); return true; }
         navigateHomeSpatial(ScalarInput.ISV_KEY_DOWN);
+        return true;
     }
 
     @Override
-    public void onLeftPressed() {
+    public boolean onLeftPressed() {
+        if (isMagnifierActive) return false;
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
             hudController.update();
-            return;
+            return true;
         }
         
-        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleLeft(); return; }
-        if (isProcessing) return;
-        if (calibController.handleLeft()) return;
+        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleLeft(); return true; }
+        if (isProcessing) return true;
+        if (calibController.handleLeft()) return true;
 
-        if (menuController.isOpen()) { menuController.handleLeft(); return; }
+        if (menuController.isOpen()) { menuController.handleLeft(); return true; }
         if (!playbackController.isActive() && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.max(0.0f, virtualFocusRatio - 0.02f);
             if (focusMeter != null) focusMeter.update(virtualFocusRatio, virtualAperture, lensManager.getCurrentFocalLength(), false, lensManager.getCurrentPoints(), getCircleOfConfusion());
@@ -660,20 +668,23 @@ public void onEnterPressed() {
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_LEFT);
         }
+        return true;
     }
 
     @Override
-    public void onRightPressed() {
+    public boolean onRightPressed() {
+        if (isMagnifierActive) return false;
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(1);
             hudController.update();
-            return;
+            return true;
         }
         
-        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleRight(); return; }
-        if (isProcessing) return;
-        if (calibController.handleRight()) return;
-        if (menuController.isOpen()) { menuController.handleRight(); return; } 
+        if (hudController.isActive() && !menuController.isNamingMode()) { hudController.handleRight(); return true; }
+        if (isProcessing) return true;
+        if (calibController.handleRight()) return true;
+        if (menuController.isOpen()) { menuController.handleRight(); return true; } 
         
         if (!playbackController.isActive() && mDialMode == DIAL_MODE_FOCUS && lensManager != null && lensManager.isCurrentProfileManual()) {
             virtualFocusRatio = Math.min(1.0f, virtualFocusRatio + 0.02f);
@@ -683,6 +694,7 @@ public void onEnterPressed() {
         } else {
             navigateHomeSpatial(ScalarInput.ISV_KEY_RIGHT);
         }
+        return true;
     }
 
     @Override
@@ -693,11 +705,11 @@ public void onEnterPressed() {
         }
 
         int action = 0;
-        if (keyId.equals("C1")) action = rm.getPrefC1();
-        else if (keyId.equals("C2")) action = rm.getPrefC2();
-        else if (keyId.equals("C3")) action = rm.getPrefC3();
-        else if (keyId.equals("AEL")) action = rm.getPrefAel();
-        else if (keyId.equals("FN")) action = rm.getPrefFn();
+        if (keyId.equals("C1")) action = recipeManager.getPrefC1();
+        else if (keyId.equals("C2")) action = recipeManager.getPrefC2();
+        else if (keyId.equals("C3")) action = recipeManager.getPrefC3();
+        else if (keyId.equals("AEL")) action = recipeManager.getPrefAel();
+        else if (keyId.equals("FN")) action = recipeManager.getPrefFn();
 
         if (action == 0) return false; // OFF (Let Sony OS handle natively)
 
@@ -709,15 +721,15 @@ public void onEnterPressed() {
             isMagnifierActive = !isMagnifierActive;
             return false; // Return false so the Sony OS actually triggers its hardware zoom natively!
         } else if (action == 3) { // TOGGLE FOCUS METER
-            host.setPrefFocusMeter(!host.isPrefFocusMeter());
+            setPrefFocusMeter(!isPrefFocusMeter());
             updateMainHUD();
             return true;
         } else if (action == 4) { // TOGGLE CINEMA MATTES
-            host.setPrefCinemaMattes(!host.isPrefCinemaMattes());
+            setPrefCinemaMattes(!isPrefCinemaMattes());
             updateMainHUD();
             return true;
         } else if (action == 5) { // TOGGLE GRID LINES
-            host.setPrefGridLines(!host.isPrefGridLines());
+            setPrefGridLines(!isPrefGridLines());
             updateMainHUD();
             return true;
         }
