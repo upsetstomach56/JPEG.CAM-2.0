@@ -414,8 +414,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    @Override 
+    private boolean isMagnifierActive = false; // Tracks if Sony OS needs the D-Pad
+
+    @Override
     public void onShutterHalfPressed() {
+        isMagnifierActive = false; // Always lock the D-Pad back to the app on half-press
         if (playbackController.isActive()) { playbackController.exit(); return; }
         if (menuController.isOpen()) { menuController.close(); return; }
         if (isProcessing) return; 
@@ -689,11 +692,36 @@ public void onEnterPressed() {
             return false; 
         }
 
-        // TEMPORARY: Keep your ISO jump working for ALL custom buttons until Chunk 3
-        mDialMode = DIAL_MODE_ISO;
-        updateMainHUD();
-        
-        return true; // We return true to tell the Sony OS "We used this button, don't do your default action!"
+        int action = 0;
+        if (keyId.equals("C1")) action = rm.getPrefC1();
+        else if (keyId.equals("C2")) action = rm.getPrefC2();
+        else if (keyId.equals("AEL")) action = rm.getPrefAel();
+        else if (keyId.equals("FN")) action = rm.getPrefFn();
+
+        if (action == 0) return false; // OFF (Let Sony OS handle natively)
+
+        if (action == 1) { // ISO MENU
+            mDialMode = DIAL_MODE_ISO;
+            updateMainHUD();
+            return true;
+        } else if (action == 2) { // FOCUS MAGNIFIER (D-Pad Unlocker)
+            isMagnifierActive = !isMagnifierActive;
+            return false; // Return false so the Sony OS actually triggers its hardware zoom natively!
+        } else if (action == 3) { // TOGGLE FOCUS METER
+            host.setPrefFocusMeter(!host.isPrefFocusMeter());
+            updateMainHUD();
+            return true;
+        } else if (action == 4) { // TOGGLE CINEMA MATTES
+            host.setPrefCinemaMattes(!host.isPrefCinemaMattes());
+            updateMainHUD();
+            return true;
+        } else if (action == 5) { // TOGGLE GRID LINES
+            host.setPrefGridLines(!host.isPrefGridLines());
+            updateMainHUD();
+            return true;
+        }
+
+        return false;
     }
     
     @Override 

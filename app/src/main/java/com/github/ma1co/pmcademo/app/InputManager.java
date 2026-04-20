@@ -15,11 +15,11 @@ public class InputManager {
         void onDeletePressed();
         void onMenuPressed();
         void onEnterPressed();
-        void onUpPressed();
-        void onDownPressed();
-        void onLeftPressed();
-        void onRightPressed();
-        boolean onCustomButtonPressed(String keyId); // <-- CHANGED: Now passes ID and returns true if consumed
+        boolean onUpPressed();
+        boolean onDownPressed();
+        boolean onLeftPressed();
+        boolean onRightPressed();
+        boolean onCustomButtonPressed(String keyId);
         
         // --- 3-DIAL SETUP RESTORED ---
         void onFrontDialRotated(int direction);
@@ -63,20 +63,16 @@ public class InputManager {
             return true;
         }
         if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            listener.onUpPressed();
-            return true;
+            return listener.onUpPressed();
         }
         if (sc == ScalarInput.ISV_KEY_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-            listener.onDownPressed();
-            return true;
+            return listener.onDownPressed();
         }
         if (sc == ScalarInput.ISV_KEY_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-            listener.onLeftPressed();
-            return true;
+            return listener.onLeftPressed();
         }
         if (sc == ScalarInput.ISV_KEY_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            listener.onRightPressed();
-            return true;
+            return listener.onRightPressed();
         }
 
         // --- APP-SPECIFIC CUSTOM BUTTON ROUTER ---
