@@ -103,8 +103,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
-    private boolean prefShowDiptych = false; // <--- ADDED
-    private int diptychState = 0;            // <--- ADDED (0 = left, 1 = right)
+    private boolean prefShowDiptych = false; 
+    private int diptychState = 0;            
+    private String diptychLeftPath = null;   // <--- ADDED
 
     private LensProfileManager lensManager;
     private List<String> availableLenses = new ArrayList<String>();
@@ -370,9 +371,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 
                 long currentSize = f.length();
                 if (currentSize > 0 && currentSize == lastSize[0]) {
-                    File outDir = Filepaths.getGradedDir();
-                    // --- CHANGED: Added prefShowCinemaMattes to the end ---
-                    mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes);
+                    // --- DIPTYCH INTERCEPT ---
+                    if (prefShowDiptych) {
+                        handleDiptychCapture(path);
+                    } else {
+                        File outDir = Filepaths.getGradedDir();
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes);
+                    }
                 } else if (retries[0] < 30) {
                     lastSize[0] = currentSize;
                     retries[0]++;
@@ -385,6 +390,111 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         };
         
         uiHandler.postDelayed(checker, 200);
+    }
+
+    private void handleDiptychCapture(final String newPath) {
+        if (diptychState == 0) {
+            // SHOT 1: Save the path and update the UI to frame the right side
+            diptychLeftPath = newPath;
+            diptychState = 1;
+            isProcessing = false; // Free the scanner for the next shot
+            
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText("LEFT SAVED. SHOOT RIGHT.");
+                        tvTopStatus.setTextColor(Color.GREEN);
+                    }
+                    updateMainHUD();
+                }
+            });
+        } else {
+            // SHOT 2: We have both halves! 
+            final String rightPath = newPath;
+            final String leftPath = diptychLeftPath;
+            
+            // Reset state machine for the next pair
+            diptychState = 0;
+            diptychLeftPath = null;
+            
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText("STITCHING DIPTYCH...");
+                        tvTopStatus.setTextColor(Color.YELLOW);
+                    }
+                    updateMainHUD();
+                }
+            });
+
+            // Perform heavy stitching on a background thread to keep UI alive
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        // 1. Determine safe proxy resolution to prevent OOM
+                        int qIdx = recipeManager.getQualityIndex();
+                        int sampleSize = (qIdx == 0) ? 4 : (qIdx == 1) ? 2 : 1;
+                        if (sampleSize == 1) sampleSize = 2; // Hard override: Never stitch 24MP natively in Java
+
+                        BitmapFactory.Options opts = new BitmapFactory.Options();
+                        opts.inSampleSize = sampleSize;
+                        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                        
+                        // 2. Decode bounds to get final dimensions
+                        opts.inJustDecodeBounds = true;
+                        BitmapFactory.decodeFile(leftPath, opts);
+                        opts.inJustDecodeBounds = false;
+                        
+                        int w = opts.outWidth;
+                        int h = opts.outHeight;
+                        int mid = w / 2;
+                        
+                        // 3. Create proxy workspace
+                        Bitmap composite = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                        android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
+                        
+                        // 4. Load Left, draw Left half, RECYCLE IMMEDIATELY
+                        Bitmap leftBmp = BitmapFactory.decodeFile(leftPath, opts);
+                        if (leftBmp != null) {
+                            android.graphics.Rect leftSrc = new android.graphics.Rect(0, 0, mid, h);
+                            android.graphics.Rect leftDst = new android.graphics.Rect(0, 0, mid, h);
+                            canvas.drawBitmap(leftBmp, leftSrc, leftDst, null);
+                            leftBmp.recycle(); 
+                        }
+                        
+                        // 5. Load Right, draw Right half, RECYCLE IMMEDIATELY
+                        Bitmap rightBmp = BitmapFactory.decodeFile(rightPath, opts);
+                        if (rightBmp != null) {
+                            android.graphics.Rect rightSrc = new android.graphics.Rect(mid, 0, w, h);
+                            android.graphics.Rect rightDst = new android.graphics.Rect(mid, 0, w, h);
+                            canvas.drawBitmap(rightBmp, rightSrc, rightDst, null);
+                            rightBmp.recycle();
+                        }
+                        
+                        // 6. Save composite to a temporary file
+                        File tempFile = new File(Environment.getExternalStorageDirectory(), "DCIM/DIPTYCH_TEMP.JPG");
+                        java.io.FileOutputStream out = new java.io.FileOutputStream(tempFile);
+                        composite.compress(Bitmap.CompressFormat.JPEG, 95, out);
+                        out.close();
+                        composite.recycle(); 
+                        
+                        // 7. Send the stitched file through the standard Recipe/LUT pipeline!
+                        File outDir = Filepaths.getGradedDir();
+                        mProcessor.processJpeg(tempFile.getAbsolutePath(), outDir.getAbsolutePath(), 
+                                               recipeManager.getQualityIndex(), prefJpegQuality, 
+                                               recipeManager.getCurrentProfile(), prefShowCinemaMattes);
+                        
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        isProcessing = false;
+                        runOnUiThread(new Runnable() {
+                            public void run() { updateMainHUD(); }
+                        });
+                    }
+                }
+            }).start();
+        }
     }
 
     private void triggerLutPreload() {
