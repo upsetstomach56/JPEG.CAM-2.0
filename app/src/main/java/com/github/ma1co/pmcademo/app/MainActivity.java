@@ -858,6 +858,11 @@ public void onEnterPressed() {
             return true;
         }
         
+        if (prefShowDiptych && diptychState == 1) {
+            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(true);
+            return true;
+        }
+        
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             menuController.advanceNameCursor(-1);
             hudController.update();
@@ -885,6 +890,11 @@ public void onEnterPressed() {
         if (cameraManager != null && cameraManager.isPreviewMagnificationActive()
                 && !playbackController.isActive() && !menuController.isOpen() && !hudController.isActive()) {
             cameraManager.movePreviewMagnification(1, 0);
+            return true;
+        }
+        
+        if (prefShowDiptych && diptychState == 1) {
+            if (diptychOverlay != null) diptychOverlay.setThumbOnLeft(false);
             return true;
         }
         
