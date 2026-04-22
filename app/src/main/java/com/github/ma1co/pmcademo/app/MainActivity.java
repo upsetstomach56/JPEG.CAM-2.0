@@ -105,7 +105,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private int prefJpegQuality = 95;
     private boolean prefShowDiptych = false; 
     private int diptychState = 0;            
-    private String diptychLeftPath = null;   // <--- ADDED
+    private String diptychLeftFilename = null;
+    private String diptychRightFilename = null;
 
     private Bitmap getDiptychThumbnail(String path) {
         try {
@@ -113,8 +114,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // Safely downscale 24MP by 8x (approx 750px wide) for the UI Overlay
             opts.inSampleSize = 8; 
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            opts.inPurgeable = true;
+            opts.inInputShareable = true;
             return BitmapFactory.decodeFile(path, opts);
-        } catch (Exception e) {
+        } catch (Throwable t) {
             return null;
         }
     }
@@ -327,7 +330,69 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
             @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
-            @Override public void onProcessFinished(String res) { isProcessing = false; runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); }
+        @Override public void onProcessFinished(String res) { 
+            if (prefShowDiptych) {
+                if ("SAVED".equals(res)) {
+                    if (diptychState == 1) {
+                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychLeftFilename).getAbsolutePath();
+                        new Thread(new Runnable() {
+                            public void run() {
+                                final Bitmap thumb = getDiptychThumbnail(gradedLeft);
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        isProcessing = false;
+                                        if (tvTopStatus != null) {
+                                            tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP.");
+                                            tvTopStatus.setTextColor(Color.GREEN);
+                                        }
+                                        if (diptychOverlay != null) {
+                                            diptychOverlay.setThumbnail(thumb);
+                                            diptychOverlay.setState(1);
+                                        }
+                                        updateMainHUD();
+                                    }
+                                });
+                            }
+                        }).start();
+                        return;
+                    } else if (diptychState == 2) {
+                        final String gradedLeft = new File(Filepaths.getGradedDir(), diptychLeftFilename).getAbsolutePath();
+                        final String gradedRight = new File(Filepaths.getGradedDir(), diptychRightFilename).getAbsolutePath();
+                        
+                        diptychState = 0;
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+                                if (diptychOverlay != null) diptychOverlay.setState(0);
+                                if (tvTopStatus != null) {
+                                    tvTopStatus.setText("STITCHING DIPTYCH...");
+                                    tvTopStatus.setTextColor(Color.YELLOW);
+                                }
+                                updateMainHUD();
+                            }
+                        });
+                        
+                        final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
+                        new Thread(new Runnable() {
+                            public void run() {
+                                performDiptychStitch(gradedLeft, gradedRight, firstShotLeft);
+                            }
+                        }).start();
+                        return;
+                    }
+                } else {
+                    diptychState = 0;
+                    diptychLeftFilename = null;
+                    diptychRightFilename = null;
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (diptychOverlay != null) diptychOverlay.setState(0);
+                        }
+                    });
+                }
+            }
+            isProcessing = false; 
+            runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } }); 
+        }
         });
         
         mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
@@ -385,7 +450,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 if (currentSize > 0 && currentSize == lastSize[0]) {
                     // --- DIPTYCH INTERCEPT ---
                     if (prefShowDiptych) {
-                        handleDiptychCapture(path);
+                    if (diptychState == 0) {
+                        diptychLeftFilename = f.getName();
+                        diptychState = 1;
+                        File outDir = Filepaths.getGradedDir();
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
+                    } else if (diptychState == 1) {
+                        diptychRightFilename = f.getName();
+                        diptychState = 2; // Stitching
+                        File outDir = Filepaths.getGradedDir();
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true);
+                    }
                     } else {
                         File outDir = Filepaths.getGradedDir();
                         mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false);
@@ -404,183 +479,82 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.postDelayed(checker, 200);
     }
 
-    private void handleDiptychCapture(final String newPath) {
-        if (diptychState == 0) {
-            // SHOT 1: Save the path and update the UI to frame the right side
-            // SHOT 1: Save the path and extract the thumbnail for the UI overlay
-            diptychLeftPath = newPath;
-            diptychState = 1;
+    private void performDiptychStitch(String leftPath, String rightPath, boolean firstShotLeft) {
+        try {
+            String pathL = firstShotLeft ? leftPath : rightPath;
+            String pathR = firstShotLeft ? rightPath : leftPath;
             
-            final Bitmap thumb = getDiptychThumbnail(newPath);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            // Decode the already downscaled and graded images
+            Bitmap bmpL = BitmapFactory.decodeFile(pathL, opts);
+            Bitmap bmpR = BitmapFactory.decodeFile(pathR, opts);
             
-            isProcessing = false; // Free the scanner for the next shot
+            if (bmpL == null || bmpR == null) throw new Exception("Failed to decode graded images.");
+            
+            int lW = bmpL.getWidth();
+            int lH = bmpL.getHeight();
+            int lMid = lW / 2;
+            
+            int rW = bmpR.getWidth();
+            int rH = bmpR.getHeight();
+            int rMid = rW / 2;
+            
+            int finalW = lMid + (rW - rMid);
+            int finalH = Math.min(lH, rH);
+            
+            Bitmap composite = Bitmap.createBitmap(finalW, finalH, Bitmap.Config.RGB_565);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
+            
+            android.graphics.Rect srcL = new android.graphics.Rect(0, 0, lMid, lH);
+            android.graphics.Rect dstL = new android.graphics.Rect(0, 0, lMid, finalH);
+            canvas.drawBitmap(bmpL, srcL, dstL, null);
+            bmpL.recycle(); bmpL = null;
+            
+            android.graphics.Rect srcR = new android.graphics.Rect(rMid, 0, rW, rH);
+            android.graphics.Rect dstR = new android.graphics.Rect(lMid, 0, finalW, finalH);
+            canvas.drawBitmap(bmpR, srcR, dstR, null);
+            bmpR.recycle(); bmpR = null;
+            
+            // Draw analog center divider
+            android.graphics.Paint dividerPaint = new android.graphics.Paint();
+            dividerPaint.setColor(android.graphics.Color.BLACK);
+            dividerPaint.setStrokeWidth(Math.max(4, finalW / 400));
+            canvas.drawLine(lMid, 0, lMid, finalH, dividerPaint);
+            
+            File finalOut = new File(Filepaths.getGradedDir(), "DIPTYCH_" + new File(rightPath).getName());
+            java.io.FileOutputStream out = new java.io.FileOutputStream(finalOut);
+            composite.compress(Bitmap.CompressFormat.JPEG, prefJpegQuality, out);
+            out.close();
+            composite.recycle(); composite = null;
+            
+            // Delete the individual graded halves to keep the folder clean
+            new File(leftPath).delete();
+            new File(rightPath).delete();
             
             runOnUiThread(new Runnable() {
-                public void run() {
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
-                        tvTopStatus.setTextColor(Color.GREEN);
-                    }
-                    if (diptychOverlay != null) {
-                        diptychOverlay.setThumbnail(thumb);
-                        diptychOverlay.setState(1);
-                    }
-                    updateMainHUD();
-                }
-            });
-        } else {
-            // SHOT 2: We have both halves! 
-            final String rightPath = newPath;
-            final String leftPath = diptychLeftPath;
-            final boolean firstShotLeft = diptychOverlay != null && diptychOverlay.isThumbOnLeft();
-            
-            // Reset state machine for the next pair
-            diptychState = 0;
-            diptychLeftPath = null;
-            
-            runOnUiThread(new Runnable() {
-                public void run() {
-                    if (diptychOverlay != null) diptychOverlay.setState(0);
-                    if (tvTopStatus != null) {
-                        tvTopStatus.setText("STITCHING HIGH-RES DIPTYCH...");
-                        tvTopStatus.setTextColor(Color.YELLOW);
-                    }
-                    updateMainHUD();
-                }
-            });
-
-            // Perform heavy stitching on a background thread to keep UI alive
-            new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    try {
-                        // 1. Assign which file goes on which side based on the user's overlay placement
-                        final String pathLeftHalf = firstShotLeft ? leftPath : rightPath;
-                        final String pathRightHalf = firstShotLeft ? rightPath : leftPath;
-
-                        // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
-                        // We use the known-good GRADED directory to guarantee write permissions.
-                        File safeDir = Filepaths.getGradedDir();
-                        File proxyL = new File(safeDir, "PROXY_L.JPG");
-                        File proxyR = new File(safeDir, "PROXY_R.JPG");
-
-                        // Pre-flight checks to provide clear errors if something is locked
-                        if (!new File(pathLeftHalf).exists()) throw new Exception("Missing L input: " + pathLeftHalf);
-                        if (!new File(pathRightHalf).exists()) throw new Exception("Missing R input: " + pathRightHalf);
-                        try { new java.io.FileOutputStream(proxyL).close(); } catch (Exception e) { throw new Exception("Cannot write proxyL"); }
-                        try { new java.io.FileOutputStream(proxyR).close(); } catch (Exception e) { throw new Exception("Exception on write proxyR"); }
-
-                        LutEngine engine = new LutEngine();
-                        RTLProfile currentProfile = recipeManager.getCurrentProfile();
-
-                        // Texture Intercept
-                        if (MenuController.grainTextureFiles.size() > 0 && currentProfile.grainSize >= 0 && currentProfile.grainSize < MenuController.grainTextureFiles.size()) {
-                            engine.loadGrainTexture(MenuController.grainTextureFiles.get(currentProfile.grainSize));
-                        }
-
-                        // Safely step down physical effects for the smaller canvas
-                        int finalGrainSize = Math.max(0, currentProfile.grainSize - 1);
-                        int[] bloomMap = {0, 5, 6, 1, 2, 3, 4};
-                        int currentBloomIdx = 0;
-                        for (int i = 0; i < bloomMap.length; i++) {
-                            if (bloomMap[i] == currentProfile.bloom) currentBloomIdx = i;
-                        }
-                        int finalBloom = bloomMap[Math.max(0, currentBloomIdx - 1)];
-                        int scale = (recipeManager.getQualityIndex() == 0) ? 4 : (recipeManager.getQualityIndex() == 2 ? 1 : 2);
-                        int safeJpegQuality = prefJpegQuality;
-                        if (scale == 4) safeJpegQuality = Math.min(85, prefJpegQuality);
-                        else if (scale == 2) safeJpegQuality = Math.min(90, prefJpegQuality);
-
-                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), scale, 
-                            currentProfile.opacity, currentProfile.grain, finalGrainSize,
-                            currentProfile.vignette, currentProfile.rollOff, currentProfile.colorChrome, 
-                            currentProfile.chromeBlue, currentProfile.shadowToe, currentProfile.subtractiveSat, 
-                            currentProfile.halation, finalBloom, safeJpegQuality, false);
-                        if (!lOk) throw new Exception("C++ failed to generate left proxy.");
-                        
-                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), scale, 
-                            currentProfile.opacity, currentProfile.grain, finalGrainSize,
-                            currentProfile.vignette, currentProfile.rollOff, currentProfile.colorChrome, 
-                            currentProfile.chromeBlue, currentProfile.shadowToe, currentProfile.subtractiveSat, 
-                            currentProfile.halation, finalBloom, safeJpegQuality, false);
-                        if (!rOk) throw new Exception("C++ failed to generate right proxy.");
-
-                        // 3. STITCH THE HALVES IN JAVA - MINIMAL PROCESSING
-                        BitmapFactory.Options opts = new BitmapFactory.Options();
-                        opts.inPreferredConfig = Bitmap.Config.RGB_565;
-                        // No additional downsampling - rely on C++ downscaling to 6MP
-                        Bitmap bmpL = BitmapFactory.decodeFile(proxyL.getAbsolutePath(), opts);
-                        Bitmap bmpR = BitmapFactory.decodeFile(proxyR.getAbsolutePath(), opts);
-
-                        if (bmpL == null || bmpR == null) throw new Exception("Failed to decode C++ proxies.");
-
-                        int lW = bmpL.getWidth();
-                        int lH = bmpL.getHeight();
-                        int lMid = lW / 2;
-
-                        int rW = bmpR.getWidth();
-                        int rH = bmpR.getHeight();
-                        int rMid = rW / 2;
-
-                        int finalW = lMid + (rW - rMid);
-                        int finalH = Math.min(lH, rH);
-
-                        Bitmap composite = Bitmap.createBitmap(finalW, finalH, Bitmap.Config.RGB_565);
-                        android.graphics.Canvas canvas = new android.graphics.Canvas(composite);
-
-                        android.graphics.Rect srcL = new android.graphics.Rect(0, 0, lMid, lH);
-                        android.graphics.Rect dstL = new android.graphics.Rect(0, 0, lMid, finalH);
-                        canvas.drawBitmap(bmpL, srcL, dstL, null);
-                        bmpL.recycle(); bmpL = null;
-
-                        android.graphics.Rect srcR = new android.graphics.Rect(rMid, 0, rW, rH);
-                        android.graphics.Rect dstR = new android.graphics.Rect(lMid, 0, finalW, finalH);
-                        canvas.drawBitmap(bmpR, srcR, dstR, null);
-                        bmpR.recycle(); bmpR = null;
-
-                        // Draw analog center divider
-                        android.graphics.Paint dividerPaint = new android.graphics.Paint();
-                        dividerPaint.setColor(android.graphics.Color.BLACK);
-                        dividerPaint.setStrokeWidth(Math.max(4, finalW / 400));
-                        canvas.drawLine(lMid, 0, lMid, finalH, dividerPaint);
-
-                        // 4. Save directly to GRADED folder
-                        File finalOut = new File(safeDir, "DIPTYCH_" + new File(rightPath).getName());
-                        java.io.FileOutputStream out = new java.io.FileOutputStream(finalOut);
-                        composite.compress(Bitmap.CompressFormat.JPEG, safeJpegQuality, out);
-                        out.close();
-                        composite.recycle(); composite = null;
-
-                        // Cleanup workspace (Do NOT delete original DCIM files)
-                        proxyL.delete(); proxyR.delete();
-                        
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                isProcessing = false;
-                                if (tvTopStatus != null) {
-                                    tvTopStatus.setText("DIPTYCH SAVED");
-                                    tvTopStatus.setTextColor(Color.WHITE);
-                                }
-                                updateMainHUD();
-                            }
-                        });
-                                               
-                    } catch (final Exception e) {
-                        e.printStackTrace();
-                        isProcessing = false;
-                        runOnUiThread(new Runnable() {
-                            public void run() { 
-                                if (tvTopStatus != null) {
-                                    tvTopStatus.setText("STITCH FAILED");
-                                    tvTopStatus.setTextColor(Color.RED);
-                                }
-                                updateMainHUD(); 
-                            }
-                        });
+                    isProcessing = false;
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText("DIPTYCH SAVED");
+                        tvTopStatus.setTextColor(Color.WHITE);
                     }
+                    updateMainHUD();
                 }
-            }).start();
+            });
+        } catch (final Exception e) {
+            e.printStackTrace();
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    isProcessing = false;
+                    if (tvTopStatus != null) {
+                        tvTopStatus.setText("STITCH FAILED");
+                        tvTopStatus.setTextColor(Color.RED);
+                    }
+                    updateMainHUD();
+                }
+            });
         }
     }
 
@@ -1995,7 +1969,8 @@ public void onEnterPressed() {
         prefShowDiptych = v; 
         if (!v) {
             diptychState = 0;
-            diptychLeftPath = null;
+            diptychLeftFilename = null;
+            diptychRightFilename = null;
             if (diptychOverlay != null) diptychOverlay.setState(0);
         }
         updateMainHUD(); 

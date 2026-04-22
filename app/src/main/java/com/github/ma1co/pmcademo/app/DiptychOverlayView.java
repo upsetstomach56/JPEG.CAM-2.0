@@ -68,23 +68,31 @@ public class DiptychOverlayView extends View {
         if (state == 0) {
             // On start (waiting for first shot), darken the right half
             canvas.drawRect(mid, 0, w, h, darkPaint);
-        } else if (state == 1 && thumbnail != null && !thumbnail.isRecycled()) {
-            int tW = thumbnail.getWidth();
-            int tH = thumbnail.getHeight();
-            int tMid = tW / 2;
-            
-            Rect srcRect;
-            Rect dstRect;
-            
+        } else if (state == 1) {
             if (thumbOnLeft) {
-                srcRect = new Rect(0, 0, tMid, tH);
-                dstRect = new Rect(0, 0, mid, h);
+                canvas.drawRect(0, 0, mid, h, darkPaint);
             } else {
-                srcRect = new Rect(tMid, 0, tW, tH);
-                dstRect = new Rect(mid, 0, w, h);
+                canvas.drawRect(mid, 0, w, h, darkPaint);
             }
-            
-            canvas.drawBitmap(thumbnail, srcRect, dstRect, thumbPaint);
+
+            if (thumbnail != null && !thumbnail.isRecycled()) {
+                int tW = thumbnail.getWidth();
+                int tH = thumbnail.getHeight();
+                int tMid = tW / 2;
+                
+                Rect srcRect;
+                Rect dstRect;
+                
+                if (thumbOnLeft) {
+                    srcRect = new Rect(0, 0, tMid, tH);
+                    dstRect = new Rect(0, 0, mid, h);
+                } else {
+                    srcRect = new Rect(tMid, 0, tW, tH);
+                    dstRect = new Rect(mid, 0, w, h);
+                }
+                
+                canvas.drawBitmap(thumbnail, srcRect, dstRect, thumbPaint);
+            }
         }
         
         // Always draw the center framing line
