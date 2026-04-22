@@ -11,6 +11,7 @@ import android.view.View;
 public class DiptychOverlayView extends View {
     private Paint linePaint;
     private Paint thumbPaint;
+    private Paint darkPaint;
     private Bitmap thumbnail;
     private boolean thumbOnLeft = true;
     private int state = 0; // 0: Need Shot 1, 1: Need Shot 2
@@ -24,6 +25,10 @@ public class DiptychOverlayView extends View {
         
         thumbPaint = new Paint();
         thumbPaint.setAlpha(140); // ~55% opacity so you can still see through it
+        
+        darkPaint = new Paint();
+        darkPaint.setColor(Color.BLACK);
+        darkPaint.setAlpha(70); // ~27% opacity for darkening
     }
 
     public void setState(int state) {
@@ -59,7 +64,11 @@ public class DiptychOverlayView extends View {
         int h = getHeight();
         int mid = w / 2;
 
-        if (state == 1 && thumbnail != null && !thumbnail.isRecycled()) {
+        // Darken the side where the user should NOT take the photo
+        if (state == 0) {
+            // On start (waiting for first shot), darken the right half
+            canvas.drawRect(mid, 0, w, h, darkPaint);
+        } else if (state == 1 && thumbnail != null && !thumbnail.isRecycled()) {
             int tW = thumbnail.getWidth();
             int tH = thumbnail.getHeight();
             int tMid = tW / 2;

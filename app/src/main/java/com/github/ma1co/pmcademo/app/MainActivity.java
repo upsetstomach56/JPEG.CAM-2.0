@@ -458,7 +458,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         final String pathLeftHalf = firstShotLeft ? leftPath : rightPath;
                         final String pathRightHalf = firstShotLeft ? rightPath : leftPath;
 
-                        // 2. Use C++ to safely downscale the massive 24MP images to 6MP proxies 
+                        // 2. Use C++ to safely downscale the massive 24MP images to smaller proxies 
                         // We use the known-good GRADED directory to guarantee write permissions.
                         File safeDir = Filepaths.getGradedDir();
                         File proxyL = new File(safeDir, "PROXY_L.JPG");
@@ -471,16 +471,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                         try { new java.io.FileOutputStream(proxyR).close(); } catch (Exception e) { throw new Exception("Exception on write proxyR"); }
 
                         LutEngine engine = new LutEngine();
-                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        // Increased downscale factor from 2 to 4 for better memory efficiency
+                        // This creates ~1.5MP proxies instead of ~6MP
+                        boolean lOk = engine.applyLutToJpeg(pathLeftHalf, proxyL.getAbsolutePath(), 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
                         if (!lOk) throw new Exception("C++ failed to generate left proxy.");
                         
-                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
+                        boolean rOk = engine.applyLutToJpeg(pathRightHalf, proxyR.getAbsolutePath(), 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false);
                         if (!rOk) throw new Exception("C++ failed to generate right proxy.");
 
-                        // 3. STITCH THE HALVES IN JAVA
+                        // 3. STITCH THE HALVES IN JAVA - MORE MEMORY EFFICIENT
                         BitmapFactory.Options opts = new BitmapFactory.Options();
                         opts.inPreferredConfig = Bitmap.Config.RGB_565;
 
+                        // Decode with inSampleSize to reduce memory usage
+                        opts.inSampleSize = 2; // Further reduce by 2x for stitching (total 8x from original)
                         Bitmap bmpL = BitmapFactory.decodeFile(proxyL.getAbsolutePath(), opts);
                         Bitmap bmpR = BitmapFactory.decodeFile(proxyR.getAbsolutePath(), opts);
 
