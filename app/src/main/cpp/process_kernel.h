@@ -96,6 +96,11 @@ inline int procedural_grain_v16(
 
     int mask = (lum < 128) ? lum : 255 - lum;
     if (lum < 64) mask = (mask * lum) >> 6;
+    if (lum > 160) {
+        int highlight_fade = 256 - ((lum - 160) * 3);
+        if (highlight_fade < 0) highlight_fade = 0;
+        mask = (mask * highlight_fade) >> 8;
+    }
     return (noise * mask * s_grain) >> 15;
 }
 
@@ -574,6 +579,10 @@ inline void process_row_yuv(
         if (oldY != outY) {
             int r256 = (outY * inv_y_lut[oldY]) >> 8;
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
+        }
+
+        if (s_chrome == 0 && s_blue == 0 && s_sat == 0 && halation == 0 && cr > 0) {
+            cr = (cr * 196 + 128) >> 8;
         }
 
         if (s_grain > 0) {

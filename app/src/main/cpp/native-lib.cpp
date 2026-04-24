@@ -229,7 +229,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
     char timing[512];
     snprintf(timing, sizeof(timing),
-         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_scale=%d lut=%d cores=%d row_mode=%s",
+         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_scale=%d grain_hi_fade=1 neutral_cr=196 lut=%d cores=%d row_mode=%s",
          t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
          t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
          t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
