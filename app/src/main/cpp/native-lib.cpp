@@ -148,11 +148,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         }
     }
 
-    JSAMPROW rpx[1];
-    if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
-    for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
-    long long t_preload_done = get_time_ms();
-
     int opac_m = (opacity * 256) / 100;
     long long cx = cd.output_width / 2;
     long long cy_center = cd.output_height / 2;
@@ -164,37 +159,66 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     int grain_offset_x = (int)(fast_rand(&grain_layout_seed) & 4095);
     int grain_offset_y = (int)(fast_rand(&grain_layout_seed) & 4095);
 
-    int pr = 0; while(pr < (int)cd.output_height){
-        int rtp = std::min(CHK, (int)cd.output_height-pr);
-        for (int i = 0; i < rtp; i++) {
-            int ay = pr + i;
+    JSAMPROW rpx[1];
+    long long t_preload_done = get_time_ms();
+
+    bool row_stream_mode = (bloom <= 0 && halation <= 0);
+    if (row_stream_mode) {
+        while (cd.output_scanline < cd.output_height) {
+            int ay = cd.output_scanline;
+            rpx[0] = r[0];
+            jpeg_read_scanlines(&cd, rpx, 1);
+
             if (!applyCrop || (ay >= sk && ay < sk + fh)) {
-                unsigned char* win[21];
-                for (int w = 0; w < 21; w++) win[w] = r[i + w];
-                memcpy(orw[i], win[10], cd.output_width * 3);
-                
-                if (bloom > 0 || halation > 0) {
-                    apply_bloom_halation(win, orw[i], cd.output_width, ay, !use_rgb, bloom, halation,
-                        work_0, work_1, work_2, work_h, h_line, scaleDenom);
-                }
-                
                 if (use_rgb) {
-                    process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                    process_row_rgb(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                         grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, opac_m, map, nativeLut.data(),
                         nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
                         inv_y);
                 } else {
-                    process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                    process_row_yuv(r[0], cd.output_width, ay, cx, cy_center, vig_coef,
                         shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
                         grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, roll, inv_y);
                 }
+                jpeg_write_scanlines(&cc, rpx, 1);
             }
         }
-        for(int i=0; i<rtp; i++){ int ay=pr+i; if(!applyCrop||(ay>=sk && ay<sk+fh)){ rpx[0]=orw[i]; jpeg_write_scanlines(&cc,rpx,1); } }
-        unsigned char* tmpx[256]; for(int i=0; i<rtp; i++) tmpx[i]=r[i]; for(int i=0; i<BUF-rtp; i++) r[i]=r[i+rtp];
-        for(int i=0; i<rtp; i++){ int di=BUF-rtp+i; r[di]=tmpx[i]; if(cd.output_scanline<cd.output_height){ rpx[0]=r[di]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[di],r[di-1],rs); }
-        pr += rtp;
+    } else {
+        if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
+        for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
+        t_preload_done = get_time_ms();
+
+        int pr = 0; while(pr < (int)cd.output_height){
+            int rtp = std::min(CHK, (int)cd.output_height-pr);
+            for (int i = 0; i < rtp; i++) {
+                int ay = pr + i;
+                if (!applyCrop || (ay >= sk && ay < sk + fh)) {
+                    unsigned char* win[21];
+                    for (int w = 0; w < 21; w++) win[w] = r[i + w];
+                    memcpy(orw[i], win[10], cd.output_width * 3);
+
+                    apply_bloom_halation(win, orw[i], cd.output_width, ay, !use_rgb, bloom, halation,
+                        work_0, work_1, work_2, work_h, h_line, scaleDenom);
+
+                    if (use_rgb) {
+                        process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                            shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                            grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, opac_m, map, nativeLut.data(),
+                            nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                            inv_y);
+                    } else {
+                        process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                            shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                            grain, grainSize, scaleDenom, grain_seed, grain_offset_x, grain_offset_y, roll, inv_y);
+                    }
+                }
+            }
+            for(int i=0; i<rtp; i++){ int ay=pr+i; if(!applyCrop||(ay>=sk && ay<sk+fh)){ rpx[0]=orw[i]; jpeg_write_scanlines(&cc,rpx,1); } }
+            unsigned char* tmpx[256]; for(int i=0; i<rtp; i++) tmpx[i]=r[i]; for(int i=0; i<BUF-rtp; i++) r[i]=r[i+rtp];
+            for(int i=0; i<rtp; i++){ int di=BUF-rtp+i; r[di]=tmpx[i]; if(cd.output_scanline<cd.output_height){ rpx[0]=r[di]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[di],r[di-1],rs); }
+            pr += rtp;
+        }
     }
     long long t_rows_done = get_time_ms();
     int log_width = cd.output_width;
@@ -204,11 +228,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
     char timing[512];
     snprintf(timing, sizeof(timing),
-         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d lut=%d cores=%d",
+         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d lut=%d cores=%d row_mode=%s",
          t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
          t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
          t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
-         bloom, halation, grain, nativeLutSize, numCores);
+         bloom, halation, grain, nativeLutSize, numCores, row_stream_mode ? "stream" : "window");
     nativeLastTiming = timing;
     LOGD("TIMING %s", nativeLastTiming.c_str());
     return JNI_TRUE;

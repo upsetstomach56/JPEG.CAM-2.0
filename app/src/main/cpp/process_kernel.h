@@ -540,10 +540,10 @@ inline void process_row_yuv(
         }
 
         int cb = row[i+1] - 128, cr = row[i+2] - 128;
-        int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
 
         // --- OPTIMIZATION: Only run heavy color math if effects are ON ---
         if (s_chrome > 0 || s_blue > 0 || s_sat > 0) {
+            int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
             if (s_chrome > 0 && sat > 15) {
                 int drop = ((sat - 15) * s_chrome) >> 8;
                 if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
