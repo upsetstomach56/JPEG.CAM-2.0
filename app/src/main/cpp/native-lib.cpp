@@ -20,6 +20,7 @@
 std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
 std::vector<uint8_t> nativeGrainTexture;
+std::string nativeLastTiming;
 
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
@@ -53,6 +54,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); return JNI_TRUE; } stbi_image_free(id); } return JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jstring JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_getLastTimingNative(JNIEnv* env, jobject obj) {
+    return env->NewStringUTF(nativeLastTiming.c_str());
+}
+
 extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath,
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
@@ -60,13 +65,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     jint shadowToe, jint subtractiveSat, jint halation,
     jint bloom, jint jpegQuality, jboolean applyCrop, jint numCores) {
 
+    nativeLastTiming = "native_status=started";
     long long st = get_time_ms(); const char *ifn = env->GetStringUTFChars(inPath, NULL); const char *ofn = env->GetStringUTFChars(outPath, NULL);
     FILE *inf = fopen(ifn, "rb"), *ouf = fopen(ofn, "wb");
-    if(!inf||!ouf){ if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    if(!inf||!ouf){ nativeLastTiming = "native_status=open_failed"; if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
     long long t_open = get_time_ms();
 
     struct jpeg_decompress_struct cd; struct my_error_mgr jd; cd.err = jpeg_std_error(&jd.pub); jd.pub.error_exit = my_error_exit;
-    if(setjmp(jd.setjmp_buffer)){ jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    if(setjmp(jd.setjmp_buffer)){ nativeLastTiming = "native_status=decode_error"; jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
     jpeg_create_decompress(&cd); jpeg_stdio_src(&cd, inf); 
     
     // --- PRESERVE ALL SONY MARKERS ---
@@ -79,7 +85,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long t_decode_start = get_time_ms();
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
-    if(setjmp(jc.setjmp_buffer)){ jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    if(setjmp(jc.setjmp_buffer)){ nativeLastTiming = "native_status=compress_error"; jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
     jpeg_create_compress(&cc); jpeg_stdio_dest(&cc, ouf);
     
     int fh = cd.output_height, sk = 0; if(applyCrop){ fh=(int)(cd.output_width/2.71f); sk=(cd.output_height-fh)/2; }
@@ -104,6 +110,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     unsigned char* rb = (unsigned char*)malloc(BUF*rs);
     unsigned char* ob = (unsigned char*)malloc(CHK*rs);
     if (!rb || !ob) {
+        nativeLastTiming = "native_status=row_buffer_alloc_failed";
         if (rb) free(rb);
         if (ob) free(ob);
         jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc);
@@ -129,6 +136,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
         work_0 = (int*)malloc(ws_s); work_1 = (int*)malloc(ws_s); work_2 = (int*)malloc(ws_s);
         work_h = (int*)malloc(ws_s); h_line = (int*)malloc(ws_s);
         if (!work_0 || !work_1 || !work_2 || !work_h || !h_line) {
+            nativeLastTiming = "native_status=effect_buffer_alloc_failed";
             free(rb); free(ob);
             if(work_0) free(work_0); if(work_1) free(work_1); if(work_2) free(work_2);
             if(work_h) free(work_h); if(h_line) free(h_line);
@@ -194,11 +202,15 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     if (work_0) { free(work_0); free(work_1); free(work_2); free(work_h); free(h_line); }
     free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
-    LOGD("TIMING total=%lldms open=%lldms header=%lldms compress_setup=%lldms preload=%lldms rows_write=%lldms finish_encode=%lldms finish_decode=%lldms size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d lut=%d cores=%d",
+    char timing[512];
+    snprintf(timing, sizeof(timing),
+         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d lut=%d cores=%d",
          t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
          t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
          t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
          bloom, halation, grain, nativeLutSize, numCores);
+    nativeLastTiming = timing;
+    LOGD("TIMING %s", nativeLastTiming.c_str());
     return JNI_TRUE;
 }
 

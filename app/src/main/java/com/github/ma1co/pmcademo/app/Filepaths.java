@@ -75,9 +75,10 @@ public class Filepaths {
     public static File getRecipeDir() { File d = new File(getAppDir(), "RECIPES"); if (!d.exists()) d.mkdirs(); return d; }
     public static File getLensesDir() { File d = new File(getAppDir(), "LENSES"); if (!d.exists()) d.mkdirs(); return d; }
     public static File getGradedDir() { File d = new File(getAppDir(), "GRADED"); if (!d.exists()) d.mkdirs(); return d; }
+    public static File getLogDir() { File d = new File(getAppDir(), "LOGS"); if (!d.exists()) d.mkdirs(); return d; }
 
     public static void buildAppStructure() {
-        getAppDir(); getLutDir(); getRecipeDir(); getLensesDir(); getGradedDir(); getGrainDir();
+        getAppDir(); getLutDir(); getRecipeDir(); getLensesDir(); getGradedDir(); getGrainDir(); getLogDir();
     }
 
     // NEW: Extracts bundled starter files explicitly (Bypasses API 10 list() bug)

@@ -11,6 +11,7 @@ public class LutEngine {
     
     // NEW: Native hook for loading the 512x512 texture into C++
     private native boolean loadGrainTextureNative(String filePath);
+    private native String getLastTimingNative();
 
     // Signature matches C++ exactly: 16 total parameters after env/obj
     private native boolean processImageNative(
@@ -43,6 +44,11 @@ public class LutEngine {
                                  rollOff, colorChrome, chromeBlue, shadowToe,
                                  subtractiveSat, halation, bloom, quality,
                                  applyCrop, numCores); 
+    }
+
+    public String getLastNativeTiming() {
+        String timing = getLastTimingNative();
+        return timing == null ? "" : timing;
     }
 
     // NEW: Public wrapper to load the grain texture safely

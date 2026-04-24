@@ -5,8 +5,12 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.util.Log;
+import java.io.FileWriter;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class ImageProcessor {
     private LutEngine mEngine;
@@ -24,6 +28,58 @@ public class ImageProcessor {
         this.mContext = context;
         this.mCallback = callback;
         this.mEngine = new LutEngine();
+    }
+
+    private String cleanLogValue(String value) {
+        if (value == null) return "";
+        return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
+    }
+
+    private void appendProcessingTiming(File original, File outFile, String result,
+                                        long waitMs, long textureMs, long nativeMs, long javaTotalMs,
+                                        int qualityIdx, int scale, int finalJpegQuality,
+                                        int finalGrainSize, int finalBloom, int numCores,
+                                        RTLProfile p, boolean applyCrop, boolean isDiptych,
+                                        String nativeTiming) {
+        FileWriter writer = null;
+        try {
+            File logDir = Filepaths.getLogDir();
+            File logFile = new File(logDir, "processing_times.txt");
+            writer = new FileWriter(logFile, true);
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
+            writer.write(timestamp
+                    + "\tresult=" + cleanLogValue(result)
+                    + "\tfile=" + cleanLogValue(original.getName())
+                    + "\tinput_bytes=" + original.length()
+                    + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
+                    + "\tjava_total=" + javaTotalMs
+                    + "\twait=" + waitMs
+                    + "\ttexture=" + textureMs
+                    + "\tnative=" + nativeMs
+                    + "\tquality_idx=" + qualityIdx
+                    + "\tscale=" + scale
+                    + "\tjpeg_q=" + finalJpegQuality
+                    + "\tcrop=" + applyCrop
+                    + "\tdiptych=" + isDiptych
+                    + "\tcores=" + numCores
+                    + "\topacity=" + p.opacity
+                    + "\tgrain=" + p.grain
+                    + "\tgrain_size=" + finalGrainSize
+                    + "\tvignette=" + p.vignette
+                    + "\trolloff=" + p.rollOff
+                    + "\tcolor_chrome=" + p.colorChrome
+                    + "\tchrome_blue=" + p.chromeBlue
+                    + "\tshadow_toe=" + p.shadowToe
+                    + "\tsubtractive_sat=" + p.subtractiveSat
+                    + "\thalation=" + p.halation
+                    + "\tbloom=" + finalBloom
+                    + "\t" + cleanLogValue(nativeTiming)
+                    + "\n");
+        } catch (Exception e) {
+            Log.e("JPEG.CAM_TIMING", "Failed to append timing log: " + e.getMessage());
+        } finally {
+            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+        }
     }
 
     public void triggerLutPreload(String lutPath, String lutName) {
@@ -116,14 +172,21 @@ public class ImageProcessor {
                 Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
                 long nativeStartMs = System.currentTimeMillis();
-                if (mEngine.applyLutToJpeg(
+                boolean success = mEngine.applyLutToJpeg(
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
                     p.halation, finalBloom, 
                     finalJpegQuality, 
-                    applyCrop, numCores)) {  // <--- ADDED numCores HERE
-                    long nativeEndMs = System.currentTimeMillis();
+                    applyCrop, numCores);  // <--- ADDED numCores HERE
+                long nativeEndMs = System.currentTimeMillis();
+                String nativeTiming = mEngine.getLastNativeTiming();
+                appendProcessingTiming(original, outFile, success ? "SAVED" : "FAILED",
+                        waitEndMs - waitStartMs, textureEndMs - textureStartMs,
+                        nativeEndMs - nativeStartMs, nativeEndMs - taskStartMs,
+                        qualityIdx, scale, finalJpegQuality, finalGrainSize, finalBloom,
+                        numCores, p, applyCrop, isDiptych, nativeTiming);
+                if (success) {
                     Log.d("JPEG.CAM_TIMING", "wait=" + (waitEndMs - waitStartMs)
                             + "ms texture=" + (textureEndMs - textureStartMs)
                             + "ms native=" + (nativeEndMs - nativeStartMs)
@@ -131,9 +194,10 @@ public class ImageProcessor {
                             + "ms scale=" + scale
                             + " q=" + finalJpegQuality
                             + " bloom=" + finalBloom
-                            + " grain=" + p.grain);
+                            + " grain=" + p.grain
+                            + " " + nativeTiming);
                     return "SAVED";
-            }
+                }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }
             return "FAILED";
         }
