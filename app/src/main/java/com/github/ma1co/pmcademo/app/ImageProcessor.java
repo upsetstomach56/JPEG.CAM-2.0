@@ -30,8 +30,8 @@ public class ImageProcessor {
         new PreloadLutTask().execute(lutPath, lutName);
     }
 
-    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p, boolean applyCrop) {
-        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop).execute(originalPath);
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p, boolean applyCrop, boolean isDiptych) {
+        new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop, isDiptych).execute(originalPath);
     }
 
     private class PreloadLutTask extends AsyncTask<String, Void, Boolean> {
@@ -48,13 +48,15 @@ public class ImageProcessor {
         private RTLProfile p;
         private String outDir;
         private boolean applyCrop; // <-- NEW
+        private boolean isDiptych;
 
-        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop) {
+        public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych) {
             this.qualityIdx  = q;
             this.jpegQuality = jpegQuality;
             this.p           = p;
             this.outDir      = out;
             this.applyCrop   = crop; // <-- NEW
+            this.isDiptych   = isDiptych;
         }
 
         @Override protected void onPreExecute() { mCallback.onProcessStarted(); }
@@ -77,10 +79,6 @@ public class ImageProcessor {
 
                 File outFile = new File(dir, original.getName());
 
-                FileOutputStream fos = new FileOutputStream(outFile);
-                fos.write(1);
-                fos.close();
-
                 // 0=1/4 RES (4), 1=HALF RES (2), 2=FULL RES (1)
                 int scale = (qualityIdx == 0) ? 4 : (qualityIdx == 2 ? 1 : 2);
 
@@ -92,28 +90,40 @@ public class ImageProcessor {
                     finalJpegQuality = Math.min(90, this.jpegQuality);
                 }
 
-                // --- NEW: ENGINE 2 TEXTURE INTERCEPT ---
-                int cxxGrainEngine = p.advancedGrainExperimental;
-                
-                // If the user selected an SD card texture (Index 2 or higher)
-                if (cxxGrainEngine >= 2) {
-                    int fileIndex = cxxGrainEngine - 2;
-                    if (fileIndex < MenuController.grainTextureFiles.size()) {
-                        File texFile = MenuController.grainTextureFiles.get(fileIndex);
-                        mEngine.loadGrainTexture(texFile); // Load into C++ Global RAM
-                    }
-                    cxxGrainEngine = 2; // Lock the C++ flag to Engine 2
+                System.gc(); // Force cleanup before heavy C++ engine starts
+
+                // Texture Intercept
+                if (MenuController.grainTextureFiles.size() > 0 && p.grainSize >= 0 && p.grainSize < MenuController.grainTextureFiles.size()) {
+                    File texFile = MenuController.grainTextureFiles.get(p.grainSize);
+                    mEngine.loadGrainTexture(texFile); // Load into C++ Global RAM
                 }
-                // --- END NEW ---
+                
+                // --- DIPTYCH COMPENSATOR ---
+                // Safely steps down physical effects to account for the smaller 6MP canvas
+                int finalGrainSize = p.grainSize;
+                int finalBloom = p.bloom;
+                
+                if (isDiptych) {
+                    finalGrainSize = Math.max(0, p.grainSize - 1);
+                    
+                    int[] bloomMap = {0, 5, 6, 1, 2, 3, 4};
+                    int currentBloomIdx = 0;
+                    for (int i = 0; i < bloomMap.length; i++) {
+                        if (bloomMap[i] == p.bloom) currentBloomIdx = i;
+                    }
+                    finalBloom = bloomMap[Math.max(0, currentBloomIdx - 1)];
+                }
+
+                int numCores = Runtime.getRuntime().availableProcessors();
+                Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
                 if (mEngine.applyLutToJpeg(
                     original.getAbsolutePath(), outFile.getAbsolutePath(),
-                    scale, p.opacity, p.grain, p.grainSize, p.vignette, p.rollOff,
+                    scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
-                    p.halation, p.bloom, 
-                    cxxGrainEngine, 
+                    p.halation, finalBloom, 
                     finalJpegQuality, 
-                    applyCrop)) {  // <--- ADDED HERE
+                    applyCrop, numCores)) {  // <--- ADDED numCores HERE
                 return "SAVED";
             }
             } catch (Exception e) { Log.e("COOKBOOK", "Java error: " + e.getMessage()); }

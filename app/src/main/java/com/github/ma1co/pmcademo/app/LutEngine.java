@@ -17,8 +17,8 @@ public class LutEngine {
         String inPath, String outPath, int scaleDenom, int opacity,
         int grain, int grainSize, int vignette, int rollOff,
         int colorChrome, int chromeBlue, int shadowToe,
-        int subtractiveSat, int halation, int bloom, int advancedGrainExperimental, int jpegQuality,
-        boolean applyCrop // <-- ADDED: Anamorphic Crop Flag
+        int subtractiveSat, int halation, int bloom, int jpegQuality,
+        boolean applyCrop, int numCores
     );
 
     /**
@@ -37,12 +37,12 @@ public class LutEngine {
                                   int grain, int grainSize, int vignette, int rollOff,
                                   int colorChrome, int chromeBlue, int shadowToe,
                                   int subtractiveSat, int halation, int bloom,
-                                  int advancedGrainExperimental, int quality,
-                                  boolean applyCrop) { // <-- ADDED: XPAN Crop Flag
+                                  int quality,
+                                  boolean applyCrop, int numCores) { 
         return processImageNative(in, out, scale, opacity, grain, grainSize, vignette,
                                  rollOff, colorChrome, chromeBlue, shadowToe,
-                                 subtractiveSat, halation, bloom, advancedGrainExperimental, quality,
-                                 applyCrop); // <-- ADDED: XPAN Crop Flag
+                                 subtractiveSat, halation, bloom, quality,
+                                 applyCrop, numCores); 
     }
 
     // NEW: Public wrapper to load the grain texture safely

@@ -39,8 +39,7 @@ public class MenuController {
 
     public static String[] getGrainEngineOptions() {
         java.util.List<String> options = new java.util.ArrayList<String>();
-        options.add("LEGACY");
-        options.add("EXPERIMENTAL");
+        // <--- DELETED: Hardcoded legacy options
 
         grainTextureFiles.clear();
         File dir = Filepaths.getGrainDir();
@@ -59,6 +58,10 @@ public class MenuController {
                 }
             }
         }
+        
+        // <--- NEW: Fallback if the user hasn't dropped any files on the SD card yet
+        if (options.isEmpty()) options.add("NO FILES FOUND");
+        
         return options.toArray(new String[0]);
     }
     // --- END NEW ---
@@ -70,18 +73,20 @@ public class MenuController {
         RecipeManager      getRecipeManager();
         ConnectivityManager getConnectivityManager();
         MatrixManager      getMatrixManager();
-        Camera             getCamera();          // may be null if camera not open
+        Camera             getCamera();
         String             getAppVersion();
 
         // Preferences — read
         boolean isPrefFocusMeter();
         boolean isPrefCinemaMattes();
+        boolean isPrefDiptych(); // <--- ADDED
         boolean isPrefGridLines();
         int     getPrefJpegQuality();
 
         // Preferences — write
         void setPrefFocusMeter(boolean v);
         void setPrefCinemaMattes(boolean v);
+        void setPrefDiptych(boolean v); // <--- ADDED
         void setPrefGridLines(boolean v);
         void setPrefJpegQuality(int v);
 
@@ -113,6 +118,7 @@ public class MenuController {
     private String   savedFocusMode    = null;
     private String   hotspotStatus     = "Press ENTER";
     private String   wifiStatus        = "Press ENTER";
+    private String[] cachedColorModes  = null;
 
     // Shared name buffer — also used by HudController for matrix / vault naming
     private char[]   nameBuffer        = "CUSTOM      ".toCharArray();
@@ -253,6 +259,18 @@ public class MenuController {
     /** Re-render the menu (e.g. after returning from a HUD overlay). */
     public void refreshDisplay()               { render(); }
 
+    /** Contextual Back: Cancels any active editing state and returns true if successful. */
+    public boolean cancelAction() {
+        if (isEditing || isNaming || isConfirmingDelete) {
+            isEditing = false;
+            isNaming = false;
+            isConfirmingDelete = false;
+            render();
+            return true;
+        }
+        return false;
+    }
+
     // -----------------------------------------------------------------------
     // Lifecycle
     // -----------------------------------------------------------------------
@@ -340,7 +358,7 @@ public class MenuController {
             handleMenuChange(-1);
         } else {
             currentPage--;
-            if (currentPage < 1) currentPage = 8;
+            if (currentPage < 1) currentPage = 9;
             currentMainTab = pageToTab(currentPage);
             selection = 0;
             render();
@@ -362,7 +380,7 @@ public class MenuController {
             handleMenuChange(1);
         } else {
             currentPage++;
-            if (currentPage > 8) currentPage = 1;
+            if (currentPage > 9) currentPage = 1;
             currentMainTab = pageToTab(currentPage);
             selection = 0;
             render();
@@ -389,7 +407,7 @@ public class MenuController {
     /** ENTER while menu is open: toggle editing, launch HUDs, or handle connection page. */
     public boolean handleEnter() {
         if (!isOpen) return false;
-        if (currentPage == 7) { handleConnectionAction(); return true; }
+        if (currentPage == 8) { handleConnectionAction(); return true; }
         if (selection == -2) return true; // Tab level — enter does nothing
         if (selection < 0)   return true; // Subtitle row — enter does nothing
         isEditing = !isEditing;
@@ -425,12 +443,49 @@ public class MenuController {
     public void updateConnectionStatus(String target, String status) {
         if ("HOTSPOT".equals(target)) hotspotStatus = status;
         else wifiStatus = status;
-        if (isOpen && currentPage == 7) render();
+        if (isOpen && currentPage == 8) render();
     }
 
     // -----------------------------------------------------------------------
     // Private — menu data change
     // -----------------------------------------------------------------------
+
+    public String[] getSupportedColorModes() {
+        if (cachedColorModes != null) return cachedColorModes;
+        
+        // This is the hardcoded list you were seeing!
+        String[] fallback = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
+        
+        Camera cam = host.getCamera();
+        if (cam != null) {
+            try {
+                Camera.Parameters p = cam.getParameters();
+                
+                // Aggressively hunt for the list of supported values across all Sony models
+                String vals = p.get("creative-style-values"); // <-- Added for A7 series
+                if (vals == null || vals.isEmpty()) vals = p.get("color-mode-values"); // <-- Used by APS-C
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-creative-style-values");
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-st-color-mode-values");
+                if (vals == null || vals.isEmpty()) vals = p.get("sony-colormode-values");
+                
+                if (vals != null && !vals.isEmpty()) {
+                    String[] split = vals.split(",");
+                    for (int i = 0; i < split.length; i++) {
+                        String s = split[i].trim();
+                        if (s.length() > 0) {
+                            // Capitalize the first letter so it looks nice in the menu
+                            split[i] = s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+                        }
+                    }
+                    cachedColorModes = split;
+                    return cachedColorModes;
+                }
+            } catch (Exception e) {
+                // If the camera is busy and throws an error, ignore it and use fallback
+            }
+        }
+        return fallback;
+    }
 
     private void handleNamingChange(int dir) {
         RecipeManager rm = host.getRecipeManager();
@@ -457,7 +512,7 @@ public class MenuController {
                 rm.setCurrentSlot(Math.max(0, Math.min(9, rm.getCurrentSlot() + dir)));
                 host.onLutPreloadNeeded();
             } else if (sel == 2) {
-                String[] styles = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Black & White","Sepia"};
+                String[] styles = getSupportedColorModes();
                 int idx = 0; for (int i = 0; i < styles.length; i++) if (styles[i].equalsIgnoreCase(p.colorMode)) idx = i;
                 p.colorMode = styles[(idx + dir + styles.length) % styles.length];
             } else if (sel == 4) {
@@ -477,15 +532,14 @@ public class MenuController {
             if (sel == 0) { if (dir > 0 && p.lutIndex < rm.getRecipeNames().size()-1) p.lutIndex++; else if (dir < 0 && p.lutIndex > 0) p.lutIndex--; }
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
-            else if (sel == 3 && p.grain > 0) p.grainSize = Math.max(0, Math.min(2, p.grainSize + dir));
             
-            // CHANGED: Use the dynamic array length instead of locking to 1
-            else if (sel == 4 && p.grain > 0) {
-                int maxEngineIndex = getGrainEngineOptions().length - 1;
-                p.advancedGrainExperimental = Math.max(0, Math.min(maxEngineIndex, p.advancedGrainExperimental + dir));
+            // <--- CHANGED: Dynamically bounds the D-Pad to the number of physical files found
+            else if (sel == 3 && p.grain > 0) {
+                int maxIdx = Math.max(0, grainTextureFiles.size() - 1);
+                p.grainSize = Math.max(0, Math.min(maxIdx, p.grainSize + dir));
             }
             
-            else if (sel == 5) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
+            else if (sel == 4) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
             if (sel == 0) p.rollOff        = Math.max(0, Math.min(5, p.rollOff + dir));
             else if (sel == 1) p.shadowToe = Math.max(0, Math.min(2, p.shadowToe + dir));
@@ -494,15 +548,34 @@ public class MenuController {
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
             
-            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom (0, 1, 2, 4, or 4)
-            else if (sel == 6) p.bloom = Math.max(0, Math.min(4, p.bloom + dir));
+            // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom
+            else if (sel == 6) {
+                int logicalIdx = getLogicalBloomIndex(p.bloom);
+                logicalIdx = Math.max(0, Math.min(6, logicalIdx + dir));
+                p.bloom = BLOOM_LOGICAL_TO_INTERNAL[logicalIdx];
+            }
             
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
-            else if (sel == 2) host.setPrefFocusMeter(!host.isPrefFocusMeter());
-            else if (sel == 3) host.setPrefCinemaMattes(!host.isPrefCinemaMattes());
-            else if (sel == 4) host.setPrefGridLines(!host.isPrefGridLines());
-            else if (sel == 5) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+            else if (sel == 1) host.setPrefFocusMeter(!host.isPrefFocusMeter());
+            else if (sel == 2) {
+                int mode = 0;
+                if (host.isPrefCinemaMattes()) mode = 1;
+                else if (host.isPrefDiptych()) mode = 2;
+                
+                mode = (mode + dir + 3) % 3;
+                
+                host.setPrefCinemaMattes(mode == 1);
+                host.setPrefDiptych(mode == 2);
+            }
+            else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
+            else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+        } else if (currentPage == 7) {
+            if      (sel == 0) rm.setPrefC1(Math.max(0, Math.min(5, rm.getPrefC1() + dir)));
+            else if (sel == 1) rm.setPrefC2(Math.max(0, Math.min(5, rm.getPrefC2() + dir)));
+            else if (sel == 2) rm.setPrefC3(Math.max(0, Math.min(5, rm.getPrefC3() + dir)));
+            else if (sel == 3) rm.setPrefAel(Math.max(0, Math.min(5, rm.getPrefAel() + dir)));
+            else if (sel == 4) rm.setPrefFn(Math.max(0, Math.min(5, rm.getPrefFn() + dir)));
         }
 
         render();
@@ -546,17 +619,15 @@ public class MenuController {
 
         // Subtitle
         tvSubtitle.setBackgroundColor(selection == -1 ? orange : Color.TRANSPARENT);
-        String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","Global Settings","Web Dashboard Server","Resources & Community"};
-        if (currentPage >= 1 && currentPage <= 8) tvSubtitle.setText(subtitles[currentPage]);
+        String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","6. App Preferences","7. Custom Buttons","8. Web Dashboard Server","9. Resources & Community"};
+        if (currentPage >= 1 && currentPage <= 9) {
+            tvSubtitle.setText(subtitles[currentPage]); 
+        }
 
         for (int i = 0; i < 8; i++) rows[i].setVisibility(View.GONE);
         supportContainer.setVisibility(View.GONE);
 
-        if (currentPage == 8) { supportContainer.setVisibility(View.VISIBLE); itemCount = 0; return; }
-
-        String scn = "UNKNOWN";
-        Camera cam = host.getCamera();
-        if (cam != null) { try { scn = cam.getParameters().getSceneMode().toUpperCase(); } catch (Exception ignored) {} }
+        if (currentPage == 9) { supportContainer.setVisibility(View.VISIBLE); itemCount = 0; return; }
 
         String[] amtLbls  = {"OFF","LOW","MED","HIGH","V.HIGH","MAX"};
         String[] sizeLbls = {"SMALL","MED","LARGE"};
@@ -607,18 +678,17 @@ public class MenuController {
                 setRow(1, "Effect Tweaker",       param);
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
-                ic = 6;
-                
-                // CHANGED: Load dynamic labels and calculate the safe index
-                String[] engineLbls = getGrainEngineOptions();
-                int safeEngineIdx = Math.max(0, Math.min(engineLbls.length - 1, p.advancedGrainExperimental));
-
+                ic = 5; 
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
-                setRow(3, "Grain Size",  sizeLbls[Math.max(0,Math.min(2,p.grainSize))]);
-                setRow(4, "Grain Engine",engineLbls[safeEngineIdx]); // CHANGED
-                setRow(5, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
+                
+                // <--- CHANGED: Dynamically fetches titles (metadata or filename) from SD card
+                String[] typeLbls = getGrainEngineOptions(); 
+                int safeIdx = Math.max(0, Math.min(typeLbls.length - 1, p.grainSize));
+                setRow(3, "Grain Type",  typeLbls[safeIdx]);
+                
+                setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
                 ic = 7; // CHANGED TO 7
                 setRow(0, "Highlight Roll-Off",    amtLbls[Math.max(0,Math.min(5,p.rollOff))]);
@@ -627,19 +697,33 @@ public class MenuController {
                 setRow(3, "Color Chrome",           p.colorChrome==0?"OFF":(p.colorChrome==1?"WEAK":"STRONG"));
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
                 setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
-                setRow(6, "Diffusion", p.bloom == 0 ? "OFF" : (p.bloom == 1 ? "Local 1/4" : (p.bloom == 2 ? "Full 1/4" : (p.bloom == 3 ? "Local 1/2" : "Full 1/2"))));
+                
+                String[] bloomLbls = {"OFF", "Local 1/8", "Full 1/8", "Local 1/4", "Full 1/4", "Local 1/2", "Full 1/2"};
+                setRow(6, "Diffusion", bloomLbls[getLogicalBloomIndex(p.bloom)]);
             }
         }
         if (currentPage == 6) {
-            ic = 6;
+            ic = 5; 
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
+            
+            String creativeMode = "OFF";
+            if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
+            else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
+            
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
-            setRow(1, "Base Scene",            scn);
-            setRow(2, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
-            setRow(3, "XPan Crop",       host.isPrefCinemaMattes() ? "ON" : "OFF");
-            setRow(4, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
-            setRow(5, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
+            setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
+            setRow(2, "Creative Modes",        creativeMode);
+            setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
+            setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
         } else if (currentPage == 7) {
+            ic = 5;
+            String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "CYCLE CREATIVE MODES", "TOGGLE GRID LINES"};
+            setRow(0, "Custom 1 (C1)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC1()))]);
+            setRow(1, "Custom 2 (C2)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC2()))]);
+            setRow(2, "Custom 3 (C3)", btnLbls[Math.max(0, Math.min(5, rm.getPrefC3()))]);
+            setRow(3, "AEL Button",    btnLbls[Math.max(0, Math.min(5, rm.getPrefAel()))]);
+            setRow(4, "FN Button",     btnLbls[Math.max(0, Math.min(5, rm.getPrefFn()))]);
+        } else if (currentPage == 8) {
             ic = 3;
             setRow(0, "Camera Hotspot", hotspotStatus);
             setRow(1, "Home Wi-Fi",     wifiStatus);
@@ -679,7 +763,7 @@ public class MenuController {
         }
         if (currentMainTab == 0 && currentPage == 4) {
             if (i == 1) return p.lutIndex > 0;
-            if (i == 3 || i == 4) return p.grain > 0;
+            if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
         return true;
     }
@@ -723,15 +807,26 @@ public class MenuController {
     private int tabToFirstPage(int tab) {
         if (tab == 0) return 1;
         if (tab == 1) return 6;
-        if (tab == 2) return 7;
-        return 8;
+        if (tab == 2) return 8;
+        return 9;
     }
 
     private int pageToTab(int page) {
         if (page <= 5) return 0;
-        if (page == 6) return 1;
-        if (page == 7) return 2;
+        if (page <= 7) return 1;
+        if (page == 8) return 2;
         return 3;
+    }
+
+    private TextView tvStatusText;
+
+    private static final int[] BLOOM_LOGICAL_TO_INTERNAL = {0, 5, 6, 1, 2, 3, 4};
+
+    private int getLogicalBloomIndex(int internalBloom) {
+        for (int i = 0; i < BLOOM_LOGICAL_TO_INTERNAL.length; i++) {
+            if (BLOOM_LOGICAL_TO_INTERNAL[i] == internalBloom) return i;
+        }
+        return 0;
     }
 
     private TextView makeTabHeader(Context ctx, String text) {

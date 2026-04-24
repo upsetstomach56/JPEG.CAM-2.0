@@ -15,11 +15,12 @@ public class InputManager {
         void onDeletePressed();
         void onMenuPressed();
         void onEnterPressed();
-        void onUpPressed();
-        void onDownPressed();
-        void onLeftPressed();
-        void onRightPressed();
-        void onCustomButtonPressed(); // Left safely in interface so it doesn't break other files
+        boolean onUpPressed();
+        boolean onDownPressed();
+        boolean onLeftPressed();
+        boolean onRightPressed();
+        boolean onCustomButtonPressed(String keyId); 
+        boolean onCustomButtonReleased(String keyId); // <-- NEW
         
         // --- 3-DIAL SETUP RESTORED ---
         void onFrontDialRotated(int direction);
@@ -63,23 +64,24 @@ public class InputManager {
             return true;
         }
         if (sc == ScalarInput.ISV_KEY_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            listener.onUpPressed();
-            return true;
+            return listener.onUpPressed();
         }
         if (sc == ScalarInput.ISV_KEY_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-            listener.onDownPressed();
-            return true;
+            return listener.onDownPressed();
         }
         if (sc == ScalarInput.ISV_KEY_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-            listener.onLeftPressed();
-            return true;
+            return listener.onLeftPressed();
         }
         if (sc == ScalarInput.ISV_KEY_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            listener.onRightPressed();
-            return true;
+            return listener.onRightPressed();
         }
 
-        // DELETED: Omni-Button interceptor block. Custom buttons will now pass to Sony OS.
+        // --- APP-SPECIFIC CUSTOM BUTTON ROUTER ---
+        if (sc == ScalarInput.ISV_KEY_CUSTOM1) { if (listener.onCustomButtonPressed("C1")) return true; }
+        if (sc == ScalarInput.ISV_KEY_CUSTOM2) { if (listener.onCustomButtonPressed("C2")) return true; }
+        if (sc == ScalarInput.ISV_KEY_CUSTOM3) { if (listener.onCustomButtonPressed("C3")) return true; }
+        if (sc == ScalarInput.ISV_KEY_AEL)     { if (listener.onCustomButtonPressed("AEL")) return true; }
+        if (sc == ScalarInput.ISV_KEY_FN)      { if (listener.onCustomButtonPressed("FN")) return true; }
 
         // --- UNIFIED DIAL TRANSLATOR (Front, Rear, Control Wheel & a6500 Hacks) ---
         if (sc == ScalarInput.ISV_DIAL_1_CLOCKWISE || 
@@ -124,7 +126,12 @@ public class InputManager {
             return false; // <-- CHANGED: Let the Sony OS know the shutter was released
         }
 
-        // DELETED: Omni-Button release interceptor block.
+        // Ask the Execution Router if we should swallow the release
+        if (sc == ScalarInput.ISV_KEY_CUSTOM1) return listener.onCustomButtonReleased("C1");
+        if (sc == ScalarInput.ISV_KEY_CUSTOM2) return listener.onCustomButtonReleased("C2");
+        if (sc == ScalarInput.ISV_KEY_CUSTOM3) return listener.onCustomButtonReleased("C3");
+        if (sc == ScalarInput.ISV_KEY_AEL)     return listener.onCustomButtonReleased("AEL");
+        if (sc == ScalarInput.ISV_KEY_FN)      return listener.onCustomButtonReleased("FN");
         
         // Ensure Mode Dial releases are also swallowed safely
         if (sc == ScalarInput.ISV_KEY_MODE_DIAL || 

@@ -182,14 +182,16 @@ public class PlaybackController {
                     speedStr = (s < 1.0) ? "1/" + Math.round(1.0 / s) + "s" : Math.round(s) + "s";
                 } catch (Exception ignored) {}
             }
+            // <--- CHANGED: Appended LOW RES PREVIEW disclaimer to the metadata block
             infoText.setText(
                 (idx + 1) + " / " + files.size() + "\n"
                 + file.getName() + "\n"
                 + (fnum != null ? "f/" + fnum : "f/--")
                 + " | " + speedStr
-                + " | " + (iso != null ? "ISO " + iso : "ISO --"));
+                + " | " + (iso != null ? "ISO " + iso : "ISO --")
+                + "\n\n* LOW-RES PREVIEW *");
 
-            // Memory-safe decode — 800×600 uses 40% less RAM than 1024×768 on BIONZ hardware
+            // Memory-safe decode — 800x600 uses 40% less RAM than 1024x768 on BIONZ hardware
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeFile(path, opts);
@@ -205,13 +207,11 @@ public class PlaybackController {
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
             
-            // REVERTED to 16-bit color. ARGB_8888 is too heavy for the BIONZ heap.
-            // Dithering is kept ON to smooth out the resulting color bands.
-            opts.inPreferredConfig  = Bitmap.Config.RGB_565; 
-            opts.inDither           = true; 
+            opts.inPreferredConfig  = Bitmap.Config.ARGB_8888; 
+            opts.inDither           = false; // Keep this false! We are dithering the DRAW, not the DECODE.
+            opts.inPreferQualityOverSpeed = true;
             
-            opts.inPurgeable        = true;
-            opts.inInputShareable   = true;
+            // <--- DELETED: inPurgeable and inInputShareable 
 
             Bitmap raw = BitmapFactory.decodeFile(path, opts);
             if (raw == null) {
@@ -233,7 +233,13 @@ public class PlaybackController {
             Bitmap bmp = Bitmap.createBitmap(raw, 0, 0, raw.getWidth(), raw.getHeight(), matrix, true);
             if (raw != bmp) { raw.recycle(); raw = null; }
 
-            imageView.setImageBitmap(bmp);
+            // <--- NEW: Force High-Quality Paint Dithering
+            // We wrap the 32-bit bitmap in a Drawable and force the paint to dither it.
+            // This hides the banding when Android inevitably crushes it to 16-bit for the display.
+            android.graphics.drawable.BitmapDrawable drawable = new android.graphics.drawable.BitmapDrawable(context.getResources(), bmp);
+            drawable.setDither(true);
+            
+            imageView.setImageDrawable(drawable);
             imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             currentBitmap = bmp;
 

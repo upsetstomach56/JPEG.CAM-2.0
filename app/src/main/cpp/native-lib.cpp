@@ -7,6 +7,7 @@
 #include <setjmp.h>
 #include <math.h>
 #include <sys/time.h>
+#include <pthread.h>
 #include "jpeglib.h"
 #include <android/log.h>
 #include "process_kernel.h"
@@ -18,445 +19,294 @@
 
 std::vector<uint8_t> nativeLut;
 int nativeLutSize = 0;
-
-// NEW: Global for our external PNG/JPG grain texture
 std::vector<uint8_t> nativeGrainTexture;
 
 struct my_error_mgr { struct jpeg_error_mgr pub; jmp_buf setjmp_buffer; };
-
 METHODDEF(void) my_error_exit (j_common_ptr cinfo) {
     my_error_mgr * myerr = (my_error_mgr *) cinfo->err;
     longjmp(myerr->setjmp_buffer, 1);
 }
 
-long long get_time_ms() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
-}
+long long get_time_ms() { struct timeval tv; gettimeofday(&tv, NULL); return (long long)tv.tv_sec*1000 + tv.tv_usec/1000; }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
-    nativeLut.clear();
-    nativeLutSize = 0;
-
-    const char *file_path = env->GetStringUTFChars(path, NULL);
-    std::string path_str(file_path);
-
-    // --- FIX: Safely find the actual extension using the last dot ---
-    std::string ext = "";
-    size_t dot_pos = path_str.find_last_of('.');
-    if (dot_pos != std::string::npos) {
-        ext = path_str.substr(dot_pos);
-        for(size_t i = 0; i < ext.length(); i++) ext[i] = tolower(ext[i]);
-    }
-
-    // --- ROUTE A: PNG (Standard Square HaldCLUT or Horizontal Strip) ---
-    if (ext == ".png") {
-        int w, h, c;
-        unsigned char *img_data = stbi_load(file_path, &w, &h, &c, 3);
-        if (img_data) {
-            int total_pixels = w * h;
-
-            // OOM Protection: Raised to 4,000,000 to safely allow 1728x1728 (Level 144) LUTs
-            if (total_pixels > 4000000) {
-                nativeLutSize = 0;
-                LOGD("ERROR: PNG file is dangerously large (>4M pixels). Rejecting.");
-            } else {
-                // Find the closest perfect cube size
-                int best_level = 1;
-                int min_diff = total_pixels;
-
-                // Raised loop ceiling to 150 to catch Level 144 files
-                for (int l = 1; l <= 150; l++) {
-                    int diff = (l * l * l) - total_pixels;
-                    if (diff < 0) diff = -diff;
-                    if (diff < min_diff) {
-                        min_diff = diff;
-                        best_level = l;
-                    }
-                }
-
-                nativeLutSize = best_level;
-                int total_bytes = nativeLutSize * nativeLutSize * nativeLutSize * 3;
-                nativeLut.resize(total_bytes);
-
-                // Integer division natively ignores minor border padding
-                int tiles_per_row = w / nativeLutSize;
-                if (tiles_per_row == 0) tiles_per_row = 1;
-
-                // UNWRAPPER: Translates the 2D PNG into the linear .cube format
-                for (int b = 0; b < nativeLutSize; b++) {
-                    int cell_x = b % tiles_per_row;
-                    int cell_y = b / tiles_per_row;
-                    for (int g = 0; g < nativeLutSize; g++) {
-                        int img_y = cell_y * nativeLutSize + g;
-                        for (int r = 0; r < nativeLutSize; r++) {
-                            int img_x = cell_x * nativeLutSize + r;
-
-                            // Bounds checking to safely ignore padding/borders
-                            if (img_x >= w) img_x = w - 1;
-                            if (img_y >= h) img_y = h - 1;
-
-                            int src_idx = (img_y * w + img_x) * 3;
-                            int dst_idx = (r + g * nativeLutSize + b * nativeLutSize * nativeLutSize) * 3;
-
-                            nativeLut[dst_idx]     = img_data[src_idx];
-                            nativeLut[dst_idx + 1] = img_data[src_idx + 1];
-                            nativeLut[dst_idx + 2] = img_data[src_idx + 2];
-                        }
-                    }
-                }
-                LOGD("SUCCESS: Loaded and Normalized PNG HaldCLUT size %d", nativeLutSize);
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadLutNative(JNIEnv* env, jobject obj, jstring path) {
+    nativeLut.clear(); nativeLutSize = 0; const char *fp = env->GetStringUTFChars(path, NULL); std::string ps(fp); std::string ex = ""; size_t dp = ps.find_last_of('.');
+    if (dp != std::string::npos) { ex = ps.substr(dp); for(size_t i=0; i<ex.length(); i++) ex[i]=tolower(ex[i]); }
+    if (ex == ".png") {
+        int w, h, c; unsigned char *id = stbi_load(fp, &w, &h, &c, 3);
+        if (id) {
+            if (w*h <= 4000000) {
+                int bl=1, md=w*h; for(int l=1; l<=150; l++){ int diff = abs((l*l*l)-(w*h)); if (diff < md) { md = diff; bl = l; } }
+                nativeLutSize=bl; nativeLut.resize(bl*bl*bl*3); int tr = w / bl; if (tr == 0) tr = 1;
+                for(int b=0; b<bl; b++){ int cx=b%tr, cy=b/tr; for(int g=0; g<bl; g++){ int iy=cy*bl+g; for(int r=0; r<bl; r++){ int ix=cx*bl+r; if(ix>=w)ix=w-1; if(iy>=h)iy=h-1; int s=(iy*w+ix)*3, d=(r+g*bl+b*bl*bl)*3; nativeLut[d]=id[s]; nativeLut[d+1]=id[s+1]; nativeLut[d+2]=id[s+2]; } } }
             }
-            stbi_image_free(img_data);
-        } else {
-            nativeLutSize = 0;
-            LOGD("ERROR: stbi_load failed to read the PNG file");
+            stbi_image_free(id);
         }
+    } else if (ex==".cube"||ex==".cub") {
+        FILE *f = fopen(fp, "r"); if(f){ char l[256]; while(fgets(l, 256, f)){ if(strncmp(l,"LUT_3D_SIZE",11)==0){ sscanf(l,"LUT_3D_SIZE %d",&nativeLutSize); nativeLut.resize(nativeLutSize*nativeLutSize*nativeLutSize*3); continue; } float r,g,b; if(nativeLutSize>0 && sscanf(l,"%f %f %f",&r,&g,&b)==3){ static size_t c=0; if(c+2<nativeLut.size()){ nativeLut[c++]=(uint8_t)(r*255); nativeLut[c++]=(uint8_t)(g*255); nativeLut[c++]=(uint8_t)(b*255); } } } fclose(f); }
     }
-    // --- ROUTE B: .CUBE (Text) ---
-    else if (ext == ".cube" || ext == ".cub") {
-        FILE *file = fopen(file_path, "r");
-        if (file) {
-            char line[256];
-            size_t count = 0;
-            while(fgets(line, sizeof(line), file)) {
-                if (strncmp(line, "LUT_3D_SIZE", 11) == 0) {
-                    sscanf(line, "LUT_3D_SIZE %d", &nativeLutSize);
-                    nativeLut.resize(nativeLutSize * nativeLutSize * nativeLutSize * 3);
-                    continue;
-                }
-                float r, g, b;
-                if (nativeLutSize > 0 && sscanf(line, "%f %f %f", &r, &g, &b) == 3) {
-                    if (count + 2 < nativeLut.size()) {
-                        nativeLut[count++] = (uint8_t)(r * 255.0f);
-                        nativeLut[count++] = (uint8_t)(g * 255.0f);
-                        nativeLut[count++] = (uint8_t)(b * 255.0f);
-                    }
-                }
-            }
-            fclose(file);
-            LOGD("SUCCESS: Loaded .cube file size %d", nativeLutSize);
-        }
-    }
-
-    env->ReleaseStringUTFChars(path, file_path);
-    return nativeLutSize > 0 ? JNI_TRUE : JNI_FALSE;
+    env->ReleaseStringUTFChars(path, fp); return nativeLutSize>0 ? JNI_TRUE : JNI_FALSE;
 }
 
-// NEW: Load the 512x512 PNG/JPG using stb_image directly in C++
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env, jobject obj, jstring path) {
-    nativeGrainTexture.clear();
-    if (path == NULL) return JNI_FALSE;
-
-    const char *file_path = env->GetStringUTFChars(path, NULL);
-    int w, h, c;
-    
-    // Force load as 3-channel (RGB)
-    unsigned char *img_data = stbi_load(file_path, &w, &h, &c, 3);
-    env->ReleaseStringUTFChars(path, file_path);
-
-    if (img_data) {
-        if (w == 512 && h == 512) {
-            int total_bytes = w * h * 3;
-            nativeGrainTexture.assign(img_data, img_data + total_bytes);
-            stbi_image_free(img_data);
-            LOGD("SUCCESS: Loaded Grain Texture 512x512");
-            return JNI_TRUE;
-        } else {
-            stbi_image_free(img_data);
-            LOGD("ERROR: Grain Texture must be exactly 512x512");
-            return JNI_FALSE;
-        }
-    }
-    LOGD("ERROR: Failed to load Grain Texture");
-    return JNI_FALSE;
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_loadGrainTextureNative(JNIEnv* env, jobject obj, jstring path) {
+    nativeGrainTexture.clear(); if(!path) return JNI_FALSE; const char *fp=env->GetStringUTFChars(path, NULL); int w,h,c; unsigned char *id=stbi_load(fp,&w,&h,&c,3); env->ReleaseStringUTFChars(path,fp);
+    if(id){ if((w==512||w==1024)&&w==h){ nativeGrainTexture.assign(id, id+(w*h*3)); stbi_image_free(id); return JNI_TRUE; } stbi_image_free(id); } return JNI_FALSE;
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     JNIEnv* env, jobject obj, jstring inPath, jstring outPath,
     jint scaleDenom, jint opacity, jint grain, jint grainSize,
     jint vignette, jint rollOff, jint colorChrome, jint chromeBlue,
     jint shadowToe, jint subtractiveSat, jint halation,
-    jint bloom, jint advancedGrainExperimental, jint jpegQuality,
-    jboolean applyCrop) { // <-- ADDED XPAN CROP FLAG
+    jint bloom, jint jpegQuality, jboolean applyCrop, jint numCores) {
 
-    long long start_time = get_time_ms();
+    long long st = get_time_ms(); const char *ifn = env->GetStringUTFChars(inPath, NULL); const char *ofn = env->GetStringUTFChars(outPath, NULL);
+    FILE *inf = fopen(ifn, "rb"), *ouf = fopen(ofn, "wb");
+    if(!inf||!ouf){ if(inf)fclose(inf); if(ouf)fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
 
-    const char *in_file  = env->GetStringUTFChars(inPath,  NULL);
-    const char *out_file = env->GetStringUTFChars(outPath, NULL);
-    FILE *infile  = fopen(in_file,  "rb");
-    FILE *outfile = fopen(out_file, "wb");
+    struct jpeg_decompress_struct cd; struct my_error_mgr jd; cd.err = jpeg_std_error(&jd.pub); jd.pub.error_exit = my_error_exit;
+    if(setjmp(jd.setjmp_buffer)){ jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    jpeg_create_decompress(&cd); jpeg_stdio_src(&cd, inf); 
+    
+    // --- PRESERVE ALL SONY MARKERS ---
+    for (int i = 0; i < 16; i++) jpeg_save_markers(&cd, JPEG_APP0 + i, 0xFFFF);
+    jpeg_save_markers(&cd, JPEG_COM, 0xFFFF);
 
-    if (!infile || !outfile) {
-        if (infile)  fclose(infile);
-        if (outfile) fclose(outfile);
-        env->ReleaseStringUTFChars(inPath,  in_file);
-        env->ReleaseStringUTFChars(outPath, out_file);
+    jpeg_read_header(&cd, TRUE);
+    cd.scale_denom = scaleDenom; cd.out_color_space = JCS_RGB; jpeg_start_decompress(&cd);
+
+    struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
+    if(setjmp(jc.setjmp_buffer)){ jpeg_destroy_compress(&cc); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_FALSE; }
+    jpeg_create_compress(&cc); jpeg_stdio_dest(&cc, ouf);
+    
+    int fh = cd.output_height, sk = 0; if(applyCrop){ fh=(int)(cd.output_width/2.71f); sk=(cd.output_height-fh)/2; }
+    cc.image_width = cd.output_width; cc.image_height = fh; cc.input_components = 3; cc.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&cc); jpeg_set_quality(&cc, jpegQuality, TRUE); 
+    
+    // --- COPY ALL MARKERS BACK (Fixes Review Error) ---
+    jpeg_start_compress(&cc, TRUE);
+    jpeg_saved_marker_ptr mark = cd.marker_list;
+    while (mark) {
+        jpeg_write_marker(&cc, mark->marker, mark->data, mark->data_length);
+        mark = mark->next;
+    }
+
+    int rs = cd.output_width*3;
+    
+    // Extremely cache-friendly chunk size for single-core execution on older L2 caches
+    int CHK = 64; 
+    int BUF = CHK + 20;
+
+    unsigned char* rb = (unsigned char*)malloc(BUF*rs);
+    unsigned char* ob = (unsigned char*)malloc(CHK*rs);
+    if (!rb || !ob) {
+        if (rb) free(rb);
+        if (ob) free(ob);
+        jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc);
+        jpeg_finish_decompress(&cd); jpeg_destroy_decompress(&cd);
+        fclose(inf); fclose(ouf);
+        env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
         return JNI_FALSE;
     }
+    unsigned char* r[256];
+    unsigned char* orw[256];
+    for(int i=0; i<BUF; i++) r[i]=rb+(i*rs);
+    for(int i=0; i<CHK; i++) orw[i]=ob+(i*rs);
 
-    std::vector<uint8_t> exifData;
-    int targetOffset = 0;
-    int finalScale   = scaleDenom;
+    int map[256]; for(int i=0; i<256; i++) map[i]=(i*(nativeLutSize-1)*128)/255;
+    uint8_t roll[256]; generate_rolloff_lut(roll, rollOff);
 
-    unsigned char* header = (unsigned char*)malloc(1048576);
-    if (header) {
-        int readLen = fread(header, 1, 1048576, infile);
-        for (int i = 0; i < readLen - 8; i++) {
-            if (header[i] == 0xFF && header[i+1] == 0xE1) {
-                if (header[i+4]=='E' && header[i+5]=='x' && header[i+6]=='i' && header[i+7]=='f') {
-                    int len = (header[i+2] << 8) | header[i+3];
-                    if (i + 2 + len <= readLen) exifData.assign(header + i + 4, header + i + 2 + len);
-                    break;
-                }
-            }
-        }
-        if (scaleDenom == 4) {
-            for (int i = 1000; i < readLen - 10; i++) {
-                if (header[i] == 0xFF && header[i+1] == 0xD8) {
-                    for (int j = i + 2; j < i + 65536 && j < readLen - 10; j++) {
-                        if (header[j] == 0xFF && header[j+1] == 0xC0) {
-                            int width = (header[j+7] << 8) | header[j+8];
-                            if (width >= 1000 && width <= 2000) { targetOffset = i; finalScale = 1; break; }
-                        }
-                    }
-                }
-                if (finalScale == 1) break;
-            }
-        }
-        free(header);
-    }
+    int inv_y[256];
+    for (int i = 0; i < 256; i++) inv_y[i] = 65536 / (i == 0 ? 1 : i);
 
-    bool use_rgb_path = (nativeLutSize > 0 && opacity > 0);
-    struct jpeg_decompress_struct cinfo_d;
-    struct jpeg_compress_struct   cinfo_c;
-    struct my_error_mgr jerr_d, jerr_c;
-
-    cinfo_d.err = jpeg_std_error(&jerr_d.pub);
-    jerr_d.pub.error_exit = my_error_exit;
-    jpeg_create_decompress(&cinfo_d);
-
-    bool decoded = false;
-    if (scaleDenom == 4 && targetOffset > 0) {
-        fseek(infile, targetOffset, SEEK_SET);
-        if (!setjmp(jerr_d.setjmp_buffer)) {
-            jpeg_stdio_src(&cinfo_d, infile);
-            jpeg_read_header(&cinfo_d, TRUE);
-            cinfo_d.scale_num = 1; cinfo_d.scale_denom = 1;
-            cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr;
-            jpeg_start_decompress(&cinfo_d);
-            decoded = true;
-        }
-    }
-    if (!decoded) {
-        fseek(infile, 0, SEEK_SET);
-        if (setjmp(jerr_d.setjmp_buffer)) {
-            jpeg_destroy_decompress(&cinfo_d);
-            fclose(infile); fclose(outfile);
+    int ws_s = cd.output_width * sizeof(int);
+    int* work_0 = NULL; int* work_1 = NULL; int* work_2 = NULL; int* work_h = NULL; int* h_line = NULL;
+    if (bloom > 0 || halation > 0) {
+        work_0 = (int*)malloc(ws_s); work_1 = (int*)malloc(ws_s); work_2 = (int*)malloc(ws_s);
+        work_h = (int*)malloc(ws_s); h_line = (int*)malloc(ws_s);
+        if (!work_0 || !work_1 || !work_2 || !work_h || !h_line) {
+            free(rb); free(ob);
+            if(work_0) free(work_0); if(work_1) free(work_1); if(work_2) free(work_2);
+            if(work_h) free(work_h); if(h_line) free(h_line);
+            jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc);
+            jpeg_finish_decompress(&cd); jpeg_destroy_decompress(&cd);
+            fclose(inf); fclose(ouf);
+            env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
             return JNI_FALSE;
         }
-        jpeg_stdio_src(&cinfo_d, infile);
-        jpeg_read_header(&cinfo_d, TRUE);
-        cinfo_d.scale_num = 1; cinfo_d.scale_denom = (scaleDenom == 4) ? 4 : scaleDenom;
-        cinfo_d.out_color_space = use_rgb_path ? JCS_RGB : JCS_YCbCr;
-        jpeg_start_decompress(&cinfo_d);
     }
 
-    cinfo_c.err = jpeg_std_error(&jerr_c.pub);
-    jerr_c.pub.error_exit = my_error_exit;
-    if (setjmp(jerr_c.setjmp_buffer)) {
-        jpeg_destroy_compress(&cinfo_c); jpeg_destroy_decompress(&cinfo_d);
-        fclose(infile); fclose(outfile);
+    const uint8_t* tex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
+    bool is1k = nativeGrainTexture.size() > 1000000;
+    JSAMPROW rpx[1];
+    if(cd.output_height>0){ rpx[0]=r[10]; jpeg_read_scanlines(&cd,rpx,1); for(int i=0; i<10; i++) memcpy(r[i],r[10],rs); }
+    for(int i=11; i<BUF; i++){ if(cd.output_scanline < cd.output_height){ rpx[0]=r[i]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[i],r[i-1],rs); }
+
+    bool use_rgb = (nativeLutSize > 0 && opacity > 0);
+    int opac_m = (opacity * 256) / 100;
+    long long cx = cd.output_width / 2;
+    long long cy_center = cd.output_height / 2;
+    long long vig_coef = get_vig_coef(vignette, cx * cx + cy_center * cy_center);
+    
+    // Seed grain randomization with a fixed but distinct value per image
+    long long current_time = get_time_ms();
+    int tx_base = (int)(current_time % 1021);
+    int ty_base = (int)((current_time / 13) % 1021);
+
+    int pr = 0; while(pr < (int)cd.output_height){
+        int rtp = std::min(CHK, (int)cd.output_height-pr);
+        for (int i = 0; i < rtp; i++) {
+            int ay = pr + i;
+            if (!applyCrop || (ay >= sk && ay < sk + fh)) {
+                unsigned char* win[21];
+                for (int w = 0; w < 21; w++) win[w] = r[i + w];
+                memcpy(orw[i], win[10], cd.output_width * 3);
+                
+                if (bloom > 0 || halation > 0) {
+                    apply_bloom_halation(win, orw[i], cd.output_width, ay, !use_rgb, bloom, halation,
+                        work_0, work_1, work_2, work_h, h_line, scaleDenom);
+                }
+                
+                if (use_rgb) {
+                    process_row_rgb(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                        grain, grainSize, scaleDenom, opac_m, map, nativeLut.data(),
+                        nativeLutSize, nativeLutSize - 1, nativeLutSize * nativeLutSize,
+                        inv_y, tex, is1k, tx_base, ty_base);
+                } else {
+                    process_row_yuv(orw[i], cd.output_width, ay, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, halation, vignette,
+                        grain, grainSize, scaleDenom, roll, inv_y, tex, is1k, tx_base, ty_base);
+                }
+            }
+        }
+        for(int i=0; i<rtp; i++){ int ay=pr+i; if(!applyCrop||(ay>=sk && ay<sk+fh)){ rpx[0]=orw[i]; jpeg_write_scanlines(&cc,rpx,1); } }
+        unsigned char* tmpx[256]; for(int i=0; i<rtp; i++) tmpx[i]=r[i]; for(int i=0; i<BUF-rtp; i++) r[i]=r[i+rtp];
+        for(int i=0; i<rtp; i++){ int di=BUF-rtp+i; r[di]=tmpx[i]; if(cd.output_scanline<cd.output_height){ rpx[0]=r[di]; jpeg_read_scanlines(&cd,rpx,1); } else memcpy(r[di],r[di-1],rs); }
+        pr += rtp;
+    }
+    
+    if (work_0) { free(work_0); free(work_1); free(work_2); free(work_h); free(h_line); }
+    free(rb); free(ob); jpeg_finish_compress(&cc); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn); return JNI_TRUE;
+}
+
+// --- FULL RESOLUTION DIPTYCH STITCH ENGINE (FULL STABILITY) ---
+extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_DiptychManager_stitchDiptychNative(
+    JNIEnv* env, jobject obj, jstring path1, jstring path2, jstring outPath, jboolean firstShotLeft, jint quality) {
+    
+    const char *p1 = env->GetStringUTFChars(path1, NULL);
+    const char *p2 = env->GetStringUTFChars(path2, NULL);
+    const char *po = env->GetStringUTFChars(outPath, NULL);
+    FILE *f1 = fopen(p1, "rb"), *f2 = fopen(p2, "rb"), *fo = fopen(po, "wb");
+    if (!f1 || !f2 || !fo) {
+        LOGD("Diptych open failed: %s | %s | %s", p1, p2, po);
+        if(f1)fclose(f1); if(f2)fclose(f2); if(fo)fclose(fo);
+        env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
         return JNI_FALSE;
     }
 
-    jpeg_create_compress(&cinfo_c);
-    jpeg_stdio_dest(&cinfo_c, outfile);
+    struct jpeg_decompress_struct c1, c2; 
+    struct my_error_mgr j1, j2;
     
-    // --- NEW: XPAN CROP MATH ---
-    int final_height = cinfo_d.output_height;
-    int skip_top = 0;
-    if (applyCrop) {
-        final_height = (int)(cinfo_d.output_width / 2.71f);
-        skip_top = (cinfo_d.output_height - final_height) / 2;
-    }
-
-    cinfo_c.image_width      = cinfo_d.output_width;
-    cinfo_c.image_height     = final_height; // <-- CROP APPLIED HERE
-    cinfo_c.input_components = 3;
-    cinfo_c.in_color_space   = use_rgb_path ? JCS_RGB : JCS_YCbCr;
-    jpeg_set_defaults(&cinfo_c);
-    jpeg_set_quality(&cinfo_c, jpegQuality, TRUE);
+    // Bullet-proof initialization so error handlers don't crash on NULL pointers
+    memset(&c1, 0, sizeof(c1));
+    memset(&c2, 0, sizeof(c2));
     
-    jpeg_start_compress(&cinfo_c, TRUE);
-
-    if (!exifData.empty()) jpeg_write_marker(&cinfo_c, JPEG_APP0 + 1, exifData.data(), exifData.size());
-
-    int row_stride    = cinfo_d.output_width * 3;
-    long long cx      = cinfo_d.output_width  / 2;
-    long long cy_center = cinfo_d.output_height / 2; // Original center maintained!
-    long long max_dist_sq = cx * cx + cy_center * cy_center;
-    long long vig_coef    = get_vig_coef(vignette, max_dist_sq);
-    int opac_mapped   = (opacity * 256) / 100;
-    bool use_optical_pass = (bloom > 0 || halation > 0);
-
-    // --- MEMORY-SAFE 21-ROW SYMMETRIC BUFFER (~400KB overhead) ---
-    unsigned char* row_block = NULL;
-    unsigned char* rows[22];
-    JSAMPROW row_pointer[1];
-
-    int map[256];
-    int lutMax   = nativeLutSize - 1;
-    int lutSize2 = nativeLutSize * nativeLutSize;
-    if (use_rgb_path) {
-        for (int i = 0; i < 256; i++) { map[i] = (i * lutMax * 128) / 255; }
+    c1.err = jpeg_std_error(&j1.pub); j1.pub.error_exit = my_error_exit;
+    c2.err = jpeg_std_error(&j2.pub); j2.pub.error_exit = my_error_exit;
+    if(setjmp(j1.setjmp_buffer) || setjmp(j2.setjmp_buffer)) {
+        LOGD("Diptych jpeg decode setup failed");
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
+        fclose(f1); fclose(f2); fclose(fo);
+        env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
+        return JNI_FALSE;
     }
-
-    uint8_t rolloff_lut[256];
-    if (!use_rgb_path && rollOff > 0) {
-        generate_rolloff_lut(rolloff_lut, rollOff);
+    
+    jpeg_create_decompress(&c1); jpeg_stdio_src(&c1, f1); jpeg_read_header(&c1, TRUE);
+    jpeg_create_decompress(&c2); jpeg_stdio_src(&c2, f2); jpeg_read_header(&c2, TRUE);
+    
+    c1.scale_denom = (c1.image_width > 3000) ? 2 : 1;
+    c2.scale_denom = (c2.image_width > 3000) ? 2 : 1;
+    
+    c1.dct_method = JDCT_IFAST; c1.do_fancy_upsampling = FALSE;
+    c2.dct_method = JDCT_IFAST; c2.do_fancy_upsampling = FALSE;
+    
+    c1.out_color_space = JCS_RGB; jpeg_start_decompress(&c1);
+    c2.out_color_space = JCS_RGB; jpeg_start_decompress(&c2);
+    
+    struct jpeg_compress_struct co; 
+    struct my_error_mgr jo; 
+    memset(&co, 0, sizeof(co));
+    
+    co.err = jpeg_std_error(&jo.pub); jo.pub.error_exit = my_error_exit;
+    if(setjmp(jo.setjmp_buffer)) {
+        LOGD("Diptych jpeg encode setup failed");
+        if (co.mem) jpeg_destroy_compress(&co);
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
+        fclose(f1); fclose(f2); fclose(fo);
+        env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
+        return JNI_FALSE;
     }
-
-    // --- PRE-ALLOCATE WORKSPACE FOR BLOOM & HALATION ---
-    int* work_0 = NULL;
-    int* work_h = NULL;
-    if (use_optical_pass) {
-        int w_size = cinfo_d.output_width * sizeof(int);
-        work_0 = (int*)malloc(w_size);
-        work_h = (int*)malloc(w_size);
+    jpeg_create_compress(&co); jpeg_stdio_dest(&co, fo);
+    
+    int w1 = c1.output_width, h1 = c1.output_height;
+    int w2 = c2.output_width, h2 = c2.output_height;
+    int half1 = w1 / 2, half2 = w2 / 2;
+    int q1 = w1 / 4, q2 = w2 / 4;
+    int finalW = half1 + half2, finalH = std::min(h1, h2);
+    
+    co.image_width = finalW; co.image_height = finalH; co.input_components = 3; co.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&co); jpeg_set_quality(&co, quality, TRUE); jpeg_start_compress(&co, TRUE);
+    
+    unsigned char *row1 = (unsigned char*)malloc(w1 * 3);
+    unsigned char *row2 = (unsigned char*)malloc(w2 * 3);
+    unsigned char *combined = (unsigned char*)malloc(finalW * 3);
+    if (!row1 || !row2 || !combined) {
+        LOGD("Diptych malloc failed");
+        if (row1) free(row1);
+        if (row2) free(row2);
+        if (combined) free(combined);
+        if (co.mem) jpeg_destroy_compress(&co);
+        if (c1.mem) jpeg_destroy_decompress(&c1);
+        if (c2.mem) jpeg_destroy_decompress(&c2);
+        fclose(f1); fclose(f2); fclose(fo);
+        env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
+        return JNI_FALSE;
     }
-
-    // --- GRAIN SEED ---
-    uint32_t seed = (uint32_t)(start_time & 0xFFFFFFFF);
-    if (seed == 0) seed = 98765;
-
-    // --- PRE-LOAD BUFFER (Initialize the 21-row window) ---
-    const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
-
-    if (!use_optical_pass) {
-        unsigned char* process_row = (unsigned char*)malloc(row_stride);
-
-        int processed_rows = 0;
-        while (processed_rows < cinfo_d.output_height) {
-            int abs_y = processed_rows;
-            row_pointer[0] = process_row;
-            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-
-            bool is_visible = !applyCrop || (abs_y >= skip_top && abs_y < skip_top + final_height);
-
-            if (is_visible) {
-                if (use_rgb_path) {
-                    process_row_rgb(
-                        process_row, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                        opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
-                        externalTex
-                    );
-                } else {
-                    process_row_yuv(
-                        process_row, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                        rolloff_lut,
-                        externalTex
-                    );
-                }
-
-                row_pointer[0] = process_row;
-                jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
-            }
-
-            processed_rows++;
+    JSAMPROW rp1[1], rp2[1], rpo[1]; rp1[0] = row1; rp2[0] = row2; rpo[0] = combined;
+    
+    for (int y = 0; y < finalH; y++) {
+        jpeg_read_scanlines(&c1, rp1, 1); jpeg_read_scanlines(&c2, rp2, 1);
+        if (firstShotLeft) {
+            memcpy(combined, row1 + q1 * 3, half1 * 3);
+            memcpy(combined + half1 * 3, row2 + q2 * 3, half2 * 3);
+        } else {
+            memcpy(combined, row2 + q2 * 3, half2 * 3);
+            memcpy(combined + half2 * 3, row1 + q1 * 3, half1 * 3);
         }
-
-        free(process_row);
-    } else {
-        row_block = (unsigned char*)malloc(22 * row_stride);
-        for (int i = 0; i < 22; i++) rows[i] = row_block + (i * row_stride);
-
-        if (cinfo_d.output_height > 0) {
-            row_pointer[0] = rows[10];
-            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-            for (int i = 0; i < 10; i++) memcpy(rows[i], rows[10], row_stride);
-        }
-
-        for (int i = 11; i <= 20; i++) {
-            if (cinfo_d.output_scanline < cinfo_d.output_height) {
-                row_pointer[0] = rows[i];
-                jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-            } else {
-                memcpy(rows[i], rows[i-1], row_stride);
+        // Draw Divider
+        int dividerX = firstShotLeft ? half1 : half2;
+        for(int d=-1; d<=1; d++) {
+            int dx = dividerX + d;
+            if (dx >= 0 && dx < finalW) {
+                int di = dx * 3;
+                combined[di]=combined[di+1]=combined[di+2]=0;
             }
         }
-
-        // --- MAIN PROCESSING LOOP ---
-        int processed_rows = 0;
-        while (processed_rows < cinfo_d.output_height) {
-            int abs_y = processed_rows;
-
-            // --- NEW: SKIP PROCESSING INVISIBLE ROWS ---
-            // If we are applying the matte, only process and save the middle rows!
-            bool is_visible = !applyCrop || (abs_y >= skip_top && abs_y < skip_top + final_height);
-
-            if (is_visible) {
-                // Keep the source row untouched for the 21-row optical window.
-                memcpy(rows[21], rows[10], row_stride);
-                apply_bloom_halation(rows, rows[21], cinfo_d.output_width, abs_y, !use_rgb_path, bloom, halation, seed, 
-                                     work_0, NULL, NULL, work_h, NULL, scaleDenom);
-
-                if (use_rgb_path) {
-                    process_row_rgb(
-                        rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                        opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
-                        externalTex
-                    );
-                } else {
-                    process_row_yuv(
-                        rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                        rolloff_lut,
-                        externalTex
-                    );
-                }
-
-                row_pointer[0] = rows[21];
-                jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
-            }
-
-            // Slide the window: move rows up (We MUST do this even for invisible rows!)
-            unsigned char* oldest = rows[0];
-            for (int i = 0; i < 20; i++) rows[i] = rows[i+1];
-            rows[20] = oldest;
-
-            // Read the next scanline into the bottom of the window
-            if (cinfo_d.output_scanline < cinfo_d.output_height) {
-                row_pointer[0] = rows[20];
-                jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-            } else {
-                memcpy(rows[20], rows[19], row_stride);
-            }
-
-            processed_rows++;
-        }
-
-        free(row_block);
+        jpeg_write_scanlines(&co, rpo, 1);
     }
-
-    if (work_0) free(work_0);
-    if (work_h) free(work_h);
-
-    jpeg_finish_compress(&cinfo_c);  jpeg_destroy_compress(&cinfo_c);
-    jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
-    fclose(infile); fclose(outfile);
-    env->ReleaseStringUTFChars(inPath, in_file);
-    env->ReleaseStringUTFChars(outPath, out_file);
+    
+    free(row1); free(row2); free(combined);
+    jpeg_finish_compress(&co); jpeg_destroy_compress(&co);
+    
+    // Abort decompression immediately without finishing to avoid unread scanline errors
+    jpeg_destroy_decompress(&c1);
+    jpeg_destroy_decompress(&c2);
+    
+    LOGD("Diptych saved: %s", po);
+    fclose(f1); fclose(f2); fclose(fo);
+    env->ReleaseStringUTFChars(path1, p1); env->ReleaseStringUTFChars(path2, p2); env->ReleaseStringUTFChars(outPath, po);
     return JNI_TRUE;
 }

@@ -18,6 +18,11 @@ public class RecipeManager {
     private int currentSlot = 0;
 
     private int qualityIndex = 1;
+    private int prefC1 = 0;
+    private int prefC2 = 0;
+    private int prefC3 = 0;
+    private int prefAel = 0;
+    private int prefFn = 0;
     private ArrayList<String> recipePaths = new ArrayList<String>();
     private ArrayList<String> recipeNames = new ArrayList<String>();
 
@@ -43,6 +48,17 @@ public class RecipeManager {
         this.qualityIndex = (index + 3) % 3;
         savePreferences();
     }
+
+    public int getPrefC1() { return prefC1; }
+    public void setPrefC1(int v) { prefC1 = v; savePreferences(); }
+    public int getPrefC2() { return prefC2; }
+    public void setPrefC2(int v) { prefC2 = v; savePreferences(); }
+    public int getPrefC3() { return prefC3; }
+    public void setPrefC3(int v) { prefC3 = v; savePreferences(); }
+    public int getPrefAel() { return prefAel; }
+    public void setPrefAel(int v) { prefAel = v; savePreferences(); }
+    public int getPrefFn() { return prefFn; }
+    public void setPrefFn(int v) { prefFn = v; savePreferences(); }
 
     public RTLProfile getCurrentProfile() { return loadedProfiles[currentSlot]; }
     public RTLProfile getProfile(int index) { return loadedProfiles[index]; }
@@ -137,8 +153,21 @@ public class RecipeManager {
             p.halation        = json.optInt("halation", 0);
             p.vignette        = json.optInt("vignette", 0);
             p.grain           = json.optInt("grain", 0);
-            p.grainSize       = json.optInt("grainSize", 0);
-            p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 0);
+            
+            String loadedGrainName = json.optString("grainName", "NONE");
+            List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
+
+            if (!loadedGrainName.equals("NONE")) {
+                p.grainSize = grainOptions.indexOf(loadedGrainName.toUpperCase());
+                if (p.grainSize == -1) p.grainSize = 0;
+            } else {
+                // Legacy Recipe Fallback
+                int legacySize = json.optInt("grainSize", 0);
+                String legacyName = (legacySize == 0) ? "SMALL" : (legacySize == 1) ? "MED" : "LARGE";
+                p.grainSize = grainOptions.indexOf(legacyName);
+                if (p.grainSize == -1) p.grainSize = 0; // If not found, use first available
+            }
+
             p.bloom           = json.optInt("bloom", 0);
             p.contrast        = json.optInt("contrast", 0);
             p.saturation      = json.optInt("saturation", 0);
@@ -187,7 +216,16 @@ public class RecipeManager {
             sb.append("  \"vignette\": ").append(p.vignette).append(",\n");
             sb.append("  \"grain\": ").append(p.grain).append(",\n");
             sb.append("  \"grainSize\": ").append(p.grainSize).append(",\n");
-            sb.append("  \"advancedGrainExperimental\": ").append(p.advancedGrainExperimental).append(",\n");
+
+            String grainNameToSave = "NONE";
+            if (p.grain > 0) {
+                List<String> grainOptions = java.util.Arrays.asList(MenuController.getGrainEngineOptions());
+                if (p.grainSize >= 0 && p.grainSize < grainOptions.size()) {
+                    grainNameToSave = grainOptions.get(p.grainSize);
+                }
+            }
+            sb.append("  \"grainName\": \"").append(grainNameToSave.replace("\"", "\\\"")).append("\",\n");
+
             sb.append("  \"bloom\": ").append(p.bloom).append(",\n");
             sb.append("  \"contrast\": ").append(p.contrast).append(",\n");
             sb.append("  \"saturation\": ").append(p.saturation).append(",\n");
@@ -228,6 +266,11 @@ public class RecipeManager {
                 while ((line = br.readLine()) != null) {
                     if (line.startsWith("quality=")) qualityIndex = Integer.parseInt(line.split("=")[1]);
                     else if (line.startsWith("slot=")) currentSlot = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("c1=")) prefC1 = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("c2=")) prefC2 = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("c3=")) prefC3 = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("ael=")) prefAel = Integer.parseInt(line.split("=")[1]);
+                    else if (line.startsWith("fn=")) prefFn = Integer.parseInt(line.split("=")[1]);
                 }
                 br.close();
             } catch (Exception e) {}
@@ -238,7 +281,10 @@ public class RecipeManager {
         try {
             File prefsFile = new File(recipeDir, "PREFS.TXT");
             FileOutputStream fos = new FileOutputStream(prefsFile);
-            fos.write(("quality=" + qualityIndex + "\nslot=" + currentSlot + "\n").getBytes());
+            String prefsData = "quality=" + qualityIndex + "\nslot=" + currentSlot + "\n" +
+                               "c1=" + prefC1 + "\nc2=" + prefC2 + "\nc3=" + prefC3 + "\n" +
+                               "ael=" + prefAel + "\nfn=" + prefFn + "\n";
+            fos.write(prefsData.getBytes());
             fos.close();
 
             if (loadedProfiles[currentSlot] != null) {
