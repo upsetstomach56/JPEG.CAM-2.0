@@ -63,7 +63,7 @@ inline uint32_t fast_rand(uint32_t* state) {
 }
 
 inline int grain_strength_v16(int grain, int grainSize) {
-    int s_grain = grain * 20;
+    int s_grain = grain * 10;
     if (grainSize == 1) s_grain = (s_grain * 3) >> 1;
     if (grainSize == 2) s_grain = (s_grain * 5) >> 2;
     return s_grain;
@@ -349,6 +349,14 @@ inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
     return (row[i] * 77 + row[i + 1] * 150 + row[i + 2] * 29) >> 8;
 }
 
+inline int grain_resolution_scale256(int scaleDenom) {
+    switch (scaleDenom) {
+        case 2: return 64;
+        case 4: return 32;
+        default: return 256;
+    }
+}
+
 // ==========================================
 // PATH A: RGB + LUT + ANALOG PHYSICS
 // ==========================================
@@ -360,16 +368,16 @@ inline void process_row_rgb(
     uint32_t& seed,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
-    const uint16_t* y_ratio_lut,
+    const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
-    (void)scaleDenom;
     int s_roll   = rollOff * 20;
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     int s_grain = grain_strength_v16(grain, grainSize);
+    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -448,7 +456,7 @@ inline void process_row_rgb(
 
         if (targetY < 8) targetY = 8;
         if (targetY != currentY) {
-            int r256 = y_ratio_lut[(targetY << 8) + currentY];
+            int r256 = (targetY * inv_y_lut[currentY]) >> 8;
             outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
         }
 
@@ -485,16 +493,16 @@ inline void process_row_yuv(
     int grain, int grainSize, int scaleDenom,
     uint32_t& seed,
     const uint8_t* rolloff_lut,
-    const uint16_t* y_ratio_lut,
+    const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
-    (void)scaleDenom;
     int s_chrome = colorChrome * 40;
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     
     int s_grain = grain_strength_v16(grain, grainSize);
+    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -561,7 +569,7 @@ inline void process_row_yuv(
         }
 
         if (oldY != outY) {
-            int r256 = y_ratio_lut[(outY << 8) + oldY];
+            int r256 = (outY * inv_y_lut[oldY]) >> 8;
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
 
