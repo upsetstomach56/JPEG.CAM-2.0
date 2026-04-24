@@ -125,12 +125,10 @@ public class HardwareRecipeApplier {
         // ----------------------------------------------------------------
         p = c.getParameters();
 
-        // Kelvin White Balance — full 2500K–9900K range via "color-temp" key.
-        // Note: Sony typo "color-temperture" is intentional — matches hardware key.
+        // v1.6 did not map recipe Kelvin strings like "5500K"; keep them on auto.
         String wb     = "auto";
         String profWb = prof.whiteBalance != null ? prof.whiteBalance : "Auto";
-        if      (profWb.endsWith("K"))    { wb = "color-temp"; p.set("color-temperture-white-balance", profWb.replace("K", "")); }
-        else if ("DAY".equals(profWb))    wb = "daylight";
+        if      ("DAY".equals(profWb))    wb = "daylight";
         else if ("SHD".equals(profWb))    wb = "shade";
         else if ("CLD".equals(profWb))    wb = "cloudy-daylight";
         else if ("INC".equals(profWb))    wb = "incandescent";

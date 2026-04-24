@@ -351,8 +351,8 @@ inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
 
 inline int grain_resolution_scale256(int scaleDenom) {
     switch (scaleDenom) {
-        case 2: return 64;
-        case 4: return 32;
+        case 2: return 68;
+        case 4: return 34;
         default: return 256;
     }
 }
