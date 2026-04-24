@@ -98,15 +98,17 @@ inline void apply_bloom_halation(
 
     if (!work_0 || !work_h) return;
 
+    static const int BLOOM_WEIGHTS[21] = {1,2,3,4,5,6,7,8,9,10,11,10,9,8,7,6,5,4,3,2,1};
+
     // 2. Vertical Summation: Extracting Pure Light Maps (High Precision)
     for (int x = 0; x < width; x++) {
         long long s0 = 0, sh = 0;
         for (int y = 0; y <= 20; y++) {
-            int w = (y <= 10) ? (y + 1) : (21 - y); // Triangle weight
+            int w = BLOOM_WEIGHTS[y];
             int v0 = rows[y][x*3], v1 = rows[y][x*3+1], v2 = rows[y][x*3+2];
             
             // Calculate true brightness (Luma)
-            int lum = is_yuv ? v0 : ((v0*77 + v1*150 + v2*29) / 256);
+            int lum = is_yuv ? v0 : ((v0*77 + v1*150 + v2*29) >> 8);
 
             // --- V6 "SMART" LUMINANCE-DEPENDENT BLOOM EMISSION ---
             int bloom_emission;
@@ -291,10 +293,10 @@ inline void sample_tex_bilinear_512_xor(const uint8_t* tex, int x_fp8, int y_fp8
 inline int grain_amount_mask(int y) {
     if (y < 16 || y > 236) return 0;
     if (y < 40) return ((y - 16) * 52) >> 3;
-    if (y < 96) return 156 + ((y - 40) * 88) / 56;
-    if (y < 148) return 244 - ((y - 96) * 36) / 52;
-    if (y < 196) return 208 - ((y - 148) * 120) / 48;
-    return 88 - ((y - 196) * 88) / 40;
+    if (y < 96) return 156 + (((y - 40) * 402) >> 8);
+    if (y < 148) return 244 - (((y - 96) * 177) >> 8);
+    if (y < 196) return 208 - (((y - 148) * 640) >> 8);
+    return 88 - (((y - 196) * 563) >> 8);
 }
 
 inline int row_luma_rgb_at(const uint8_t* row, int width, int x) {
@@ -322,6 +324,7 @@ inline void process_row_rgb(
     int grain, int grainSize, int scaleDenom,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
+    const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
@@ -379,7 +382,10 @@ inline void process_row_rgb(
 
         if (shadowToe > 0) {
             int lift = (shadowToe == 1) ? 35 : 55;
-            if (targetY < lift) targetY += ((lift - targetY) * (lift - targetY)) / (shadowToe == 1 ? 140 : 180);
+            if (targetY < lift) {
+                if (shadowToe == 1) targetY += ((lift - targetY) * (lift - targetY)) / 140;
+                else targetY += ((lift - targetY) * (lift - targetY)) / 180;
+            }
         }
         if (rollOff > 0 && targetY > 200) targetY -= ((targetY - 200) * (targetY - 200) * s_roll) / 11000;
 
@@ -412,7 +418,7 @@ inline void process_row_rgb(
 
         if (targetY < 8) targetY = 8;
         if (targetY != currentY) {
-            int r256 = (targetY * 256) / (currentY == 0 ? 1 : currentY);
+            int r256 = (targetY * inv_y_lut[currentY]) >> 8;
             outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
         }
 
@@ -509,6 +515,7 @@ inline void process_row_yuv(
     int subtractiveSat, int halation, int vignette,
     int grain, int grainSize, int scaleDenom,
     const uint8_t* rolloff_lut,
+    const int* inv_y_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
@@ -536,7 +543,10 @@ inline void process_row_yuv(
 
         if (shadowToe > 0) {
             int lift = (shadowToe == 1) ? 35 : 55;
-            if (outY < lift) outY += ((lift - outY) * (lift - outY)) / (shadowToe == 1 ? 140 : 180);
+            if (outY < lift) {
+                if (shadowToe == 1) outY += ((lift - outY) * (lift - outY)) / 140;
+                else outY += ((lift - outY) * (lift - outY)) / 180;
+            }
         }
         if (rollOff > 0) outY = rolloff_lut[outY];
         
@@ -582,7 +592,7 @@ inline void process_row_yuv(
         }
 
         if (oldY != outY) {
-            int r256 = (outY * 256) / (oldY == 0 ? 1 : oldY);
+            int r256 = (outY * inv_y_lut[oldY]) >> 8;
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
 
