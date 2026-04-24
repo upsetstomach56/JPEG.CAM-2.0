@@ -368,7 +368,7 @@ inline void process_row_rgb(
     uint32_t& seed,
     int opac_mapped, const int* map,
     const uint8_t* nativeLut, int nativeLutSize, int lutMax, int lutSize2,
-    const int* inv_y_lut,
+    const uint16_t* y_ratio_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
@@ -456,7 +456,7 @@ inline void process_row_rgb(
 
         if (targetY < 8) targetY = 8;
         if (targetY != currentY) {
-            int r256 = (targetY * inv_y_lut[currentY]) >> 8;
+            int r256 = y_ratio_lut[(targetY << 8) + currentY];
             outR = (outR * r256) >> 8; outG = (outG * r256) >> 8; outB = (outB * r256) >> 8;
         }
 
@@ -493,7 +493,7 @@ inline void process_row_yuv(
     int grain, int grainSize, int scaleDenom,
     uint32_t& seed,
     const uint8_t* rolloff_lut,
-    const int* inv_y_lut,
+    const uint16_t* y_ratio_lut,
     const uint8_t* externalGrainTexture = NULL,
     bool is_1024_grain = false, int t_off_x = 0, int t_off_y = 0)
 {
@@ -569,7 +569,7 @@ inline void process_row_yuv(
         }
 
         if (oldY != outY) {
-            int r256 = (outY * inv_y_lut[oldY]) >> 8;
+            int r256 = y_ratio_lut[(outY << 8) + oldY];
             cb = (cb * r256) >> 8; cr = (cr * r256) >> 8;
         }
 
