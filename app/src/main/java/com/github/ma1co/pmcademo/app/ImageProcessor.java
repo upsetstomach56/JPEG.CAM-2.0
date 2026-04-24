@@ -35,50 +35,69 @@ public class ImageProcessor {
         return value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
     }
 
+    private void appendLogLine(File logFile, String line) throws Exception {
+        File parent = logFile.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        FileWriter writer = null;
+        try {
+            writer = new FileWriter(logFile, true);
+            writer.write(line);
+        } finally {
+            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+        }
+        mContext.sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, Uri.fromFile(logFile)));
+    }
+
     private void appendProcessingTiming(File original, File outFile, String result,
                                         long waitMs, long textureMs, long nativeMs, long javaTotalMs,
                                         int qualityIdx, int scale, int finalJpegQuality,
                                         int finalGrainSize, int finalBloom, int numCores,
                                         RTLProfile p, boolean applyCrop, boolean isDiptych,
                                         String nativeTiming) {
-        FileWriter writer = null;
-        try {
-            File logDir = Filepaths.getLogDir();
-            File logFile = new File(logDir, "processing_times.txt");
-            writer = new FileWriter(logFile, true);
-            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-            writer.write(timestamp
-                    + "\tresult=" + cleanLogValue(result)
-                    + "\tfile=" + cleanLogValue(original.getName())
-                    + "\tinput_bytes=" + original.length()
-                    + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
-                    + "\tjava_total=" + javaTotalMs
-                    + "\twait=" + waitMs
-                    + "\ttexture=" + textureMs
-                    + "\tnative=" + nativeMs
-                    + "\tquality_idx=" + qualityIdx
-                    + "\tscale=" + scale
-                    + "\tjpeg_q=" + finalJpegQuality
-                    + "\tcrop=" + applyCrop
-                    + "\tdiptych=" + isDiptych
-                    + "\tcores=" + numCores
-                    + "\topacity=" + p.opacity
-                    + "\tgrain=" + p.grain
-                    + "\tgrain_size=" + finalGrainSize
-                    + "\tvignette=" + p.vignette
-                    + "\trolloff=" + p.rollOff
-                    + "\tcolor_chrome=" + p.colorChrome
-                    + "\tchrome_blue=" + p.chromeBlue
-                    + "\tshadow_toe=" + p.shadowToe
-                    + "\tsubtractive_sat=" + p.subtractiveSat
-                    + "\thalation=" + p.halation
-                    + "\tbloom=" + finalBloom
-                    + "\t" + cleanLogValue(nativeTiming)
-                    + "\n");
-        } catch (Exception e) {
-            Log.e("JPEG.CAM_TIMING", "Failed to append timing log: " + e.getMessage());
-        } finally {
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
+        String line = timestamp
+                + "\tresult=" + cleanLogValue(result)
+                + "\tfile=" + cleanLogValue(original.getName())
+                + "\tinput_bytes=" + original.length()
+                + "\toutput_bytes=" + (outFile.exists() ? outFile.length() : 0)
+                + "\tjava_total=" + javaTotalMs
+                + "\twait=" + waitMs
+                + "\ttexture=" + textureMs
+                + "\tnative=" + nativeMs
+                + "\tquality_idx=" + qualityIdx
+                + "\tscale=" + scale
+                + "\tjpeg_q=" + finalJpegQuality
+                + "\tcrop=" + applyCrop
+                + "\tdiptych=" + isDiptych
+                + "\tcores=" + numCores
+                + "\topacity=" + p.opacity
+                + "\tgrain=" + p.grain
+                + "\tgrain_size=" + finalGrainSize
+                + "\tvignette=" + p.vignette
+                + "\trolloff=" + p.rollOff
+                + "\tcolor_chrome=" + p.colorChrome
+                + "\tchrome_blue=" + p.chromeBlue
+                + "\tshadow_toe=" + p.shadowToe
+                + "\tsubtractive_sat=" + p.subtractiveSat
+                + "\thalation=" + p.halation
+                + "\tbloom=" + finalBloom
+                + "\t" + cleanLogValue(nativeTiming)
+                + "\n";
+
+        File[] logFiles = new File[] {
+                new File(Filepaths.getAppDir(), "TIMING.TXT"),
+                new File(Filepaths.getGradedDir(), "TIMING.TXT"),
+                new File(Filepaths.getLogDir(), "TIMING.TXT"),
+                new File(Filepaths.getLogDir(), "processing_times.txt")
+        };
+
+        for (File logFile : logFiles) {
+            try {
+                appendLogLine(logFile, line);
+                Log.d("JPEG.CAM_TIMING", "Wrote timing log: " + logFile.getAbsolutePath());
+            } catch (Exception e) {
+                Log.e("JPEG.CAM_TIMING", "Failed timing log " + logFile.getAbsolutePath() + ": " + e.getMessage());
+            }
         }
     }
 
