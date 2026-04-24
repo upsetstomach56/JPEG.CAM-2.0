@@ -5,6 +5,7 @@ import java.io.File;
 public class LutEngine {
     static { System.loadLibrary("native-lib"); }
     private String currentLutName = "";
+    private String currentGrainTexturePath = "";
 
     private native boolean loadLutNative(String filePath);
     
@@ -47,6 +48,12 @@ public class LutEngine {
     // NEW: Public wrapper to load the grain texture safely
     public boolean loadGrainTexture(File texFile) {
         if (texFile == null || !texFile.exists()) return false;
-        return loadGrainTextureNative(texFile.getAbsolutePath());
+        String texPath = texFile.getAbsolutePath();
+        if (texPath.equals(currentGrainTexturePath)) return true;
+        if (loadGrainTextureNative(texPath)) {
+            currentGrainTexturePath = texPath;
+            return true;
+        }
+        return false;
     }
 }

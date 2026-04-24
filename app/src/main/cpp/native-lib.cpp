@@ -302,11 +302,11 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     long long max_dist_sq = cx * cx + cy_center * cy_center;
     long long vig_coef    = get_vig_coef(vignette, max_dist_sq);
     int opac_mapped   = (opacity * 256) / 100;
+    bool use_optical_pass = (bloom > 0 || halation > 0);
 
     // --- MEMORY-SAFE 21-ROW SYMMETRIC BUFFER (~400KB overhead) ---
-    unsigned char* row_block = (unsigned char*)malloc(22 * row_stride);
+    unsigned char* row_block = NULL;
     unsigned char* rows[22];
-    for (int i = 0; i < 22; i++) rows[i] = row_block + (i * row_stride);
     JSAMPROW row_pointer[1];
 
     int map[256];
@@ -317,20 +317,17 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     }
 
     uint8_t rolloff_lut[256];
-    if (!use_rgb_path) {
+    if (!use_rgb_path && rollOff > 0) {
         generate_rolloff_lut(rolloff_lut, rollOff);
     }
 
     // --- PRE-ALLOCATE WORKSPACE FOR BLOOM & HALATION ---
-    int* work_0 = NULL; int* work_1 = NULL; int* work_2 = NULL; 
-    int* work_h = NULL; int* h_line = NULL;
-    if (bloom > 0 || halation > 0) {
+    int* work_0 = NULL;
+    int* work_h = NULL;
+    if (use_optical_pass) {
         int w_size = cinfo_d.output_width * sizeof(int);
         work_0 = (int*)malloc(w_size);
-        work_1 = (int*)malloc(w_size);
-        work_2 = (int*)malloc(w_size);
         work_h = (int*)malloc(w_size);
-        if (halation > 0) h_line = (int*)malloc(w_size);
     }
 
     // --- GRAIN SEED ---
@@ -340,84 +337,121 @@ Java_com_github_ma1co_pmcademo_app_LutEngine_processImageNative(
     // --- PRE-LOAD BUFFER (Initialize the 21-row window) ---
     const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
 
-    if (cinfo_d.output_height > 0) {
-        row_pointer[0] = rows[10]; 
-        jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-        for (int i = 0; i < 10; i++) memcpy(rows[i], rows[10], row_stride);
-    }
-    
-    for (int i = 11; i <= 20; i++) {
-        if (cinfo_d.output_scanline < cinfo_d.output_height) {
-            row_pointer[0] = rows[i];
+    if (!use_optical_pass) {
+        unsigned char* process_row = (unsigned char*)malloc(row_stride);
+
+        int processed_rows = 0;
+        while (processed_rows < cinfo_d.output_height) {
+            int abs_y = processed_rows;
+            row_pointer[0] = process_row;
             jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-        } else {
-            memcpy(rows[i], rows[i-1], row_stride);
-        }
-    }
 
-    // --- MAIN PROCESSING LOOP ---
-    int processed_rows = 0;
-    while (processed_rows < cinfo_d.output_height) {
-        int abs_y = processed_rows;
-        
-        // --- NEW: SKIP PROCESSING INVISIBLE ROWS ---
-        // If we are applying the matte, only process and save the middle rows!
-        bool is_visible = !applyCrop || (abs_y >= skip_top && abs_y < skip_top + final_height);
+            bool is_visible = !applyCrop || (abs_y >= skip_top && abs_y < skip_top + final_height);
 
-        if (is_visible) {
-            // Copy original curr data into out buffer (rows[21]) to safely modify it
-            memcpy(rows[21], rows[10], row_stride);
+            if (is_visible) {
+                if (use_rgb_path) {
+                    process_row_rgb(
+                        process_row, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
+                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                        opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
+                        externalTex
+                    );
+                } else {
+                    process_row_yuv(
+                        process_row, cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
+                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                        rolloff_lut,
+                        externalTex
+                    );
+                }
 
-            // Optical Bloom & Halation pre-pass
-            if (bloom > 0 || halation > 0) {
-                apply_bloom_halation(rows, rows[21], cinfo_d.output_width, abs_y, !use_rgb_path, bloom, halation, seed, 
-                                     work_0, work_1, work_2, work_h, h_line, scaleDenom);
+                row_pointer[0] = process_row;
+                jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
             }
 
-            if (use_rgb_path) {
-                process_row_rgb(
-                    rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                    shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                    grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                    opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
-                    externalTex 
-                );
+            processed_rows++;
+        }
+
+        free(process_row);
+    } else {
+        row_block = (unsigned char*)malloc(22 * row_stride);
+        for (int i = 0; i < 22; i++) rows[i] = row_block + (i * row_stride);
+
+        if (cinfo_d.output_height > 0) {
+            row_pointer[0] = rows[10];
+            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+            for (int i = 0; i < 10; i++) memcpy(rows[i], rows[10], row_stride);
+        }
+
+        for (int i = 11; i <= 20; i++) {
+            if (cinfo_d.output_scanline < cinfo_d.output_height) {
+                row_pointer[0] = rows[i];
+                jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
             } else {
-                process_row_yuv(
-                    rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
-                    shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
-                    grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
-                    rolloff_lut,
-                    externalTex 
-                );
+                memcpy(rows[i], rows[i-1], row_stride);
+            }
+        }
+
+        // --- MAIN PROCESSING LOOP ---
+        int processed_rows = 0;
+        while (processed_rows < cinfo_d.output_height) {
+            int abs_y = processed_rows;
+
+            // --- NEW: SKIP PROCESSING INVISIBLE ROWS ---
+            // If we are applying the matte, only process and save the middle rows!
+            bool is_visible = !applyCrop || (abs_y >= skip_top && abs_y < skip_top + final_height);
+
+            if (is_visible) {
+                // Keep the source row untouched for the 21-row optical window.
+                memcpy(rows[21], rows[10], row_stride);
+                apply_bloom_halation(rows, rows[21], cinfo_d.output_width, abs_y, !use_rgb_path, bloom, halation, seed, 
+                                     work_0, NULL, NULL, work_h, NULL, scaleDenom);
+
+                if (use_rgb_path) {
+                    process_row_rgb(
+                        rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
+                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                        opac_mapped, map, nativeLut.data(), nativeLutSize, lutMax, lutSize2,
+                        externalTex
+                    );
+                } else {
+                    process_row_yuv(
+                        rows[21], cinfo_d.output_width, abs_y, cx, cy_center, vig_coef,
+                        shadowToe, rollOff, colorChrome, chromeBlue, subtractiveSat, 0, vignette,
+                        grain, grainSize, scaleDenom, advancedGrainExperimental, seed,
+                        rolloff_lut,
+                        externalTex
+                    );
+                }
+
+                row_pointer[0] = rows[21];
+                jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
             }
 
-            row_pointer[0] = rows[21];
-            jpeg_write_scanlines(&cinfo_c, row_pointer, 1);
+            // Slide the window: move rows up (We MUST do this even for invisible rows!)
+            unsigned char* oldest = rows[0];
+            for (int i = 0; i < 20; i++) rows[i] = rows[i+1];
+            rows[20] = oldest;
+
+            // Read the next scanline into the bottom of the window
+            if (cinfo_d.output_scanline < cinfo_d.output_height) {
+                row_pointer[0] = rows[20];
+                jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
+            } else {
+                memcpy(rows[20], rows[19], row_stride);
+            }
+
+            processed_rows++;
         }
 
-        // Slide the window: move rows up (We MUST do this even for invisible rows!)
-        unsigned char* oldest = rows[0];
-        for (int i = 0; i < 20; i++) rows[i] = rows[i+1];
-        rows[20] = oldest; 
-
-        // Read the next scanline into the bottom of the window
-        if (cinfo_d.output_scanline < cinfo_d.output_height) {
-            row_pointer[0] = rows[20];
-            jpeg_read_scanlines(&cinfo_d, row_pointer, 1);
-        } else {
-            memcpy(rows[20], rows[19], row_stride);
-        }
-        
-        processed_rows++;
+        free(row_block);
     }
 
-    free(row_block);
     if (work_0) free(work_0);
-    if (work_1) free(work_1);
-    if (work_2) free(work_2);
     if (work_h) free(work_h);
-    if (h_line) free(h_line);
 
     jpeg_finish_compress(&cinfo_c);  jpeg_destroy_compress(&cinfo_c);
     jpeg_finish_decompress(&cinfo_d); jpeg_destroy_decompress(&cinfo_d);
