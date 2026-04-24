@@ -380,6 +380,7 @@ inline void process_row_rgb(
     int s_blue   = chromeBlue * 40;
     int s_sat    = subtractiveSat * 40;
     int s_grain = grain_strength_v16(grain, grainSize);
+    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -504,6 +505,7 @@ inline void process_row_yuv(
     int s_sat    = subtractiveSat * 40;
     
     int s_grain = grain_strength_v16(grain, grainSize);
+    s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
