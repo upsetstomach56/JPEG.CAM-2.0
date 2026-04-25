@@ -119,6 +119,8 @@ public class MenuController {
         boolean isPrefDiptych(); // <--- ADDED
         boolean isPrefGridLines();
         int     getPrefJpegQuality();
+        int     getProcessingFrequency();
+        int     getQueuedPhotoCount();
 
         // Preferences — write
         void setPrefFocusMeter(boolean v);
@@ -126,6 +128,8 @@ public class MenuController {
         void setPrefDiptych(boolean v); // <--- ADDED
         void setPrefGridLines(boolean v);
         void setPrefJpegQuality(int v);
+        void setProcessingFrequency(int v);
+        void forceProcessQueuedPhotos();
 
         // UI coordination
         FrameLayout getMainUIContainer();
@@ -447,6 +451,13 @@ public class MenuController {
         if (currentPage == 8) { handleConnectionAction(); return true; }
         if (selection == -2) return true; // Tab level — enter does nothing
         if (selection < 0)   return true; // Subtitle row — enter does nothing
+        if (currentPage == 6 && selection == 6) {
+            if (host.getQueuedPhotoCount() > 0) {
+                host.forceProcessQueuedPhotos();
+                close();
+            }
+            return true;
+        }
         isEditing = !isEditing;
         render();
         return true;
@@ -603,6 +614,7 @@ public class MenuController {
             }
             else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
             else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
+            else if (sel == 5) host.setProcessingFrequency(nextProcessingFrequency(host.getProcessingFrequency(), dir));
         } else if (currentPage == 7) {
             if      (sel == 0) rm.setPrefC1(Math.max(0, Math.min(5, rm.getPrefC1() + dir)));
             else if (sel == 1) rm.setPrefC2(Math.max(0, Math.min(5, rm.getPrefC2() + dir)));
@@ -614,6 +626,14 @@ public class MenuController {
         render();
         rm.savePreferences();
         host.scheduleHardwareApply();
+    }
+
+    private int nextProcessingFrequency(int current, int dir) {
+        int idx = current == 3 ? 1 : (current == 5 ? 2 : 0);
+        idx = (idx + (dir >= 0 ? 1 : -1) + 3) % 3;
+        if (idx == 1) return 3;
+        if (idx == 2) return 5;
+        return 1;
     }
 
     private void handleConnectionAction() {
@@ -736,18 +756,23 @@ public class MenuController {
             }
         }
         if (currentPage == 6) {
-            ic = 5; 
+            ic = 7;
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
             
             String creativeMode = "OFF";
             if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
             else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
+            int freq = host.getProcessingFrequency();
+            String frequencyLabel = freq <= 1 ? "INSTANT" : (freq + " SHOTS");
+            int queueCount = host.getQueuedPhotoCount();
             
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
             setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
             setRow(2, "Creative Modes",        creativeMode);
             setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
             setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
+            setRow(5, "Processing Frequency",  frequencyLabel);
+            setRow(6, "Process Queued Photos", queueCount > 0 ? (queueCount + " WAITING") : "EMPTY");
         } else if (currentPage == 7) {
             ic = 5;
             String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "CYCLE CREATIVE MODES", "TOGGLE GRID LINES"};
@@ -798,6 +823,7 @@ public class MenuController {
             if (i == 1) return p.lutIndex > 0;
             if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
+        if (currentPage == 6 && i == 6) return host.getQueuedPhotoCount() > 0;
         return true;
     }
 

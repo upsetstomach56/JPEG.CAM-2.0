@@ -126,7 +126,15 @@ public class ImageProcessor {
     public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p,
                             boolean applyCrop, boolean isDiptych,
                             long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        processJpeg(originalPath, outDirPath, qualityIndex, jpegQuality, p, applyCrop, isDiptych,
+                null, null, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+    }
+
+    public void processJpeg(String originalPath, String outDirPath, int qualityIndex, int jpegQuality, RTLProfile p,
+                            boolean applyCrop, boolean isDiptych, String lutPath, String lutName,
+                            long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
         new ProcessTask(qualityIndex, jpegQuality, p, outDirPath, applyCrop, isDiptych,
+                lutPath, lutName,
                 scannerStartedMs, detectedMs, stableMs, scannerAttempts).execute(originalPath);
     }
 
@@ -145,12 +153,15 @@ public class ImageProcessor {
         private String outDir;
         private boolean applyCrop; // <-- NEW
         private boolean isDiptych;
+        private String lutPath;
+        private String lutName;
         private long scannerStartedMs;
         private long detectedMs;
         private long stableMs;
         private int scannerAttempts;
 
         public ProcessTask(int q, int jpegQuality, RTLProfile p, String out, boolean crop, boolean isDiptych,
+                           String lutPath, String lutName,
                            long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
             this.qualityIdx  = q;
             this.jpegQuality = jpegQuality;
@@ -158,6 +169,8 @@ public class ImageProcessor {
             this.outDir      = out;
             this.applyCrop   = crop; // <-- NEW
             this.isDiptych   = isDiptych;
+            this.lutPath     = lutPath;
+            this.lutName     = lutName;
             this.scannerStartedMs = scannerStartedMs;
             this.detectedMs = detectedMs;
             this.stableMs = stableMs;
@@ -183,6 +196,10 @@ public class ImageProcessor {
                     }
                 }
                 long waitEndMs = System.currentTimeMillis();
+
+                if (lutPath != null || lutName != null) {
+                    if (!mEngine.loadLut(lutPath, lutName)) return "FAILED";
+                }
 
                 File dir = new File(outDir);
                 if (!dir.exists()) dir.mkdirs();

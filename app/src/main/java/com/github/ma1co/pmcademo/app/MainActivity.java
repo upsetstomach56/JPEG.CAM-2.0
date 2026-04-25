@@ -61,6 +61,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     
     private ImageProcessor mProcessor;
     private SonyFileScanner mScanner;
+    private ProcessingQueueManager processingQueueManager;
+    private ProcessingQueueManager.Entry pendingShotSnapshot;
+    private ProcessingQueueManager.Entry activeQueueEntry;
+    private boolean processingQueueActive = false;
+    private boolean manualQueueProcessRequested = false;
+    private int processingQueueTotal = 0;
 
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false;
@@ -110,6 +116,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean prefShowCinemaMattes = false;
     private boolean prefShowGridLines = false;
     private int prefJpegQuality = 95;
+    private int processingFrequency = 1;
     private DiptychManager diptychManager;
 
     private LensProfileManager lensManager;
@@ -308,7 +315,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         prefShowCinemaMattes = prefs.getBoolean("cinemaMattes", false);
         prefShowGridLines = prefs.getBoolean("gridLines", true);
         prefJpegQuality = prefs.getInt("jpegQuality", 95);
+        processingFrequency = normalizeProcessingFrequency(prefs.getInt("processingFrequency", 1));
         boolean prefShowDiptych = prefs.getBoolean("diptychEnabled", false);
+        processingQueueManager = new ProcessingQueueManager();
         
         cameraManager = new SonyCameraManager(this);
         inputManager = new InputManager(this);
@@ -352,9 +361,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
             @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText("PROCESSING..."); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(false); else maybeAutoProcessQueuedPhotos(); } }); }
+            @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText(getProcessingStatusText()); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
         @Override public void onProcessFinished(String res) { 
+            if (processingQueueActive) {
+                handleQueuedProcessFinished(res);
+                return;
+            }
             if (diptychManager != null && diptychManager.isEnabled()) {
                 if (res != null && !res.toUpperCase().contains("ERROR")) {
                     if (diptychManager.getState() == DiptychManager.STATE_PROCESSING_FIRST) {
@@ -379,12 +392,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
             @Override 
             public boolean isReadyToProcess() { 
-                RTLProfile p = recipeManager.getCurrentProfile();
-                return isReady && !isProcessing && !calibController.isCalibrating() &&
-                       ((diptychManager != null && diptychManager.isEnabled()) || p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
-                        p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
-                        p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
-                        p.bloom != 0);
+                RTLProfile p = (pendingShotSnapshot != null && pendingShotSnapshot.profile != null)
+                        ? pendingShotSnapshot.profile
+                        : recipeManager.getCurrentProfile();
+                boolean readyForQueue = shouldQueuePhotos();
+                return (isReady || readyForQueue) && !isProcessing && !calibController.isCalibrating() &&
+                       ((diptychManager != null && diptychManager.isEnabled()) || hasSoftwareEffects(p));
             }
             @Override
             public void onNewPhotoDetected(final String path, final long scannerStartedMs, final long detectedMs, final int attempts) {
@@ -393,6 +406,141 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         });
         
         triggerLutPreload();
+    }
+
+    private boolean hasSoftwareEffects(RTLProfile p) {
+        return p != null && (p.lutIndex != 0 || p.grain != 0 || p.vignette != 0 ||
+                p.rollOff != 0 || p.colorChrome != 0 || p.chromeBlue != 0 ||
+                p.shadowToe != 0 || p.subtractiveSat != 0 || p.halation != 0 ||
+                p.bloom != 0);
+    }
+
+    private int normalizeProcessingFrequency(int value) {
+        if (value == 3 || value == 5) return value;
+        return 1;
+    }
+
+    private boolean shouldQueuePhotos() {
+        return processingFrequency > 1 && (diptychManager == null || !diptychManager.isEnabled());
+    }
+
+    private ProcessingQueueManager.Entry createCurrentQueueEntry() {
+        ProcessingQueueManager.Entry entry = new ProcessingQueueManager.Entry();
+        entry.profile = ProcessingQueueManager.copyProfile(recipeManager.getCurrentProfile());
+        entry.qualityIndex = recipeManager.getQualityIndex();
+        entry.jpegQuality = prefJpegQuality;
+        entry.applyCrop = prefShowCinemaMattes;
+        entry.isDiptych = false;
+        entry.outDirPath = Filepaths.getGradedDir().getAbsolutePath();
+
+        int lutIndex = entry.profile != null ? entry.profile.lutIndex : 0;
+        ArrayList<String> paths = recipeManager.getRecipePaths();
+        ArrayList<String> names = recipeManager.getRecipeNames();
+        if (lutIndex > 0 && paths != null && names != null && lutIndex < paths.size() && lutIndex < names.size()) {
+            entry.lutPath = paths.get(lutIndex);
+            entry.lutName = names.get(lutIndex);
+        } else {
+            entry.lutPath = "NONE";
+            entry.lutName = "OFF";
+        }
+        return entry;
+    }
+
+    private ProcessingQueueManager.Entry consumeShotSnapshot(String path, long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        ProcessingQueueManager.Entry entry = pendingShotSnapshot != null
+                ? ProcessingQueueManager.copyEntry(pendingShotSnapshot)
+                : createCurrentQueueEntry();
+        pendingShotSnapshot = null;
+        entry.originalPath = path;
+        entry.outDirPath = Filepaths.getGradedDir().getAbsolutePath();
+        entry.scannerStartedMs = scannerStartedMs;
+        entry.detectedMs = detectedMs;
+        entry.stableMs = stableMs;
+        entry.scannerAttempts = scannerAttempts;
+        return entry;
+    }
+
+    private String getProcessingStatusText() {
+        if (processingQueueActive && processingQueueTotal > 0 && processingQueueManager != null) {
+            int current = processingQueueTotal - processingQueueManager.getCount() + 1;
+            if (current < 1) current = 1;
+            if (current > processingQueueTotal) current = processingQueueTotal;
+            return "PROCESSING QUEUE " + current + "/" + processingQueueTotal;
+        }
+        return "PROCESSING...";
+    }
+
+    private void maybeAutoProcessQueuedPhotos() {
+        if (processingFrequency > 1 && processingQueueManager != null &&
+                processingQueueManager.getCount() >= processingFrequency && !isProcessing && isReady) {
+            startQueuedProcessing(false);
+        }
+    }
+
+    private void startQueuedProcessing(boolean manual) {
+        if (manual) manualQueueProcessRequested = true;
+        if (mProcessor == null || processingQueueManager == null || processingQueueManager.getCount() == 0) {
+            manualQueueProcessRequested = false;
+            return;
+        }
+        if (isProcessing || processingQueueActive || !isReady) return;
+        manualQueueProcessRequested = false;
+        processingQueueActive = true;
+        processingQueueTotal = processingQueueManager.getCount();
+        isProcessing = true;
+        processNextQueuedPhoto();
+    }
+
+    private void processNextQueuedPhoto() {
+        if (processingQueueManager == null) return;
+        activeQueueEntry = processingQueueManager.peek();
+        if (activeQueueEntry == null) {
+            finishQueuedProcessing();
+            return;
+        }
+
+        if (tvTopStatus != null) {
+            tvTopStatus.setText(getProcessingStatusText());
+            tvTopStatus.setTextColor(Color.YELLOW);
+        }
+        File outDir = activeQueueEntry.outDirPath != null && activeQueueEntry.outDirPath.length() > 0
+                ? new File(activeQueueEntry.outDirPath)
+                : Filepaths.getGradedDir();
+        mProcessor.processJpeg(activeQueueEntry.originalPath, outDir.getAbsolutePath(),
+                activeQueueEntry.qualityIndex, activeQueueEntry.jpegQuality,
+                activeQueueEntry.profile, activeQueueEntry.applyCrop, activeQueueEntry.isDiptych,
+                activeQueueEntry.lutPath, activeQueueEntry.lutName,
+                activeQueueEntry.scannerStartedMs, activeQueueEntry.detectedMs,
+                activeQueueEntry.stableMs, activeQueueEntry.scannerAttempts);
+    }
+
+    private void handleQueuedProcessFinished(String result) {
+        boolean success = result != null && result.toUpperCase().indexOf("SAVED") >= 0;
+        if (success && processingQueueManager != null) {
+            processingQueueManager.removeFirst();
+            if (processingQueueManager.getCount() > 0) {
+                processNextQueuedPhoto();
+                return;
+            }
+            finishQueuedProcessing();
+        } else {
+            processingQueueActive = false;
+            activeQueueEntry = null;
+            processingQueueTotal = 0;
+            isProcessing = false;
+            runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } });
+        }
+    }
+
+    private void finishQueuedProcessing() {
+        processingQueueActive = false;
+        activeQueueEntry = null;
+        processingQueueTotal = 0;
+        isProcessing = false;
+        triggerLutPreload();
+        applyHardwareRecipe();
+        syncHardwareState();
+        runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } });
     }
     
     private void processWhenFileReady(final String path, final long scannerStartedMs, final long detectedMs, final int scannerAttempts) {
@@ -430,14 +578,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 long currentSize = f.length();
                 if (currentSize > 0 && (hasJpegEndMarker(f, currentSize) || currentSize == lastSize[0])) {
                     long stableMs = System.currentTimeMillis();
+                    ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     // --- DIPTYCH INTERCEPT ---
                     if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), false, true,
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
+                                entry.lutPath, entry.lutName,
                                 scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                    } else if (shouldQueuePhotos()) {
+                        if (processingQueueManager != null) {
+                            processingQueueManager.add(entry);
+                        }
+                        isProcessing = false;
+                        updateMainHUD();
+                        maybeAutoProcessQueuedPhotos();
                     } else {
                         File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), recipeManager.getQualityIndex(), prefJpegQuality, recipeManager.getCurrentProfile(), prefShowCinemaMattes, false,
+                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, false,
+                                entry.lutPath, entry.lutName,
                                 scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     }
                 } else if (retries[0] < 30) {
@@ -476,6 +634,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             // No LUT selected, engine is ready immediately for other effects
             isReady = true;
             updateMainHUD();
+            maybeAutoProcessQueuedPhotos();
             return;
         }
         mProcessor.triggerLutPreload(recipeManager.getRecipePaths().get(p.lutIndex), recipeManager.getRecipeNames().get(p.lutIndex));
@@ -544,6 +703,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     public void armFileScanner() {
         if (mScanner != null) {
+            pendingShotSnapshot = createCurrentQueueEntry();
             mScanner.start();
         }
     }
@@ -862,6 +1022,7 @@ public void onEnterPressed() {
         ed.putBoolean("cinemaMattes",  prefShowCinemaMattes);
         ed.putBoolean("gridLines",     prefShowGridLines);
         ed.putInt("jpegQuality",       prefJpegQuality);
+        ed.putInt("processingFrequency", processingFrequency);
         ed.putBoolean("diptychEnabled", isPrefDiptych());
         ed.apply();
     }
@@ -1625,7 +1786,16 @@ public void onEnterPressed() {
                 tvTopStatus.setTextColor(Color.YELLOW);
             } else {
                 int slotNum = recipeManager.getCurrentSlot() + 1;
-                tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + (isReady ? "READY" : "LOADING.."));
+                String readyText = isReady ? "READY" : "LOADING..";
+                int queued = processingQueueManager != null ? processingQueueManager.getCount() : 0;
+                if (processingFrequency > 1) {
+                    int left = processingFrequency - queued;
+                    if (left < 0) left = 0;
+                    readyText += " | " + left + "/" + processingFrequency + " LEFT";
+                } else if (queued > 0) {
+                    readyText += " | " + queued + " QUEUED";
+                }
+                tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + readyText);
                 
                 if (mDialMode == DIAL_MODE_RTL) {
                     tvTopStatus.setTextColor(selectedColor);
@@ -1916,13 +2086,19 @@ public void onEnterPressed() {
     @Override public boolean isPrefGridLines()    { return prefShowGridLines; }
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
     @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
+    @Override public int     getProcessingFrequency() { return processingFrequency; }
+    @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCount() : 0; }
     @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
+    @Override public void    setProcessingFrequency(int v)   { processingFrequency = normalizeProcessingFrequency(v); saveAppPreferences(); updateMainHUD(); maybeAutoProcessQueuedPhotos(); }
     @Override public void    setPrefDiptych(boolean v)      { 
         if (diptychManager != null) diptychManager.setEnabled(v);
         updateMainHUD(); 
+    }
+    @Override public void forceProcessQueuedPhotos() {
+        startQueuedProcessing(true);
     }
     
 
@@ -1933,6 +2109,10 @@ public void onEnterPressed() {
     @Override public void onMenuClosed() {
         recipeManager.savePreferences();
         saveAppPreferences();
+        if (isProcessing || processingQueueActive) {
+            updateMainHUD();
+            return;
+        }
         triggerLutPreload();
         applyHardwareRecipe();
         syncHardwareState();
