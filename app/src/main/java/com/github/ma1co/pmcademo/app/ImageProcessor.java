@@ -85,6 +85,7 @@ public class ImageProcessor {
                 + "\topacity=" + p.opacity
                 + "\tgrain=" + p.grain
                 + "\tgrain_size=" + finalGrainSize
+                + "\tgrain_engine=" + p.advancedGrainExperimental
                 + "\tvignette=" + p.vignette
                 + "\trolloff=" + p.rollOff
                 + "\tcolor_chrome=" + p.colorChrome
@@ -217,6 +218,17 @@ public class ImageProcessor {
                     finalBloom = bloomMap[Math.max(0, currentBloomIdx - 1)];
                 }
 
+                int cxxGrainEngine = p.advancedGrainExperimental;
+                if (cxxGrainEngine >= 2) {
+                    int fileIndex = cxxGrainEngine - 2;
+                    if (fileIndex >= 0 && fileIndex < MenuController.grainTextureFiles.size()) {
+                        File texFile = MenuController.grainTextureFiles.get(fileIndex);
+                        mEngine.loadGrainTexture(texFile);
+                        textureEndMs = System.currentTimeMillis();
+                    }
+                    cxxGrainEngine = 2;
+                }
+
                 int numCores = Runtime.getRuntime().availableProcessors();
                 Log.d("JPEG.CAM", "Using " + numCores + " cores for processing.");
 
@@ -226,6 +238,7 @@ public class ImageProcessor {
                     scale, p.opacity, p.grain, finalGrainSize, p.vignette, p.rollOff,
                     p.colorChrome, p.chromeBlue, p.shadowToe, p.subtractiveSat,
                     p.halation, finalBloom, 
+                    cxxGrainEngine,
                     finalJpegQuality, 
                     applyCrop, numCores);  // <--- ADDED numCores HERE
                 long nativeEndMs = System.currentTimeMillis();

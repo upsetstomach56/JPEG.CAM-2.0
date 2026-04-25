@@ -168,6 +168,7 @@ public class RecipeManager {
                 if (p.grainSize == -1) p.grainSize = 0; // If not found, use first available
             }
 
+            p.advancedGrainExperimental = json.optInt("advancedGrainExperimental", 1);
             p.bloom           = json.optInt("bloom", 0);
             p.contrast        = json.optInt("contrast", 0);
             p.saturation      = json.optInt("saturation", 0);
@@ -225,6 +226,7 @@ public class RecipeManager {
                 }
             }
             sb.append("  \"grainName\": \"").append(grainNameToSave.replace("\"", "\\\"")).append("\",\n");
+            sb.append("  \"advancedGrainExperimental\": ").append(p.advancedGrainExperimental).append(",\n");
 
             sb.append("  \"bloom\": ").append(p.bloom).append(",\n");
             sb.append("  \"contrast\": ").append(p.contrast).append(",\n");
