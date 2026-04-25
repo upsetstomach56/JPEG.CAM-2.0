@@ -82,7 +82,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     bool use_rgb = (nativeLutSize > 0 && opacity > 0);
     jpeg_read_header(&cd, TRUE);
-    cd.scale_denom = scaleDenom; cd.out_color_space = use_rgb ? JCS_RGB : JCS_YCbCr; jpeg_start_decompress(&cd);
+    cd.scale_num = 1;
+    cd.scale_denom = scaleDenom;
+    cd.out_color_space = use_rgb ? JCS_RGB : JCS_YCbCr;
+    jpeg_start_decompress(&cd);
     long long t_decode_start = get_time_ms();
 
     struct jpeg_compress_struct cc; struct my_error_mgr jc; cc.err = jpeg_std_error(&jc.pub); jc.pub.error_exit = my_error_exit;
@@ -158,7 +161,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     JSAMPROW rpx[1];
     long long t_preload_done = get_time_ms();
 
-    bool row_stream_mode = (bloom <= 0 && halation <= 0);
+    bool row_stream_mode = (bloom <= 0 && halation <= 0 && advancedGrainExperimental != 1);
     if (row_stream_mode) {
         while (cd.output_scanline < cd.output_height) {
             int ay = cd.output_scanline;
