@@ -892,6 +892,26 @@ inline void sample_tex_bilinear_512_xor(const uint8_t* tex, int x_fp8, int y_fp8
     }
 }
 
+inline void sample_tex_nearest_1024(const uint8_t* tex, int px, int py, int* outRGB) {
+    int tx = px & 1023;
+    int ty = py & 1023;
+    int tex_idx = (ty * 1024 + tx) * 3;
+    outRGB[0] = tex[tex_idx];
+    outRGB[1] = tex[tex_idx + 1];
+    outRGB[2] = tex[tex_idx + 2];
+}
+
+inline void sample_tex_nearest_512_xor(const uint8_t* tex, int px, int py, int* outRGB) {
+    int tx = px & 511;
+    int ty = py & 511;
+    if (((px >> 9) ^ (py >> 9)) & 1) tx = 511 - tx;
+    if ((((px >> 9) * 3) ^ (py >> 9)) & 2) ty = 511 - ty;
+    int tex_idx = (ty * 512 + tx) * 3;
+    outRGB[0] = tex[tex_idx];
+    outRGB[1] = tex[tex_idx + 1];
+    outRGB[2] = tex[tex_idx + 2];
+}
+
 // ==========================================
 // PATH A: RGB + LUT + ANALOG PHYSICS
 // ==========================================
@@ -911,6 +931,7 @@ inline void process_row_rgb(
     int s_sat    = subtractiveSat * 40;
     int s_grain = (grain * 40) + (grain * grain * 12);
     s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
+    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -1039,41 +1060,21 @@ inline void process_row_rgb(
             if (env > 0) {
                 int tr, tg, tb;
 
-                if (scaleDenom == 1) {
-                    if (is_1024_grain) {
-                        int tx = x & 1023;
-                        int ty = abs_y & 1023;
-                        int tex_idx = (ty * 1024 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx];
-                        tg = externalGrainTexture[tex_idx + 1];
-                        tb = externalGrainTexture[tex_idx + 2];
-                    } else {
-                        int tx = x & 511;
-                        int ty = abs_y & 511;
-                        if (((x >> 9) ^ (abs_y >> 9)) & 1) tx = 511 - tx;
-                        if ((((x >> 9) * 3) ^ (abs_y >> 9)) & 2) ty = 511 - ty;
-                        int tex_idx = (ty * 512 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx];
-                        tg = externalGrainTexture[tex_idx + 1];
-                        tb = externalGrainTexture[tex_idx + 2];
-                    }
+                int gRGB[3];
+                int texX = x * scaleDenom;
+                int texY = abs_y * scaleDenom;
+                if (is_1024_grain) {
+                    sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
                 } else {
-                    // --- HQ PATH (HALF/PROXY): Bilinear Interpolation ---
-                    int gRGB[3];
-                    if (is_1024_grain) {
-                        sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
-                    } else {
-                        sample_tex_bilinear_512_xor(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
-                    }
-                    tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
+                    sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
                 }
+                tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
 
                 int blendedR = blend_overlay(outR, tr);
                 int blendedG = blend_overlay(outG, tg);
                 int blendedB = blend_overlay(outB, tb);
 
-                int base_mix = (grain >= 5) ? 256 : (grain * 51);
-                int mix = (base_mix * env) >> 8;
+                int mix = (texture_base_mix * env) >> 8;
 
                 outR = outR + (((blendedR - outR) * mix) >> 8);
                 outG = outG + (((blendedG - outG) * mix) >> 8);
@@ -1126,6 +1127,7 @@ inline void process_row_yuv(
     // Exponential math: Slider 1 is subtle, Slider 5 is massive cinematic noise
     int s_grain = (grain * 40) + (grain * grain * 12);
     s_grain = (s_grain * grain_resolution_scale256(scaleDenom) + 128) >> 8;
+    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
 
     long long dy = (long long)(abs_y - cy_center);
     long long d_sq = ((long long)(0 - cx) * (long long)(0 - cx)) + (dy * dy);
@@ -1160,10 +1162,10 @@ inline void process_row_yuv(
         }
 
         int cb = row[i+1] - 128, cr = row[i+2] - 128;
-        int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
 
         // --- OPTIMIZATION: Only run heavy color math if effects are ON ---
         if (s_chrome > 0 || s_blue > 0 || s_sat > 0) {
+            int sat = (cb >= 0 ? cb : -cb) + (cr >= 0 ? cr : -cr);
             if (s_chrome > 0 && sat > 15) {
                 int drop = ((sat - 15) * s_chrome) >> 8;
                 if (outY > 160) { int fade = 255 - ((outY - 160) * 3); if (fade < 0) fade = 0; drop = (drop * fade) >> 8; }
@@ -1204,34 +1206,15 @@ inline void process_row_yuv(
             if (env > 0) {
                 int tr, tg, tb;
 
-                if (scaleDenom == 1) {
-                    if (is_1024_grain) {
-                        int tx = x & 1023;
-                        int ty = abs_y & 1023;
-                        int tex_idx = (ty * 1024 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx];
-                        tg = externalGrainTexture[tex_idx + 1];
-                        tb = externalGrainTexture[tex_idx + 2];
-                    } else {
-                        int tx = x & 511;
-                        int ty = abs_y & 511;
-                        if (((x >> 9) ^ (abs_y >> 9)) & 1) tx = 511 - tx;
-                        if ((((x >> 9) * 3) ^ (abs_y >> 9)) & 2) ty = 511 - ty;
-                        int tex_idx = (ty * 512 + tx) * 3;
-                        tr = externalGrainTexture[tex_idx];
-                        tg = externalGrainTexture[tex_idx + 1];
-                        tb = externalGrainTexture[tex_idx + 2];
-                    }
+                int gRGB[3];
+                int texX = x * scaleDenom;
+                int texY = abs_y * scaleDenom;
+                if (is_1024_grain) {
+                    sample_tex_nearest_1024(externalGrainTexture, texX, texY, gRGB);
                 } else {
-                    // --- HQ PATH (HALF/PROXY): Bilinear Interpolation ---
-                    int gRGB[3];
-                    if (is_1024_grain) {
-                        sample_tex_bilinear_1024(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
-                    } else {
-                        sample_tex_bilinear_512_xor(externalGrainTexture, (x * scaleDenom) << 8, (abs_y * scaleDenom) << 8, gRGB);
-                    }
-                    tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
+                    sample_tex_nearest_512_xor(externalGrainTexture, texX, texY, gRGB);
                 }
+                tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
 
                 // Fast YUV to RGB for blending
                 int r = outY + ((cr * 359) >> 8);
@@ -1242,8 +1225,7 @@ inline void process_row_yuv(
                 int blendedG = blend_overlay(g, tg);
                 int blendedB = blend_overlay(b, tb);
 
-                int base_mix = (grain >= 5) ? 256 : (grain * 51);
-                int mix = (base_mix * env) >> 8;
+                int mix = (texture_base_mix * env) >> 8;
 
                 r = r + (((blendedR - r) * mix) >> 8);
                 g = g + (((blendedG - g) * mix) >> 8);
