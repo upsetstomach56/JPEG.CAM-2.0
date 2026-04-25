@@ -220,17 +220,16 @@ public class ImageProcessor {
                 }
 
                 int cxxGrainEngine = p.advancedGrainExperimental;
-                if (cxxGrainEngine == 1) {
-                    cxxGrainEngine = 0;
-                }
-                if (cxxGrainEngine >= 2) {
-                    int fileIndex = cxxGrainEngine - 2;
-                    if (fileIndex >= 0 && fileIndex < MenuController.grainTextureFiles.size()) {
+                if (p.grain > 0) {
+                    MenuController.getGrainEngineOptions();
+                    if (MenuController.grainTextureFiles.size() > 0) {
+                        int fileIndex = Math.max(0, Math.min(MenuController.grainTextureFiles.size() - 1, finalGrainSize));
                         File texFile = MenuController.grainTextureFiles.get(fileIndex);
-                        mEngine.loadGrainTexture(texFile);
+                        if (mEngine.loadGrainTexture(texFile)) {
+                            cxxGrainEngine = 2;
+                        }
                         textureEndMs = System.currentTimeMillis();
                     }
-                    cxxGrainEngine = 2;
                 }
 
                 int numCores = Runtime.getRuntime().availableProcessors();
