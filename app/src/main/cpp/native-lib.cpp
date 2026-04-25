@@ -154,9 +154,13 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long t_compress_start = get_time_ms();
 
     int rs = cd.output_width*3;
-    
-    // Extremely cache-friendly chunk size for single-core execution on older L2 caches
-    int CHK = 64; 
+    const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
+    bool is_1024_grain = nativeGrainTexture.size() > 1000000;
+    bool use_fast_yuv_texture_candidate = (!use_rgb && advancedGrainExperimental == 2 && externalTex != NULL
+        && grain > 0 && colorChrome == 0 && chromeBlue == 0 && subtractiveSat == 0
+        && bloom <= 0 && halation == 0 && vignette == 0);
+
+    int CHK = (use_fast_yuv_texture_candidate && !applyCrop && numCores > 1) ? 128 : 64;
     int BUF = CHK + 20;
 
     unsigned char* rb = (unsigned char*)malloc(BUF*rs);
@@ -178,6 +182,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     int map[256]; for(int i=0; i<256; i++) map[i]=(i*(nativeLutSize-1)*128)/255;
     uint8_t roll[256]; generate_rolloff_lut(roll, rollOff);
+    if (advancedGrainExperimental == 2 && externalTex != NULL && grain > 0) {
+        ensure_overlay_blend_lut();
+    }
     int grainScale = grain_resolution_scale256(scaleDenom);
 
     int ws_s = cd.output_width * sizeof(int);
@@ -204,15 +211,11 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
     long long vig_coef = get_vig_coef(vignette, cx * cx + cy_center * cy_center);
     uint32_t grain_seed = (uint32_t)(st & 0xFFFFFFFF);
     if (grain_seed == 0) grain_seed = 98765;
-    const uint8_t* externalTex = nativeGrainTexture.empty() ? NULL : nativeGrainTexture.data();
-    bool is_1024_grain = nativeGrainTexture.size() > 1000000;
     int grainTransform = choose_grain_transform(grain_seed, advancedGrainExperimental == 2 && externalTex != NULL && grain > 0);
-    bool use_fast_yuv_texture = (!use_rgb && advancedGrainExperimental == 2 && externalTex != NULL
-        && grain > 0 && colorChrome == 0 && chromeBlue == 0 && subtractiveSat == 0
-        && bloom <= 0 && halation == 0 && vignette == 0);
+    bool use_fast_yuv_texture = use_fast_yuv_texture_candidate;
     YuvTextureFastLut fast_yuv_texture_lut;
     if (use_fast_yuv_texture) {
-        build_yuv_texture_fast_lut(fast_yuv_texture_lut, shadowToe, rollOff, roll);
+        build_yuv_texture_fast_lut(fast_yuv_texture_lut, shadowToe, rollOff, roll, grain);
     }
 
     JSAMPROW rpx[1];
@@ -238,6 +241,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
                 int active_workers = worker_count;
                 if (active_workers > rows_read) active_workers = rows_read;
+                if (rows_read < worker_count * 16) active_workers = 1;
 
                 pthread_t threads[4];
                 bool created[4] = { false, false, false, false };
@@ -351,15 +355,15 @@ extern "C" JNIEXPORT jboolean JNICALL Java_com_github_ma1co_pmcademo_app_LutEngi
 
     if (work_0) { free(work_0); free(work_1); free(work_2); free(work_h); free(h_line); }
     free(rb); free(ob); jpeg_finish_compress(&cc); long long t_finish_compress = get_time_ms(); jpeg_destroy_compress(&cc); jpeg_finish_decompress(&cd); long long t_finish_decompress = get_time_ms(); jpeg_destroy_decompress(&cd); fclose(inf); fclose(ouf); env->ReleaseStringUTFChars(inPath,ifn); env->ReleaseStringUTFChars(outPath,ofn);
-    char timing[512];
+    char timing[768];
     snprintf(timing, sizeof(timing),
-         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_engine=%d grain_tex=%d grain_transform=%d grain_scale=%d lut=%d cores=%d row_mode=%s fast_path=%s",
+         "native_status=ok native_total=%lld open=%lld header=%lld compress_setup=%lld preload=%lld rows_write=%lld finish_encode=%lld finish_decode=%lld size=%dx%d scale=%d q=%d bloom=%d halation=%d grain=%d grain_engine=%d grain_tex=%d grain_transform=%d grain_scale=%d lut=%d cores=%d chunk=%d row_mode=%s fast_path=%s",
          t_finish_decompress - st, t_open - st, t_decode_start - t_open, t_compress_start - t_decode_start,
          t_preload_done - t_compress_start, t_rows_done - t_preload_done, t_finish_compress - t_rows_done,
          t_finish_decompress - t_finish_compress, log_width, log_height, scaleDenom, jpegQuality,
          bloom, halation, grain, advancedGrainExperimental,
          nativeGrainTexture.empty() ? 0 : (is_1024_grain ? 1024 : 512),
-         grainTransform, grainScale, nativeLutSize, numCores, row_stream_mode ? "stream" : "window",
+         grainTransform, grainScale, nativeLutSize, numCores, CHK, row_stream_mode ? "stream" : "window",
          use_fast_yuv_texture_parallel ? "yuv_texture_parallel" : (use_fast_yuv_texture ? "yuv_texture" : "generic"));
     nativeLastTiming = timing;
     LOGD("TIMING %s", nativeLastTiming.c_str());

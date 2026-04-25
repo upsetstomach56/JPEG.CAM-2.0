@@ -855,6 +855,23 @@ inline void sample_tex_bilinear_1024(const uint8_t* tex, int x_fp8, int y_fp8, i
     }
 }
 
+static uint8_t overlayBlendLut[65536];
+static bool overlayBlendLutReady = false;
+
+inline void ensure_overlay_blend_lut() {
+    if (overlayBlendLutReady) return;
+    for (int base = 0; base < 256; base++) {
+        for (int blend = 0; blend < 256; blend++) {
+            overlayBlendLut[(base << 8) | blend] = (uint8_t)blend_overlay(base, blend);
+        }
+    }
+    overlayBlendLutReady = true;
+}
+
+inline int blend_overlay_cached(int base, int blend) {
+    return overlayBlendLut[(CLAMP(base) << 8) | CLAMP(blend)];
+}
+
 // High-fidelity sampler for 512x512 textures with built-in XOR mirroring.
 inline void sample_tex_bilinear_512_xor(const uint8_t* tex, int x_fp8, int y_fp8, int* outRGB) {
     int px0 = x_fp8 >> 8;
@@ -1135,9 +1152,9 @@ inline void process_row_rgb(
                 }
                 tr = gRGB[0]; tg = gRGB[1]; tb = gRGB[2];
 
-                int blendedR = blend_overlay(outR, tr);
-                int blendedG = blend_overlay(outG, tg);
-                int blendedB = blend_overlay(outB, tb);
+                int blendedR = blend_overlay_cached(outR, tr);
+                int blendedG = blend_overlay_cached(outG, tg);
+                int blendedB = blend_overlay_cached(outB, tb);
 
                 int mix = (texture_base_mix * env) >> 8;
 
@@ -1289,9 +1306,9 @@ inline void process_row_yuv(
                 int g = outY - ((cb * 88 + cr * 183) >> 8);
                 int b = outY + ((cb * 454) >> 8);
 
-                int blendedR = blend_overlay(r, tr);
-                int blendedG = blend_overlay(g, tg);
-                int blendedB = blend_overlay(b, tb);
+                int blendedR = blend_overlay_cached(r, tr);
+                int blendedG = blend_overlay_cached(g, tg);
+                int blendedB = blend_overlay_cached(b, tb);
 
                 int mix = (texture_base_mix * env) >> 8;
 
@@ -1334,6 +1351,7 @@ struct YuvTextureFastLut {
     uint8_t tone[256];
     uint8_t changed[256];
     uint8_t grainEnv[256];
+    uint8_t grainMix[256];
     uint16_t ratio256[256];
 };
 
@@ -1341,10 +1359,12 @@ inline void build_yuv_texture_fast_lut(
     YuvTextureFastLut& out,
     int shadowToe,
     int rollOff,
-    const uint8_t* rolloff_lut)
+    const uint8_t* rolloff_lut,
+    int grain)
 {
     const int lift = (shadowToe == 1) ? 35 : 55;
     const int liftDenom = (shadowToe == 1) ? 140 : 180;
+    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
 
     for (int oldY = 0; oldY < 256; oldY++) {
         int outY = oldY;
@@ -1357,6 +1377,7 @@ inline void build_yuv_texture_fast_lut(
         out.tone[oldY] = (uint8_t)outY;
         out.changed[oldY] = (uint8_t)(oldY != outY);
         out.grainEnv[oldY] = (uint8_t)grain_amount_mask(outY);
+        out.grainMix[oldY] = (uint8_t)((texture_base_mix * out.grainEnv[oldY]) >> 8);
         out.ratio256[oldY] = (uint16_t)((outY * 256) / (oldY == 0 ? 1 : oldY));
     }
 }
@@ -1369,19 +1390,13 @@ inline void process_row_yuv_texture_fast(
     bool is_1024_grain,
     int grainTransform)
 {
-    const int texture_base_mix = (grain >= 5) ? 256 : (grain * 51);
-    const bool transformActive = (grainTransform != 0);
     const int texPeriodMask = is_1024_grain ? 1023 : 2047;
-    const int baseTexY = abs_y * scaleDenom;
-    const int texY = transformActive
-        ? ((grainTransform & 2) ? (texPeriodMask - (baseTexY & texPeriodMask)) : (baseTexY & texPeriodMask))
-        : baseTexY;
-    const int texStep = transformActive
-        ? (((grainTransform & 1) ? -scaleDenom : scaleDenom) & texPeriodMask)
-        : scaleDenom;
+    const int baseTexY = (abs_y * scaleDenom) & texPeriodMask;
+    const int texY = (grainTransform & 2) ? (texPeriodMask - baseTexY) : baseTexY;
+    const int texStep = ((grainTransform & 1) ? -scaleDenom : scaleDenom) & texPeriodMask;
 
     uint8_t* p = row;
-    int texX = (transformActive && (grainTransform & 1)) ? texPeriodMask : 0;
+    int texX = (grainTransform & 1) ? texPeriodMask : 0;
     for (int x = 0; x < width; x++, p += 3) {
         int oldY = p[0];
         int outY = fastLut.tone[oldY];
@@ -1404,11 +1419,11 @@ inline void process_row_yuv_texture_fast(
             int g = outY - ((cb * 88 + cr * 183) >> 8);
             int b = outY + ((cb * 454) >> 8);
 
-            int blendedR = blend_overlay(r, gRGB[0]);
-            int blendedG = blend_overlay(g, gRGB[1]);
-            int blendedB = blend_overlay(b, gRGB[2]);
+            int blendedR = blend_overlay_cached(r, gRGB[0]);
+            int blendedG = blend_overlay_cached(g, gRGB[1]);
+            int blendedB = blend_overlay_cached(b, gRGB[2]);
 
-            int mix = (texture_base_mix * env) >> 8;
+            int mix = fastLut.grainMix[oldY];
             r = r + (((blendedR - r) * mix) >> 8);
             g = g + (((blendedG - g) * mix) >> 8);
             b = b + (((blendedB - b) * mix) >> 8);
@@ -1421,7 +1436,7 @@ inline void process_row_yuv_texture_fast(
         p[0] = (uint8_t)CLAMP(outY);
         p[1] = (uint8_t)CLAMP(128 + cb);
         p[2] = (uint8_t)CLAMP(128 + cr);
-        texX = transformActive ? ((texX + texStep) & texPeriodMask) : (texX + texStep);
+        texX = (texX + texStep) & texPeriodMask;
     }
 }
 
