@@ -21,6 +21,10 @@ public final class UiTheme {
     public static final int TEXT_DIM = Color.rgb(68, 78, 78);
     public static final int ACCENT = Color.rgb(56, 198, 175);
     public static final int ACCENT_DARK = Color.rgb(19, 89, 82);
+    public static final int ACCENT_RECIPES = Color.rgb(234, 133, 48);
+    public static final int ACCENT_SETTINGS = Color.rgb(236, 186, 84);
+    public static final int ACCENT_NETWORK = Color.rgb(78, 172, 232);
+    public static final int ACCENT_SUPPORT = Color.rgb(178, 136, 236);
     public static final int WARN = Color.rgb(236, 186, 84);
     public static final int SUCCESS = Color.rgb(70, 218, 142);
     public static final int ERROR = Color.rgb(235, 74, 83);
@@ -49,6 +53,24 @@ public final class UiTheme {
         view.setBackgroundDrawable(rect(Color.argb(215, 17, 110, 100), ACCENT, 1, 6));
     }
 
+    public static void selected(View view, int accent) {
+        view.setBackgroundDrawable(rect(tint(accent, 96), accent, 1, 6));
+    }
+
+    public static void activePanel(View view, int accent) {
+        view.setBackgroundDrawable(rect(tint(accent, 48), tint(accent, 150), 1, 6));
+    }
+
+    public static void tabPanel(View view, int accent, boolean selected, boolean active) {
+        if (selected) {
+            view.setBackgroundDrawable(rect(tint(accent, 132), accent, 1, 7));
+        } else if (active) {
+            view.setBackgroundDrawable(rect(tint(accent, 66), tint(accent, 170), 1, 7));
+        } else {
+            view.setBackgroundDrawable(rect(SURFACE_SOFT, Color.argb(90, 117, 145, 140), 1, 7));
+        }
+    }
+
     public static void clear(View view) {
         view.setBackgroundColor(Color.TRANSPARENT);
     }
@@ -73,5 +95,9 @@ public final class UiTheme {
         tv.setTextSize(size);
         tv.setShadowLayer(3, 0, 0, SHADOW);
         tv.setTypeface(typeface != null ? typeface : Typeface.DEFAULT_BOLD);
+    }
+
+    private static int tint(int color, int alpha) {
+        return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }
 }

@@ -22,6 +22,7 @@ import fi.iki.elonen.NanoHTTPD;
 
 public class HttpServer extends NanoHTTPD {
     public static final int PORT = 8080;
+    public static final String LOCAL_HOSTNAME = "jpeg.cam.local";
     private Context context;
 
     public HttpServer(Context context) {
@@ -30,7 +31,12 @@ public class HttpServer extends NanoHTTPD {
     }
 
     public static String urlFor(String ipAddress) {
-        return "http://" + ipAddress + ":" + PORT + "/";
+        if (ipAddress == null || ipAddress.length() == 0) return friendlyUrl();
+        return friendlyUrl() + "\nIP " + ipAddress + ":" + PORT;
+    }
+
+    public static String friendlyUrl() {
+        return "http://" + LOCAL_HOSTNAME + ":" + PORT + "/";
     }
 
     @Override

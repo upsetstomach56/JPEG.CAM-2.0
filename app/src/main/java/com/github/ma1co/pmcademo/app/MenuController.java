@@ -10,7 +10,6 @@ import android.media.ExifInterface;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
-import android.text.Html;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -183,9 +182,11 @@ public class MenuController {
     private boolean  isEditing         = false;
     private boolean  isNaming          = false;
     private boolean  isConfirmingDelete = false;
+    private boolean  categoryOpen      = false;
     private int      currentMainTab    = 0;
     private int      currentPage       = 1;
     private int      selection         = 0;
+    private int      headerSelection   = 1;
     private int      itemCount         = 0;
     private String   savedFocusMode    = null;
     private String   hotspotStatus     = "Press ENTER";
@@ -204,8 +205,16 @@ public class MenuController {
     private final TextView[]     labels = new TextView[8];
     private final TextView[]     values = new TextView[8];
     private final ImageView[]    thumbs = new ImageView[8];
-    private final TextView       tvTabRTL, tvTabSettings, tvTabNetwork, tvTabSupport;
+    private final View[]         rowDividers = new View[7];
+    private final LinearLayout   homeContainer;
+    private final TextView[]     homeTiles = new TextView[4];
+    private final TextView       homeProcessingFrequency;
+    private final TextView       homeQueueAction;
+    private final LinearLayout   tabRow;
+    private final TextView       tvBack, tvTabRTL, tvTabSettings, tvTabNetwork, tvTabSupport, tvTabExtra;
+    private final TextView[]     pageTabs = new TextView[5];
     private final TextView       tvSubtitle;
+    private final View           pageDivider;
     private final LinearLayout   supportContainer;
 
     private final HostCallback host;
@@ -234,19 +243,68 @@ public class MenuController {
         UiTheme.panel(container);
         container.setPadding(24, 18, 24, 18);
 
-        // Tab header row
-        LinearLayout tabRow = new LinearLayout(ctx);
+        homeContainer = new LinearLayout(ctx);
+        homeContainer.setOrientation(LinearLayout.VERTICAL);
+        homeContainer.setPadding(4, 2, 4, 4);
+        TextView homeTitle = new TextView(ctx);
+        homeTitle.setText("JPEG.CAM");
+        homeTitle.setTextColor(UiTheme.TEXT);
+        homeTitle.setTextSize(26);
+        homeTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        homeTitle.setGravity(Gravity.CENTER);
+        homeTitle.setPadding(0, 0, 0, 10);
+        homeContainer.addView(homeTitle, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout tileRowTop = new LinearLayout(ctx);
+        tileRowTop.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout tileRowBottom = new LinearLayout(ctx);
+        tileRowBottom.setOrientation(LinearLayout.HORIZONTAL);
+        homeTiles[0] = makeHomeTile(ctx);
+        homeTiles[1] = makeHomeTile(ctx);
+        homeTiles[2] = makeHomeTile(ctx);
+        homeTiles[3] = makeHomeTile(ctx);
+        tileRowTop.addView(homeTiles[0]);
+        tileRowTop.addView(homeTiles[1]);
+        tileRowBottom.addView(homeTiles[2]);
+        tileRowBottom.addView(homeTiles[3]);
+        homeContainer.addView(tileRowTop, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+        homeContainer.addView(tileRowBottom, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
+        homeProcessingFrequency = makeHomeAction(ctx);
+        homeQueueAction = makeHomeAction(ctx);
+        LinearLayout queueRow = new LinearLayout(ctx);
+        queueRow.setOrientation(LinearLayout.HORIZONTAL);
+        queueRow.setPadding(0, 10, 0, 0);
+        queueRow.addView(homeProcessingFrequency);
+        queueRow.addView(homeQueueAction);
+        homeContainer.addView(queueRow, new LinearLayout.LayoutParams(-1, -2));
+        container.addView(homeContainer, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+
+        // Detail header row: Back plus category page tabs
+        tabRow = new LinearLayout(ctx);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         tabRow.setGravity(Gravity.CENTER);
         tabRow.setPadding(0, 0, 0, 12);
-        tvTabRTL      = makeTabHeader(ctx, "RECIPES");
-        tvTabSettings = makeTabHeader(ctx, "SETTINGS");
-        tvTabNetwork  = makeTabHeader(ctx, "NETWORK");
-        tvTabSupport  = makeTabHeader(ctx, "SUPPORT");
+        tvBack        = makeTabHeader(ctx, "< BACK");
+        tvTabRTL      = makeTabHeader(ctx, "BASE");
+        tvTabSettings = makeTabHeader(ctx, "COLOR");
+        tvTabNetwork  = makeTabHeader(ctx, "FX");
+        tvTabSupport  = makeTabHeader(ctx, "GRAIN");
+        tvTabExtra    = makeTabHeader(ctx, "ANALOG");
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(105, -2);
+        backLp.setMargins(3, 0, 9, 0);
+        tvBack.setLayoutParams(backLp);
+        pageTabs[0] = tvTabRTL;
+        pageTabs[1] = tvTabSettings;
+        pageTabs[2] = tvTabNetwork;
+        pageTabs[3] = tvTabSupport;
+        pageTabs[4] = tvTabExtra;
+        tabRow.addView(tvBack);
         tabRow.addView(tvTabRTL);
         tabRow.addView(tvTabSettings);
         tabRow.addView(tvTabNetwork);
         tabRow.addView(tvTabSupport);
+        tabRow.addView(tvTabExtra);
         container.addView(tabRow);
 
         // Support tab content (hidden by default)
@@ -286,11 +344,11 @@ public class MenuController {
         container.addView(tvSubtitle);
 
         // Divider
-        View div = new View(ctx);
-        div.setBackgroundColor(UiTheme.BORDER);
+        pageDivider = new View(ctx);
+        pageDivider.setBackgroundColor(UiTheme.BORDER);
         LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(-1, 2);
         divLp.setMargins(0, 0, 0, 15);
-        container.addView(div, divLp);
+        container.addView(pageDivider, divLp);
 
         // 8 content rows
         for (int i = 0; i < 8; i++) {
@@ -305,13 +363,20 @@ public class MenuController {
             LinearLayout.LayoutParams thumbLp = new LinearLayout.LayoutParams(86, 56);
             thumbLp.setMargins(0, 0, 10, 0);
             rows[i].addView(thumbs[i], thumbLp);
-            labels[i] = new TextView(ctx); labels[i].setTextSize(18); labels[i].setTypeface(Typeface.DEFAULT_BOLD);
-            values[i] = new TextView(ctx); values[i].setTextSize(18); values[i].setGravity(Gravity.RIGHT);
+            labels[i] = new TextView(ctx);
+            labels[i].setTextSize(17);
+            labels[i].setTypeface(Typeface.DEFAULT_BOLD);
+            labels[i].setSingleLine(false);
+            values[i] = new TextView(ctx);
+            values[i].setTextSize(17);
+            values[i].setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+            values[i].setSingleLine(false);
             rows[i].addView(labels[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
             rows[i].addView(values[i], new LinearLayout.LayoutParams(-2, -2));
             if (i < 7) {
                 View rowDiv = new View(ctx);
                 rowDiv.setBackgroundColor(Color.argb(90, 117, 145, 140));
+                rowDividers[i] = rowDiv;
                 container.addView(rowDiv, new LinearLayout.LayoutParams(-1, 1));
             }
         }
@@ -364,6 +429,10 @@ public class MenuController {
             render();
             return true;
         }
+        if (categoryOpen) {
+            showHome();
+            return true;
+        }
         return false;
     }
 
@@ -390,11 +459,13 @@ public class MenuController {
         host.closeHud();
         isOpen      = true;
 
-        // We always cancel editing/naming modes so the user doesn't get stuck,
-        // but we leave currentMainTab, currentPage, and selection alone!
+        // Always reopen to the category dashboard so the menu starts at a predictable place.
         isEditing   = false;
         isNaming    = false;
         manualQueueOpen = false;
+        categoryOpen = false;
+        selection = 0;
+        headerSelection = 1;
 
         container.setVisibility(View.VISIBLE);
         host.getMainUIContainer().setVisibility(View.GONE);
@@ -407,6 +478,7 @@ public class MenuController {
         isNaming           = false;
         isConfirmingDelete = false;
         manualQueueOpen    = false;
+        categoryOpen       = false;
         host.closeHud();
         container.setVisibility(View.GONE);
         host.getMainUIContainer().setVisibility(
@@ -431,7 +503,12 @@ public class MenuController {
             render();
             return true;
         }
-        if (selection == 0)           selection = -2;
+        if (isHome()) {
+            moveHomeSelection(-1, 0);
+            render();
+            return true;
+        }
+        if (selection == 0)           { selection = -2; headerSelection = activeHeaderSelection(); }
         else if (selection == -2)     { selection = itemCount - 1; if (selection < 0) selection = -2; }
         else                          selection--;
         render();
@@ -446,6 +523,11 @@ public class MenuController {
             if (itemCount <= 0) return true;
             if (selection >= itemCount - 1) selection = 0;
             else selection++;
+            render();
+            return true;
+        }
+        if (isHome()) {
+            moveHomeSelection(1, 0);
             render();
             return true;
         }
@@ -465,21 +547,25 @@ public class MenuController {
             render();
             return true;
         }
-        if (selection == -2) {
-            currentMainTab--;
-            if (currentMainTab < 0) currentMainTab = 3;
-            currentPage = tabToFirstPage(currentMainTab);
-            render();
-        } else if (isNaming) {
+        if (isNaming) {
             nameCursorPos = Math.max(0, nameCursorPos - 1);
             render();
-        } else if (isEditing) {
+            return true;
+        }
+        if (isEditing) {
             handleMenuChange(-1);
+            return true;
+        }
+        if (isHome()) {
+            moveHomeSelection(0, -1);
+            render();
+            return true;
+        }
+        if (selection == -2) {
+            moveHeaderSelection(-1);
+            render();
         } else {
-            currentPage--;
-            if (currentPage < 1) currentPage = 9;
-            currentMainTab = pageToTab(currentPage);
-            selection = 0;
+            moveCategoryPage(-1);
             render();
         }
         return true;
@@ -495,21 +581,25 @@ public class MenuController {
             render();
             return true;
         }
-        if (selection == -2) {
-            currentMainTab++;
-            if (currentMainTab > 3) currentMainTab = 0;
-            currentPage = tabToFirstPage(currentMainTab);
-            render();
-        } else if (isNaming) {
+        if (isNaming) {
             nameCursorPos = Math.min(7, nameCursorPos + 1);
             render();
-        } else if (isEditing) {
+            return true;
+        }
+        if (isEditing) {
             handleMenuChange(1);
+            return true;
+        }
+        if (isHome()) {
+            moveHomeSelection(0, 1);
+            render();
+            return true;
+        }
+        if (selection == -2) {
+            moveHeaderSelection(1);
+            render();
         } else {
-            currentPage++;
-            if (currentPage > 9) currentPage = 1;
-            currentMainTab = pageToTab(currentPage);
-            selection = 0;
+            moveCategoryPage(1);
             render();
         }
         return true;
@@ -535,18 +625,15 @@ public class MenuController {
     public boolean handleEnter() {
         if (!isOpen) return false;
         if (manualQueueOpen) return handleManualQueueEnter();
+        if (isHome()) return handleHomeEnter();
+        if (selection == -2) {
+            if (headerSelection == 0) showHome();
+            else selectHeaderPage(headerSelection - 1);
+            return true;
+        }
         if (currentPage == 8) { handleConnectionAction(); return true; }
         if (selection == -2) return true; // Tab level — enter does nothing
         if (selection < 0)   return true; // Subtitle row — enter does nothing
-        if (currentPage == 6 && selection == 6) {
-            if (host.getProcessingFrequency() == PROCESSING_FREQUENCY_MANUAL) {
-                openManualQueue();
-            } else if (host.getQueuedPhotoCount() > 0) {
-                host.forceProcessQueuedPhotos();
-                close();
-            }
-            return true;
-        }
         isEditing = !isEditing;
         render();
         return true;
@@ -554,6 +641,7 @@ public class MenuController {
 
     private void openManualQueue() {
         manualQueueOpen = true;
+        categoryOpen = false;
         isEditing = false;
         isNaming = false;
         manualQueueOffset = 0;
@@ -566,9 +654,9 @@ public class MenuController {
         manualQueueOpen = false;
         isEditing = false;
         isNaming = false;
-        currentMainTab = 1;
-        currentPage = 6;
-        selection = 6;
+        categoryOpen = false;
+        selection = 5;
+        headerSelection = 1;
         render();
     }
 
@@ -636,6 +724,7 @@ public class MenuController {
     /** Launch HUD modes from menu — called from onEnterPressed page/selection dispatch. */
     public boolean dispatchHudLaunch() {
         if (!isOpen) return false;
+        if (manualQueueOpen || !categoryOpen) return false;
         if (currentMainTab == 0 && currentPage == 1 && selection == 1) { host.onHudModeRequested(10); return true; }
         if (currentMainTab == 0 && currentPage == 1 && selection == 2) { host.onHudModeRequested(6);  return true; }
         if (currentMainTab == 0 && currentPage == 1 && selection == 3) { host.onHudModeRequested(3);  return true; }
@@ -661,7 +750,7 @@ public class MenuController {
     public void updateConnectionStatus(String target, String status) {
         if ("HOTSPOT".equals(target)) hotspotStatus = status;
         else wifiStatus = status;
-        if (isOpen && currentPage == 8) render();
+        if (isOpen && categoryOpen && currentPage == 8) render();
     }
 
     // -----------------------------------------------------------------------
@@ -724,6 +813,14 @@ public class MenuController {
         RTLProfile p = rm.getCurrentProfile();
         int sel = selection;
 
+        if (isHome()) {
+            if (sel == 4) host.setProcessingFrequency(nextProcessingFrequency(host.getProcessingFrequency(), dir));
+            render();
+            rm.savePreferences();
+            host.scheduleHardwareApply();
+            return;
+        }
+
         if (currentPage == 1) {
             if (sel == 0 && !isNaming) {
                 rm.savePreferences();
@@ -784,7 +881,6 @@ public class MenuController {
             }
             else if (sel == 3) host.setPrefGridLines(!host.isPrefGridLines());
             else if (sel == 4) host.setPrefJpegQuality(Math.max(60, Math.min(100, host.getPrefJpegQuality() + dir * 5)));
-            else if (sel == 5) host.setProcessingFrequency(nextProcessingFrequency(host.getProcessingFrequency(), dir));
         } else if (currentPage == 7) {
             if      (sel == 0) rm.setPrefC1(clampCustomButtonAction(rm.getPrefC1() + dir));
             else if (sel == 1) rm.setPrefC2(clampCustomButtonAction(rm.getPrefC2() + dir));
@@ -822,7 +918,7 @@ public class MenuController {
         } else if (selection == 1) {
             wifiStatus = "Connecting...";
             if (host.getConnectivityManager() != null) { host.getConnectivityManager().startHomeWifi(); host.onSetAutoPowerOffMode(false); }
-        } else if (selection == 2) {
+        } else if (selection == 3) {
             hotspotStatus = "Press ENTER";
             wifiStatus    = "Press ENTER";
             if (host.getConnectivityManager() != null) { host.getConnectivityManager().stopNetworking(); host.onSetAutoPowerOffMode(true); }
@@ -838,17 +934,25 @@ public class MenuController {
         RecipeManager rm = host.getRecipeManager();
         RTLProfile p = rm.getCurrentProfile();
 
-        // Tab highlight
-        int accent = UiTheme.ACCENT;
-        styleTab(tvTabRTL,      selection == -2 && currentMainTab == 0, currentMainTab == 0);
-        styleTab(tvTabSettings, selection == -2 && currentMainTab == 1, currentMainTab == 1);
-        styleTab(tvTabNetwork,  selection == -2 && currentMainTab == 2, currentMainTab == 2);
-        styleTab(tvTabSupport,  selection == -2 && currentMainTab == 3, currentMainTab == 3);
+        if (isHome()) {
+            renderHome();
+            return;
+        }
+
+        homeContainer.setVisibility(View.GONE);
+        tabRow.setVisibility(manualQueueOpen ? View.GONE : View.VISIBLE);
+        tvSubtitle.setVisibility(View.VISIBLE);
+        pageDivider.setVisibility(View.VISIBLE);
+        supportContainer.setVisibility(View.GONE);
+
+        // Detail page tabs
+        int accent = currentTabAccent();
+        configurePageTabs(accent);
 
         // Subtitle
-        if (selection == -1) UiTheme.selected(tvSubtitle);
+        if (selection == -1) UiTheme.selected(tvSubtitle, accent);
         else UiTheme.clear(tvSubtitle);
-        String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","6. App Preferences","7. Custom Buttons","8. Web Dashboard Server","9. Resources & Community"};
+        String[] subtitles = {"","RECIPES 1/5 - Identity & Base","RECIPES 2/5 - Color Engine","RECIPES 3/5 - Effects & Shading","RECIPES 4/5 - LUTs & Grain","RECIPES 5/5 - Analog Physics","SETTINGS 1/2 - App Preferences","SETTINGS 2/2 - Custom Buttons","NETWORK - Web Dashboard","SUPPORT - Resources"};
         if (currentPage >= 1 && currentPage <= 9) {
             tvSubtitle.setText(subtitles[currentPage]);
         }
@@ -858,18 +962,23 @@ public class MenuController {
             thumbs[i].setVisibility(View.GONE);
             thumbs[i].setImageBitmap(null);
             thumbs[i].setTag(null);
+            if (i < rowDividers.length && rowDividers[i] != null) rowDividers[i].setVisibility(View.GONE);
         }
-        supportContainer.setVisibility(View.GONE);
 
         if (manualQueueOpen) {
-            renderManualQueue(accent);
+            renderManualQueue(UiTheme.ACCENT_SETTINGS);
             return;
         }
 
-        if (currentPage == 9) { supportContainer.setVisibility(View.VISIBLE); itemCount = 0; return; }
+        if (currentPage == 9) {
+            tvSubtitle.setVisibility(View.GONE);
+            pageDivider.setVisibility(View.GONE);
+            supportContainer.setVisibility(View.VISIBLE);
+            itemCount = 0;
+            return;
+        }
 
         String[] amtLbls  = {"OFF","LOW","MED","HIGH","V.HIGH","MAX"};
-        String[] sizeLbls = {"SMALL","MED","LARGE"};
         int ic = 0;
 
         if (currentMainTab == 0) {
@@ -942,24 +1051,18 @@ public class MenuController {
             }
         }
         if (currentPage == 6) {
-            ic = 7;
+            ic = 5;
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
 
             String creativeMode = "OFF";
             if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
             else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
-            int freq = host.getProcessingFrequency();
-            String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
-            int queueCount = host.getQueuedPhotoCount();
 
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
             setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
             setRow(2, "Creative Modes",        creativeMode);
             setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
             setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
-            setRow(5, "Processing Frequency",  frequencyLabel);
-            setRow(6, freq == PROCESSING_FREQUENCY_MANUAL ? "Manual Queue" : "Process Queued Photos",
-                    freq == PROCESSING_FREQUENCY_MANUAL ? (queueCount + " WAITING") : (queueCount > 0 ? (queueCount + " WAITING") : "EMPTY"));
         } else if (currentPage == 7) {
             ic = 5;
             setRow(0, "Custom 1 (C1)", customButtonLabel(rm.getPrefC1()));
@@ -968,10 +1071,11 @@ public class MenuController {
             setRow(3, "AEL Button",    customButtonLabel(rm.getPrefAel()));
             setRow(4, "FN Button",     customButtonLabel(rm.getPrefFn()));
         } else if (currentPage == 8) {
-            ic = 3;
+            ic = 4;
             setRow(0, "Camera Hotspot", hotspotStatus);
             setRow(1, "Home Wi-Fi",     wifiStatus);
-            setRow(2, "Stop Networking","");
+            setRow(2, "Browser Name",   HttpServer.friendlyUrl());
+            setRow(3, "Stop Networking","");
         }
 
         highlightRows(ic, accent);
@@ -1009,7 +1113,7 @@ public class MenuController {
         int selected = getManualSelectedCount();
         setRow(row++, "Process Selected", selected > 0 ? (selected + " | " + host.getProcessingEstimateText(selected)) : "NONE");
         setRow(row++, "Clear Queue List", queueCount > 0 ? (queueCount + " ITEMS") : "EMPTY");
-        setRow(row++, "Back", "SETTINGS");
+        setRow(row++, "Back", "MENU");
 
         itemCount = row;
         if (selection >= itemCount) selection = itemCount - 1;
@@ -1018,6 +1122,7 @@ public class MenuController {
     }
 
     private void highlightRows(int ic, int accent) {
+        updateRowDividers(ic);
         RTLProfile p = host.getRecipeManager().getCurrentProfile();
         for (int i = 0; i < ic; i++) {
             boolean active = manualQueueOpen || isRowActive(p, i);
@@ -1034,7 +1139,7 @@ public class MenuController {
                     values[i].setTextColor(accent);
                     values[i].setShadowLayer(2, 0, 0, UiTheme.SHADOW);
                 } else {
-                    UiTheme.selected(rows[i]);
+                    UiTheme.selected(rows[i], accent);
                     UiTheme.selectedText(labels[i]);
                     UiTheme.selectedText(values[i]);
                 }
@@ -1223,7 +1328,6 @@ public class MenuController {
             if (i == 1) return p.lutIndex > 0;
             if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
-        if (currentPage == 6 && i == 6) return host.getProcessingFrequency() == PROCESSING_FREQUENCY_MANUAL || host.getQueuedPhotoCount() > 0;
         return true;
     }
 
@@ -1277,28 +1381,273 @@ public class MenuController {
         return 3;
     }
 
-    private TextView tvStatusText;
+    private boolean isHome() {
+        return !categoryOpen && !manualQueueOpen;
+    }
+
+    private boolean handleHomeEnter() {
+        if (selection >= 0 && selection <= 3) {
+            openCategory(selection);
+            return true;
+        }
+        if (selection == 4) {
+            isEditing = !isEditing;
+            render();
+            return true;
+        }
+        if (selection == 5) {
+            if (host.getProcessingFrequency() == PROCESSING_FREQUENCY_MANUAL) {
+                openManualQueue();
+            } else if (host.getQueuedPhotoCount() > 0) {
+                host.forceProcessQueuedPhotos();
+                close();
+            }
+            return true;
+        }
+        return true;
+    }
+
+    private void openCategory(int tab) {
+        categoryOpen = true;
+        manualQueueOpen = false;
+        isEditing = false;
+        isNaming = false;
+        isConfirmingDelete = false;
+        currentMainTab = tab;
+        currentPage = tabToFirstPage(tab);
+        headerSelection = activeHeaderSelection();
+        selection = tab == 3 ? -2 : 0;
+        render();
+    }
+
+    private void showHome() {
+        categoryOpen = false;
+        manualQueueOpen = false;
+        isEditing = false;
+        isNaming = false;
+        isConfirmingDelete = false;
+        selection = 0;
+        headerSelection = 1;
+        render();
+    }
+
+    private void moveHomeSelection(int vertical, int horizontal) {
+        if (horizontal != 0) {
+            if (selection == 0) selection = 1;
+            else if (selection == 1) selection = 0;
+            else if (selection == 2) selection = 3;
+            else if (selection == 3) selection = 2;
+            else if (selection == 4) selection = 5;
+            else if (selection == 5) selection = 4;
+            return;
+        }
+
+        if (vertical > 0) {
+            if (selection == 0) selection = 2;
+            else if (selection == 1) selection = 3;
+            else if (selection == 2 || selection == 3) selection = 4;
+            else if (selection == 4) selection = 5;
+            else selection = 0;
+        } else {
+            if (selection == 0 || selection == 1) selection = 5;
+            else if (selection == 2) selection = 0;
+            else if (selection == 3) selection = 1;
+            else if (selection == 4) selection = 2;
+            else selection = 4;
+        }
+    }
+
+    private int[] categoryPages(int tab) {
+        if (tab == 0) return new int[] {1, 2, 3, 4, 5};
+        if (tab == 1) return new int[] {6, 7};
+        if (tab == 2) return new int[] {8};
+        return new int[] {9};
+    }
+
+    private String[] categoryPageLabels(int tab) {
+        if (tab == 0) return new String[] {"BASE", "COLOR", "FX", "GRAIN", "ANALOG"};
+        if (tab == 1) return new String[] {"APP", "BUTTONS"};
+        if (tab == 2) return new String[] {"WEB"};
+        return new String[] {"HELP"};
+    }
+
+    private int activeHeaderSelection() {
+        int[] pages = categoryPages(currentMainTab);
+        for (int i = 0; i < pages.length; i++) {
+            if (pages[i] == currentPage) return i + 1;
+        }
+        return 1;
+    }
+
+    private void moveHeaderSelection(int dir) {
+        int max = categoryPages(currentMainTab).length;
+        headerSelection += dir;
+        if (headerSelection < 0) headerSelection = max;
+        if (headerSelection > max) headerSelection = 0;
+    }
+
+    private void selectHeaderPage(int pageTabIndex) {
+        int[] pages = categoryPages(currentMainTab);
+        if (pageTabIndex < 0 || pageTabIndex >= pages.length) return;
+        currentPage = pages[pageTabIndex];
+        currentMainTab = pageToTab(currentPage);
+        headerSelection = pageTabIndex + 1;
+        selection = currentPage == 9 ? -2 : 0;
+        isEditing = false;
+        isNaming = false;
+        render();
+    }
+
+    private void moveCategoryPage(int dir) {
+        int[] pages = categoryPages(currentMainTab);
+        if (pages.length <= 1) return;
+        int idx = 0;
+        for (int i = 0; i < pages.length; i++) {
+            if (pages[i] == currentPage) {
+                idx = i;
+                break;
+            }
+        }
+        idx = (idx + dir + pages.length) % pages.length;
+        currentPage = pages[idx];
+        headerSelection = idx + 1;
+        selection = currentPage == 9 ? -2 : 0;
+        isEditing = false;
+        isNaming = false;
+    }
+
+    private void configurePageTabs(int accent) {
+        String[] labels = categoryPageLabels(currentMainTab);
+        int[] pages = categoryPages(currentMainTab);
+
+        UiTheme.tabPanel(tvBack, accent, selection == -2 && headerSelection == 0, false);
+        tvBack.setTextColor(selection == -2 && headerSelection == 0 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+
+        for (int i = 0; i < pageTabs.length; i++) {
+            TextView tab = pageTabs[i];
+            if (i >= labels.length) {
+                tab.setVisibility(View.GONE);
+                continue;
+            }
+            tab.setVisibility(View.VISIBLE);
+            tab.setText(labels[i]);
+            boolean active = currentPage == pages[i];
+            boolean selected = selection == -2 && headerSelection == i + 1;
+            UiTheme.tabPanel(tab, accent, selected, active);
+            tab.setTextColor(active || selected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        }
+    }
+
+    private void renderHome() {
+        homeContainer.setVisibility(View.VISIBLE);
+        tabRow.setVisibility(View.GONE);
+        supportContainer.setVisibility(View.GONE);
+        tvSubtitle.setVisibility(View.GONE);
+        pageDivider.setVisibility(View.GONE);
+
+        for (int i = 0; i < 8; i++) {
+            rows[i].setVisibility(View.GONE);
+            thumbs[i].setVisibility(View.GONE);
+            thumbs[i].setImageBitmap(null);
+            thumbs[i].setTag(null);
+            if (i < rowDividers.length && rowDividers[i] != null) rowDividers[i].setVisibility(View.GONE);
+        }
+
+        styleHomeTile(0, "RECIPES\nLook + Grain", UiTheme.ACCENT_RECIPES, selection == 0);
+        styleHomeTile(1, "SETTINGS\nApp + Buttons", UiTheme.ACCENT_SETTINGS, selection == 1);
+        styleHomeTile(2, "NETWORK\nDashboard", UiTheme.ACCENT_NETWORK, selection == 2);
+        styleHomeTile(3, "SUPPORT\nResources", UiTheme.ACCENT_SUPPORT, selection == 3);
+
+        int freq = host.getProcessingFrequency();
+        String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
+        int queueCount = host.getQueuedPhotoCount();
+        styleHomeAction(homeProcessingFrequency, "Processing Frequency\n" + frequencyLabel,
+                UiTheme.ACCENT_SETTINGS, selection == 4, true, isEditing && selection == 4);
+
+        String queueLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "Manual Queue" : "Process Queue";
+        String queueValue = queueCount > 0 ? (queueCount + " WAITING") : "EMPTY";
+        boolean queueActive = freq == PROCESSING_FREQUENCY_MANUAL || queueCount > 0;
+        styleHomeAction(homeQueueAction, queueLabel + "\n" + queueValue,
+                UiTheme.ACCENT_SETTINGS, selection == 5, queueActive, false);
+        itemCount = 6;
+    }
+
+    private void styleHomeTile(int index, String text, int accent, boolean selected) {
+        TextView tile = homeTiles[index];
+        tile.setText(text);
+        UiTheme.tabPanel(tile, accent, selected, true);
+        tile.setTextColor(UiTheme.TEXT);
+        tile.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
+    }
+
+    private void styleHomeAction(TextView view, String text, int accent, boolean selected, boolean active, boolean editing) {
+        view.setText(text);
+        UiTheme.tabPanel(view, accent, selected, active);
+        if (!active) {
+            UiTheme.dimText(view);
+        } else {
+            view.setTextColor(editing ? accent : UiTheme.TEXT);
+            view.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
+        }
+    }
+
+    private void updateRowDividers(int count) {
+        for (int i = 0; i < rowDividers.length; i++) {
+            if (rowDividers[i] != null) rowDividers[i].setVisibility(i < count - 1 ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private TextView makeHomeTile(Context ctx) {
+        TextView tv = new TextView(ctx);
+        tv.setTextSize(18);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(false);
+        tv.setPadding(10, 16, 10, 16);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1.0f);
+        lp.setMargins(5, 5, 5, 5);
+        tv.setLayoutParams(lp);
+        UiTheme.softPanel(tv);
+        return tv;
+    }
+
+    private TextView makeHomeAction(Context ctx) {
+        TextView tv = new TextView(ctx);
+        tv.setTextSize(15);
+        tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(false);
+        tv.setPadding(8, 10, 8, 10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lp.setMargins(5, 0, 5, 0);
+        tv.setLayoutParams(lp);
+        UiTheme.softPanel(tv);
+        return tv;
+    }
 
     private TextView makeTabHeader(Context ctx, String text) {
         TextView tv = new TextView(ctx);
         tv.setText(text);
-        tv.setTextSize(16);
+        tv.setTextSize(15);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(0, 7, 0, 7);
-        tv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        tv.setPadding(0, 9, 0, 9);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lp.setMargins(3, 0, 3, 0);
+        tv.setLayoutParams(lp);
         tv.setTextColor(UiTheme.TEXT_MUTED);
         UiTheme.softPanel(tv);
         return tv;
     }
 
-    private void styleTab(TextView tv, boolean selected, boolean activePage) {
-        if (selected) {
-            UiTheme.selected(tv);
-            tv.setTextColor(UiTheme.TEXT);
-        } else {
-            UiTheme.softPanel(tv);
-            tv.setTextColor(activePage ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
-        }
+    private int currentTabAccent() {
+        return tabAccent(currentMainTab);
+    }
+
+    private int tabAccent(int tab) {
+        if (tab == 1) return UiTheme.ACCENT_SETTINGS;
+        if (tab == 2) return UiTheme.ACCENT_NETWORK;
+        if (tab == 3) return UiTheme.ACCENT_SUPPORT;
+        return UiTheme.ACCENT_RECIPES;
     }
 }
