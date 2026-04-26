@@ -79,9 +79,11 @@ public class PlaybackController {
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
         infoText = new TextView(context);
-        infoText.setTextColor(Color.WHITE);
+        infoText.setTextColor(UiTheme.TEXT);
         infoText.setTextSize(18);
-        infoText.setShadowLayer(3, 0, 0, Color.BLACK);
+        infoText.setShadowLayer(3, 0, 0, UiTheme.SHADOW);
+        infoText.setPadding(12, 8, 12, 8);
+        UiTheme.softPanel(infoText);
         FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -206,12 +208,12 @@ public class PlaybackController {
             }
             opts.inJustDecodeBounds = false;
             opts.inSampleSize       = inSampleSize;
-            
-            opts.inPreferredConfig  = Bitmap.Config.ARGB_8888; 
+
+            opts.inPreferredConfig  = Bitmap.Config.ARGB_8888;
             opts.inDither           = false; // Keep this false! We are dithering the DRAW, not the DECODE.
             opts.inPreferQualityOverSpeed = true;
-            
-            // <--- DELETED: inPurgeable and inInputShareable 
+
+            // <--- DELETED: inPurgeable and inInputShareable
 
             Bitmap raw = BitmapFactory.decodeFile(path, opts);
             if (raw == null) {
@@ -238,7 +240,7 @@ public class PlaybackController {
             // This hides the banding when Android inevitably crushes it to 16-bit for the display.
             android.graphics.drawable.BitmapDrawable drawable = new android.graphics.drawable.BitmapDrawable(context.getResources(), bmp);
             drawable.setDither(true);
-            
+
             imageView.setImageDrawable(drawable);
             imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             currentBitmap = bmp;

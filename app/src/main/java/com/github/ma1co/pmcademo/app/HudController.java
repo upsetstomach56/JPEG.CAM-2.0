@@ -90,16 +90,17 @@ public class HudController {
         // 9-cell horizontal overlay (pinned to bottom)
         overlay = new LinearLayout(ctx);
         overlay.setOrientation(LinearLayout.HORIZONTAL);
-        overlay.setBackgroundColor(Color.argb(220, 15, 15, 15));
-        overlay.setPadding(10, 15, 10, 15);
+        UiTheme.panel(overlay);
+        overlay.setPadding(12, 14, 12, 14);
         overlay.setVisibility(View.GONE);
         for (int i = 0; i < 9; i++) {
             cells[i] = new LinearLayout(ctx);
             cells[i].setOrientation(LinearLayout.VERTICAL);
             cells[i].setGravity(Gravity.CENTER);
-            cellLabels[i] = new TextView(ctx); cellLabels[i].setTextColor(Color.GRAY); cellLabels[i].setTextSize(14);
+            cells[i].setPadding(3, 0, 3, 0);
+            cellLabels[i] = new TextView(ctx); cellLabels[i].setTextColor(UiTheme.TEXT_MUTED); cellLabels[i].setTextSize(13);
             if (font != null) cellLabels[i].setTypeface(font); else cellLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
-            cellValues[i] = new TextView(ctx); cellValues[i].setTextColor(Color.WHITE); cellValues[i].setTextSize(18);
+            cellValues[i] = new TextView(ctx); cellValues[i].setTextColor(UiTheme.TEXT); cellValues[i].setTextSize(18);
             if (font != null) cellValues[i].setTypeface(font); else cellValues[i].setTypeface(Typeface.DEFAULT_BOLD);
             cells[i].addView(cellLabels[i]); cells[i].addView(cellValues[i]);
             overlay.addView(cells[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -110,9 +111,9 @@ public class HudController {
 
         // Tooltip text (above overlay)
         tooltip = new TextView(ctx);
-        tooltip.setTextColor(Color.LTGRAY); tooltip.setTextSize(12);
-        tooltip.setGravity(Gravity.CENTER); tooltip.setPadding(10, 8, 10, 8);
-        tooltip.setBackgroundColor(Color.argb(200, 15, 15, 15));
+        tooltip.setTextColor(UiTheme.TEXT_MUTED); tooltip.setTextSize(12);
+        tooltip.setGravity(Gravity.CENTER); tooltip.setPadding(14, 9, 14, 9);
+        UiTheme.softPanel(tooltip);
         tooltip.setVisibility(View.GONE);
         FrameLayout.LayoutParams ttLp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         ttLp.setMargins(0, 0, 0, 130);
@@ -120,28 +121,28 @@ public class HudController {
 
         // WB grid (mode 2 — special cursor UI)
         wbGrid = new FrameLayout(ctx);
-        wbGrid.setBackgroundColor(Color.argb(160, 20, 20, 20));
+        UiTheme.panel(wbGrid);
         wbGrid.setVisibility(View.GONE);
-        View vAxis = new View(ctx); vAxis.setBackgroundColor(Color.GRAY);
+        View vAxis = new View(ctx); vAxis.setBackgroundColor(UiTheme.BORDER);
         wbGrid.addView(vAxis, new FrameLayout.LayoutParams(2, 280, Gravity.CENTER));
-        View hAxis = new View(ctx); hAxis.setBackgroundColor(Color.GRAY);
+        View hAxis = new View(ctx); hAxis.setBackgroundColor(UiTheme.BORDER);
         wbGrid.addView(hAxis, new FrameLayout.LayoutParams(280, 2, Gravity.CENTER));
         TextView lG = makeLabel(ctx,"G"); wbGrid.addView(lG, new FrameLayout.LayoutParams(-2,-2, Gravity.TOP|Gravity.CENTER_HORIZONTAL));
         TextView lM = makeLabel(ctx,"M"); wbGrid.addView(lM, new FrameLayout.LayoutParams(-2,-2, Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL));
         TextView lB = makeLabel(ctx,"B"); FrameLayout.LayoutParams pB = new FrameLayout.LayoutParams(-2,-2,Gravity.LEFT|Gravity.CENTER_VERTICAL); pB.setMargins(10,0,0,0); wbGrid.addView(lB, pB);
         TextView lA = makeLabel(ctx,"A"); FrameLayout.LayoutParams pA = new FrameLayout.LayoutParams(-2,-2,Gravity.RIGHT|Gravity.CENTER_VERTICAL); pA.setMargins(0,0,10,0); wbGrid.addView(lA, pA);
-        wbValueText = new TextView(ctx); wbValueText.setTextColor(Color.rgb(227,69,20)); wbValueText.setTextSize(16);
+        wbValueText = new TextView(ctx); wbValueText.setTextColor(UiTheme.ACCENT); wbValueText.setTextSize(16);
         if (font != null) wbValueText.setTypeface(font); else wbValueText.setTypeface(Typeface.DEFAULT_BOLD);
         FrameLayout.LayoutParams pVal = new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.RIGHT); pVal.setMargins(0,10,15,0);
         wbGrid.addView(wbValueText, pVal);
-        wbCursor = new View(ctx); wbCursor.setBackgroundColor(Color.rgb(227,69,20));
+        wbCursor = new View(ctx); wbCursor.setBackgroundColor(UiTheme.ACCENT);
         FrameLayout.LayoutParams cursorLp = new FrameLayout.LayoutParams(14,14,Gravity.TOP|Gravity.LEFT); cursorLp.setMargins(153,153,0,0);
         wbGrid.addView(wbCursor, cursorLp);
         mainUIContainer.addView(wbGrid, new FrameLayout.LayoutParams(320,320,Gravity.CENTER));
     }
 
     private TextView makeLabel(Context ctx, String text) {
-        TextView tv = new TextView(ctx); tv.setText(text); tv.setTextColor(Color.WHITE); return tv;
+        TextView tv = new TextView(ctx); tv.setText(text); tv.setTextColor(UiTheme.TEXT); return tv;
     }
 
     // -----------------------------------------------------------------------
@@ -181,7 +182,7 @@ public class HudController {
         selection = defaultSel;
         host.getMenuController().setConfirmingDelete(false);
         host.getMenuController().getContainer().setVisibility(View.GONE);
-        
+
         // NEW: Sync the vault cursor to your currently active recipe
         if (hudMode == 10) {
             refreshVaultItems();
@@ -379,8 +380,8 @@ public class HudController {
         } else if (mode == 6) {
             if (selection == 0) {
                 // Use the dynamic hardware list from the MenuController instead of a hardcoded array!
-                String[] styles = host.getMenuController().getSupportedColorModes(); 
-                int idx = 0; 
+                String[] styles = host.getMenuController().getSupportedColorModes();
+                int idx = 0;
                 for (int i = 0; i < styles.length; i++) {
                     if (styles[i].equalsIgnoreCase(p.colorMode)) idx = i;
                 }
@@ -445,8 +446,8 @@ public class HudController {
                 if (mc.isNamingMode()) {
                     StringBuilder sb=new StringBuilder("NAME: "); char[] buf=mc.getNameBuffer(); int pos=mc.getNameCursorPos();
                     for(int i=0;i<buf.length;i++) { if(i==pos) sb.append("[").append(buf[i]).append("]"); else sb.append(buf[i]); }
-                    tvTop.setText(sb.toString()); tvTop.setTextColor(Color.YELLOW);
-                } else { tvTop.setText("MATRIX: "+currentName); tvTop.setTextColor(selection==-1?Color.rgb(227,69,20):Color.WHITE); }
+                    tvTop.setText(sb.toString()); tvTop.setTextColor(UiTheme.WARN);
+                } else { tvTop.setText("MATRIX: "+currentName); tvTop.setTextColor(selection==-1?UiTheme.ACCENT:UiTheme.TEXT); }
                 tvTop.setVisibility(View.VISIBLE);
             }
             if (selection==-1) tip="FILE: "+matrixNote+"\n"+balText;
@@ -500,11 +501,11 @@ public class HudController {
                 else if(selection==3) tip="Permanently delete the currently selected Vault recipe.";
             }
             if(tvTop!=null){
-                if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(Color.YELLOW);}
+                if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(UiTheme.WARN);}
                 else{
                     // <--- CHANGED: Added the [MENU = BACK] safe escape hint
                     tvTop.setText("RECIPE MANAGER - SLOT "+(host.getRecipeManager().getCurrentSlot()+1) + "  [MENU = BACK]");
-                    tvTop.setTextColor(Color.WHITE);
+                    tvTop.setTextColor(UiTheme.TEXT);
                 }
                 tvTop.setVisibility(View.VISIBLE);
             }
@@ -513,8 +514,8 @@ public class HudController {
         // Render cells
         for(int i=0;i<9;i++){
             if(i<activeCells){cells[i].setVisibility(View.VISIBLE);cellLabels[i].setText(labels[i]);cellValues[i].setText(values[i]);
-                if(i==selection){cellLabels[i].setTextColor(Color.rgb(227,69,20));cellValues[i].setTextColor(Color.rgb(227,69,20));}
-                else{cellLabels[i].setTextColor(Color.GRAY);cellValues[i].setTextColor(Color.WHITE);}
+                if(i==selection){cellLabels[i].setTextColor(UiTheme.ACCENT);cellValues[i].setTextColor(UiTheme.ACCENT);}
+                else{cellLabels[i].setTextColor(UiTheme.TEXT_MUTED);cellValues[i].setTextColor(UiTheme.TEXT);}
             } else cells[i].setVisibility(View.GONE);
         }
         if(tooltip!=null){tooltip.setText(tip);tooltip.setVisibility(tip.isEmpty()?View.GONE:View.VISIBLE);}

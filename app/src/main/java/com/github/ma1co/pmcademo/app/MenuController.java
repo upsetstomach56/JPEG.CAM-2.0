@@ -231,14 +231,14 @@ public class MenuController {
 
         container = new LinearLayout(ctx);
         container.setOrientation(LinearLayout.VERTICAL);
-        container.setBackgroundColor(Color.argb(250, 15, 15, 15));
-        container.setPadding(20, 20, 20, 20);
+        UiTheme.panel(container);
+        container.setPadding(24, 18, 24, 18);
 
         // Tab header row
         LinearLayout tabRow = new LinearLayout(ctx);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         tabRow.setGravity(Gravity.CENTER);
-        tabRow.setPadding(0, 0, 0, 10);
+        tabRow.setPadding(0, 0, 0, 12);
         tvTabRTL      = makeTabHeader(ctx, "RECIPES");
         tvTabSettings = makeTabHeader(ctx, "SETTINGS");
         tvTabNetwork  = makeTabHeader(ctx, "NETWORK");
@@ -255,12 +255,12 @@ public class MenuController {
         supportContainer.setGravity(Gravity.CENTER);
         supportContainer.setVisibility(View.GONE);
         TextView tvTitle = new TextView(ctx); tvTitle.setText("JPEG.CAM");
-        tvTitle.setTextColor(Color.WHITE); tvTitle.setTextSize(28);
+        tvTitle.setTextColor(UiTheme.TEXT); tvTitle.setTextSize(28);
         tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
         supportContainer.addView(tvTitle);
         TextView tvSub = new TextView(ctx);
         tvSub.setText("by JPEG Cookbook \u2022 v" + host.getAppVersion());
-        tvSub.setTextColor(Color.LTGRAY); tvSub.setTextSize(12);
+        tvSub.setTextColor(UiTheme.TEXT_MUTED); tvSub.setTextSize(12);
         tvSub.setPadding(0, 0, 0, 20);
         supportContainer.addView(tvSub);
         ImageView qrView = new ImageView(ctx);
@@ -273,21 +273,21 @@ public class MenuController {
         supportContainer.addView(qrView);
         TextView tvDesc = new TextView(ctx);
         tvDesc.setText("Manuals, Lens Profiles, & Support");
-        tvDesc.setTextColor(Color.GRAY); tvDesc.setTextSize(12);
+        tvDesc.setTextColor(UiTheme.TEXT_MUTED); tvDesc.setTextSize(12);
         supportContainer.addView(tvDesc);
         container.addView(supportContainer, new LinearLayout.LayoutParams(-1, -1));
 
         // Page subtitle
         tvSubtitle = new TextView(ctx);
         tvSubtitle.setTextSize(18);
-        tvSubtitle.setTextColor(Color.WHITE);
+        tvSubtitle.setTextColor(UiTheme.TEXT);
         tvSubtitle.setTypeface(Typeface.DEFAULT_BOLD);
-        tvSubtitle.setPadding(10, 0, 0, 15);
+        tvSubtitle.setPadding(12, 4, 12, 14);
         container.addView(tvSubtitle);
 
         // Divider
         View div = new View(ctx);
-        div.setBackgroundColor(Color.GRAY);
+        div.setBackgroundColor(UiTheme.BORDER);
         LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(-1, 2);
         divLp.setMargins(0, 0, 0, 15);
         container.addView(div, divLp);
@@ -297,7 +297,7 @@ public class MenuController {
             rows[i] = new LinearLayout(ctx);
             rows[i].setOrientation(LinearLayout.HORIZONTAL);
             rows[i].setGravity(Gravity.CENTER_VERTICAL);
-            rows[i].setPadding(10, 0, 10, 0);
+            rows[i].setPadding(12, 0, 12, 0);
             container.addView(rows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
             thumbs[i] = new ImageView(ctx);
             thumbs[i].setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -311,7 +311,7 @@ public class MenuController {
             rows[i].addView(values[i], new LinearLayout.LayoutParams(-2, -2));
             if (i < 7) {
                 View rowDiv = new View(ctx);
-                rowDiv.setBackgroundColor(Color.DKGRAY);
+                rowDiv.setBackgroundColor(Color.argb(90, 117, 145, 140));
                 container.addView(rowDiv, new LinearLayout.LayoutParams(-1, 1));
             }
         }
@@ -389,13 +389,13 @@ public class MenuController {
         host.onMenuOpened();
         host.closeHud();
         isOpen      = true;
-        
+
         // We always cancel editing/naming modes so the user doesn't get stuck,
         // but we leave currentMainTab, currentPage, and selection alone!
         isEditing   = false;
         isNaming    = false;
         manualQueueOpen = false;
-        
+
         container.setVisibility(View.VISIBLE);
         host.getMainUIContainer().setVisibility(View.GONE);
         render();
@@ -670,22 +670,22 @@ public class MenuController {
 
     public String[] getSupportedColorModes() {
         if (cachedColorModes != null) return cachedColorModes;
-        
+
         // This is the hardcoded list you were seeing!
         String[] fallback = {"Standard","Vivid","Neutral","Clear","Deep","Light","Portrait","Landscape","Sunset","Night Scene","Autumn Leaves","Mono","Sepia"};
-        
+
         Camera cam = host.getCamera();
         if (cam != null) {
             try {
                 Camera.Parameters p = cam.getParameters();
-                
+
                 // Aggressively hunt for the list of supported values across all Sony models
                 String vals = p.get("creative-style-values"); // <-- Added for A7 series
                 if (vals == null || vals.isEmpty()) vals = p.get("color-mode-values"); // <-- Used by APS-C
                 if (vals == null || vals.isEmpty()) vals = p.get("sony-creative-style-values");
                 if (vals == null || vals.isEmpty()) vals = p.get("sony-st-color-mode-values");
                 if (vals == null || vals.isEmpty()) vals = p.get("sony-colormode-values");
-                
+
                 if (vals != null && !vals.isEmpty()) {
                     String[] split = vals.split(",");
                     for (int i = 0; i < split.length; i++) {
@@ -750,13 +750,13 @@ public class MenuController {
             if (sel == 0) { if (dir > 0 && p.lutIndex < rm.getRecipeNames().size()-1) p.lutIndex++; else if (dir < 0 && p.lutIndex > 0) p.lutIndex--; }
             else if (sel == 1 && p.lutIndex > 0) p.opacity = Math.max(10, Math.min(100, p.opacity + dir * 10));
             else if (sel == 2) p.grain = Math.max(0, Math.min(5, p.grain + dir));
-            
+
             // <--- CHANGED: Dynamically bounds the D-Pad to the number of physical files found
             else if (sel == 3 && p.grain > 0) {
                 int maxIdx = Math.max(0, grainTextureFiles.size() - 1);
                 p.grainSize = Math.max(0, Math.min(maxIdx, p.grainSize + dir));
             }
-            
+
             else if (sel == 4) p.vignette = Math.max(0, Math.min(5, p.vignette + dir));
         } else if (currentPage == 5) {
             if (sel == 0) p.rollOff        = Math.max(0, Math.min(5, p.rollOff + dir));
@@ -765,10 +765,10 @@ public class MenuController {
             else if (sel == 3) p.colorChrome = Math.max(0, Math.min(2, p.colorChrome + dir));
             else if (sel == 4) p.chromeBlue = Math.max(0, Math.min(2, p.chromeBlue + dir));
             else if (sel == 5) p.halation  = Math.max(0, Math.min(2, p.halation + dir));
-            
+
             // NEW ROW ADDED HERE: Handles left/right d-pad clicks for Optical Bloom
             else if (sel == 6) p.bloom = Math.max(0, Math.min(6, p.bloom + dir));
-            
+
         } else if (currentPage == 6) {
             if      (sel == 0) rm.setQualityIndex(Math.max(0, Math.min(2, rm.getQualityIndex() + dir)));
             else if (sel == 1) host.setPrefFocusMeter(!host.isPrefFocusMeter());
@@ -776,9 +776,9 @@ public class MenuController {
                 int mode = 0;
                 if (host.isPrefCinemaMattes()) mode = 1;
                 else if (host.isPrefDiptych()) mode = 2;
-                
+
                 mode = (mode + dir + 3) % 3;
-                
+
                 host.setPrefCinemaMattes(mode == 1);
                 host.setPrefDiptych(mode == 2);
             }
@@ -839,21 +839,18 @@ public class MenuController {
         RTLProfile p = rm.getCurrentProfile();
 
         // Tab highlight
-        int orange = Color.rgb(227, 69, 20);
-        tvTabRTL.setBackgroundColor     (selection == -2 && currentMainTab == 0 ? orange : Color.TRANSPARENT);
-        tvTabSettings.setBackgroundColor(selection == -2 && currentMainTab == 1 ? orange : Color.TRANSPARENT);
-        tvTabNetwork.setBackgroundColor (selection == -2 && currentMainTab == 2 ? orange : Color.TRANSPARENT);
-        tvTabSupport.setBackgroundColor (selection == -2 && currentMainTab == 3 ? orange : Color.TRANSPARENT);
-        tvTabRTL.setTextColor     (currentMainTab == 0 ? Color.WHITE : Color.GRAY);
-        tvTabSettings.setTextColor(currentMainTab == 1 ? Color.WHITE : Color.GRAY);
-        tvTabNetwork.setTextColor (currentMainTab == 2 ? Color.WHITE : Color.GRAY);
-        tvTabSupport.setTextColor (currentMainTab == 3 ? Color.WHITE : Color.GRAY);
+        int accent = UiTheme.ACCENT;
+        styleTab(tvTabRTL,      selection == -2 && currentMainTab == 0, currentMainTab == 0);
+        styleTab(tvTabSettings, selection == -2 && currentMainTab == 1, currentMainTab == 1);
+        styleTab(tvTabNetwork,  selection == -2 && currentMainTab == 2, currentMainTab == 2);
+        styleTab(tvTabSupport,  selection == -2 && currentMainTab == 3, currentMainTab == 3);
 
         // Subtitle
-        tvSubtitle.setBackgroundColor(selection == -1 ? orange : Color.TRANSPARENT);
+        if (selection == -1) UiTheme.selected(tvSubtitle);
+        else UiTheme.clear(tvSubtitle);
         String[] subtitles = {"","1. Recipe Identity & Base [HW]","2. Advanced Color Engine [HW]","3. Effects & Shading [HW]","4. LUTs & Textures [SW] - ADDS PROCESSING TIME","5. Analog Physics [SW] - ADDS PROCESSING TIME","6. App Preferences","7. Custom Buttons","8. Web Dashboard Server","9. Resources & Community"};
         if (currentPage >= 1 && currentPage <= 9) {
-            tvSubtitle.setText(subtitles[currentPage]); 
+            tvSubtitle.setText(subtitles[currentPage]);
         }
 
         for (int i = 0; i < 8; i++) {
@@ -865,7 +862,7 @@ public class MenuController {
         supportContainer.setVisibility(View.GONE);
 
         if (manualQueueOpen) {
-            renderManualQueue(orange);
+            renderManualQueue(accent);
             return;
         }
 
@@ -920,16 +917,16 @@ public class MenuController {
                 setRow(1, "Effect Tweaker",       param);
                 setRow(2, "Edge Shading Editor",  shade);
             } else if (currentPage == 4) {
-                ic = 5; 
+                ic = 5;
                 setRow(0, "LUT File",    rm.getRecipeNames().get(p.lutIndex));
                 setRow(1, "LUT Opacity", p.opacity + "%");
                 setRow(2, "Grain Amount",amtLbls[Math.max(0,Math.min(5,p.grain))]);
-                
+
                 // <--- CHANGED: Dynamically fetches titles (metadata or filename) from SD card
-                String[] typeLbls = getGrainEngineOptions(); 
+                String[] typeLbls = getGrainEngineOptions();
                 int safeIdx = Math.max(0, Math.min(typeLbls.length - 1, p.grainSize));
                 setRow(3, "Grain Type",  typeLbls[safeIdx]);
-                
+
                 setRow(4, "Vignette",    amtLbls[Math.max(0,Math.min(5,p.vignette))]);
             } else if (currentPage == 5) {
                 ic = 7; // CHANGED TO 7
@@ -939,7 +936,7 @@ public class MenuController {
                 setRow(3, "Color Chrome",           p.colorChrome==0?"OFF":(p.colorChrome==1?"WEAK":"STRONG"));
                 setRow(4, "Chrome Blue",            p.chromeBlue==0?"OFF":(p.chromeBlue==1?"WEAK":"STRONG"));
                 setRow(5, "Halation",    p.halation==0?"OFF":(p.halation==1?"WEAK":"STRONG"));
-                
+
                 String[] bloomLbls = {"OFF", "Local 1/8", "Full 1/8", "Local 1/4", "Full 1/4", "Local 1/2", "Full 1/2"};
                 setRow(6, "Diffusion", bloomLbls[Math.max(0, Math.min(6, p.bloom))]);
             }
@@ -947,14 +944,14 @@ public class MenuController {
         if (currentPage == 6) {
             ic = 7;
             String[] qLbls = {"1/4 RES","HALF RES","FULL RES"};
-            
+
             String creativeMode = "OFF";
             if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
             else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
             int freq = host.getProcessingFrequency();
             String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
             int queueCount = host.getQueuedPhotoCount();
-            
+
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
             setRow(1, "Manual Focus Meter",    host.isPrefFocusMeter()   ? "ON" : "OFF");
             setRow(2, "Creative Modes",        creativeMode);
@@ -977,17 +974,17 @@ public class MenuController {
             setRow(2, "Stop Networking","");
         }
 
-        highlightRows(ic, orange);
+        highlightRows(ic, accent);
         itemCount = ic;
     }
 
-    private void renderManualQueue(int orange) {
+    private void renderManualQueue(int accent) {
         int queueCount = host.getQueuedPhotoCount();
         ensureManualSelectionSize(queueCount);
         if (manualQueueOffset >= queueCount) manualQueueOffset = Math.max(0, queueCount - MANUAL_QUEUE_PAGE_SIZE);
 
         int end = Math.min(queueCount, manualQueueOffset + MANUAL_QUEUE_PAGE_SIZE);
-        tvSubtitle.setBackgroundColor(Color.TRANSPARENT);
+        UiTheme.clear(tvSubtitle);
 
         int row = 0;
         boolean thumbsLoading = false;
@@ -1017,24 +1014,40 @@ public class MenuController {
         itemCount = row;
         if (selection >= itemCount) selection = itemCount - 1;
         if (selection < 0) selection = 0;
-        highlightRows(row, orange);
+        highlightRows(row, accent);
     }
 
-    private void highlightRows(int ic, int orange) {
+    private void highlightRows(int ic, int accent) {
         RTLProfile p = host.getRecipeManager().getCurrentProfile();
         for (int i = 0; i < ic; i++) {
             boolean active = manualQueueOpen || isRowActive(p, i);
             String plain = labels[i].getText().toString().replace("> ", "").replace("  ", "");
             if (i == selection) {
                 labels[i].setText("> " + plain);
-                if (!active) { rows[i].setBackgroundColor(Color.TRANSPARENT); labels[i].setTextColor(Color.DKGRAY); values[i].setTextColor(Color.DKGRAY); }
-                else if (isEditing || isNaming) { rows[i].setBackgroundColor(Color.TRANSPARENT); labels[i].setTextColor(Color.WHITE); values[i].setTextColor(orange); }
-                else { rows[i].setBackgroundColor(orange); labels[i].setTextColor(Color.WHITE); values[i].setTextColor(Color.WHITE); }
+                if (!active) {
+                    UiTheme.clear(rows[i]);
+                    UiTheme.dimText(labels[i]);
+                    UiTheme.dimText(values[i]);
+                } else if (isEditing || isNaming) {
+                    UiTheme.clear(rows[i]);
+                    UiTheme.selectedText(labels[i]);
+                    values[i].setTextColor(accent);
+                    values[i].setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+                } else {
+                    UiTheme.selected(rows[i]);
+                    UiTheme.selectedText(labels[i]);
+                    UiTheme.selectedText(values[i]);
+                }
             } else {
                 labels[i].setText("  " + plain);
-                rows[i].setBackgroundColor(Color.TRANSPARENT);
-                labels[i].setTextColor(active ? Color.WHITE : Color.DKGRAY);
-                values[i].setTextColor (active ? Color.WHITE : Color.DKGRAY);
+                UiTheme.clear(rows[i]);
+                if (active) {
+                    labels[i].setTextColor(UiTheme.TEXT);
+                    values[i].setTextColor(UiTheme.TEXT_MUTED);
+                } else {
+                    UiTheme.dimText(labels[i]);
+                    UiTheme.dimText(values[i]);
+                }
             }
         }
     }
@@ -1272,8 +1285,20 @@ public class MenuController {
         tv.setTextSize(16);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(0, 0, 0, 10);
+        tv.setPadding(0, 7, 0, 7);
         tv.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1.0f));
+        tv.setTextColor(UiTheme.TEXT_MUTED);
+        UiTheme.softPanel(tv);
         return tv;
+    }
+
+    private void styleTab(TextView tv, boolean selected, boolean activePage) {
+        if (selected) {
+            UiTheme.selected(tv);
+            tv.setTextColor(UiTheme.TEXT);
+        } else {
+            UiTheme.softPanel(tv);
+            tv.setTextColor(activePage ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        }
     }
 }

@@ -97,7 +97,7 @@ public class DiptychManager {
                 activity.armFileScanner();
                 if (tvTopStatus != null) {
                     tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
-                    tvTopStatus.setTextColor(Color.GREEN);
+                    tvTopStatus.setTextColor(UiTheme.SUCCESS);
                 }
                 activity.updateMainHUD();
             }
@@ -109,12 +109,12 @@ public class DiptychManager {
             public void run() {
                 if (overlayView != null) {
                     // Immediately purge the thumbnail to give the C++ stitcher max breathing room
-                    overlayView.clearThumbnail(); 
+                    overlayView.clearThumbnail();
                     overlayView.setState(STATE_STITCHING);
                 }
                 if (tvTopStatus != null) {
                     tvTopStatus.setText("STITCHING DIPTYCH...");
-                    tvTopStatus.setTextColor(Color.YELLOW);
+                    tvTopStatus.setTextColor(UiTheme.WARN);
                 }
             }
         });
@@ -124,9 +124,9 @@ public class DiptychManager {
             public void run() {
                 try {
                     // Guarantee the UI thread has time to execute the thumbnail purge before C++ asks for RAM
-                    Thread.sleep(150); 
+                    Thread.sleep(150);
                 } catch (Exception ignored) {}
-                
+
                 performDiptychStitch(gradedLeftPath, gradedRightPath, firstShotLeft);
             }
         }).start();
@@ -163,7 +163,7 @@ public class DiptychManager {
                     reset();
                     if (tvTopStatus != null) {
                         tvTopStatus.setText(success ? "DIPTYCH SAVED" : "DIPTYCH FAILED");
-                        tvTopStatus.setTextColor(success ? Color.WHITE : Color.RED);
+                        tvTopStatus.setTextColor(success ? UiTheme.TEXT : UiTheme.ERROR);
                     }
                     activity.updateMainHUD();
                 }
@@ -176,7 +176,7 @@ public class DiptychManager {
                     reset();
                     if (tvTopStatus != null) {
                         tvTopStatus.setText("DIPTYCH FAILED");
-                        tvTopStatus.setTextColor(Color.RED);
+                        tvTopStatus.setTextColor(UiTheme.ERROR);
                     }
                     activity.updateMainHUD();
                 }
