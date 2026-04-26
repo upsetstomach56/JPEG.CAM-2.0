@@ -49,8 +49,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // Set to true to see diagnostic Toasts, false for clean public release
     public static final boolean DEBUG_MODE = false;
     private static final int PHOTO_READY_RETRY_MS = 75;
-    private static final int PHOTO_READY_MAX_RETRIES = 67;
-    private static final int PHOTO_READY_STABLE_CHECKS = 1;
+    private static final int PHOTO_READY_MAX_RETRIES = 240;
+    private static final int PHOTO_READY_STABLE_CHECKS = 4;
+    private static final int SCANNER_ARM_TIMEOUT_MS = 6000;
     private static final long QUEUE_FALLBACK_PROCESS_MS = 14000;
     private static final int PROCESSING_FREQUENCY_MANUAL = -1;
 
@@ -641,39 +642,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     stableChecks[0] = 0;
                 }
 
-                if (currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS
-                        && hasJpegEndMarker(f, currentSize)) {
+                if (currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS) {
                     captureWritePending = false;
                     long stableMs = System.currentTimeMillis();
                     ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
-                    // --- DIPTYCH INTERCEPT ---
-                    if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
-                        File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
-                                entry.lutPath, entry.lutName,
-                                scannerStartedMs, detectedMs, stableMs, scannerAttempts);
-                    } else if (shouldQueuePhotos()) {
-                        if (processingQueueManager != null) {
-                            processingQueueManager.add(entry);
-                        }
-                        isProcessing = false;
-                        updateMainHUD();
-                        maybeAutoProcessQueuedPhotos();
-                    } else {
-                        File outDir = Filepaths.getGradedDir();
-                        mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, false,
-                                entry.lutPath, entry.lutName,
-                                scannerStartedMs, detectedMs, stableMs, scannerAttempts);
-                    }
+                    handleReadyPhotoFile(f, path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                 } else if (retries[0] < PHOTO_READY_MAX_RETRIES) {
                     lastSize[0] = currentSize;
                     retries[0]++;
                     uiHandler.postDelayed(this, PHOTO_READY_RETRY_MS);
                 } else {
-                    pendingShotSnapshot = null;
                     captureWritePending = false;
-                    isProcessing = false;
-                    updateMainHUD();
+                    if (f.exists() && f.length() > 0) {
+                        long stableMs = System.currentTimeMillis();
+                        ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                        handleReadyPhotoFile(f, path, entry, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+                    } else {
+                        pendingShotSnapshot = null;
+                        isProcessing = false;
+                        updateMainHUD();
+                    }
                 }
             }
         };
@@ -681,19 +669,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         uiHandler.post(checker);
     }
 
-    private boolean hasJpegEndMarker(File f, long length) {
-        if (length < 2) return false;
-        java.io.RandomAccessFile raf = null;
-        try {
-            raf = new java.io.RandomAccessFile(f, "r");
-            raf.seek(length - 2);
-            return raf.read() == 0xFF && raf.read() == 0xD9;
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (raf != null) {
-                try { raf.close(); } catch (Exception ignored) {}
+    private void handleReadyPhotoFile(File f, String path, ProcessingQueueManager.Entry entry,
+                                      long scannerStartedMs, long detectedMs, long stableMs, int scannerAttempts) {
+        // --- DIPTYCH INTERCEPT ---
+        if (diptychManager != null && diptychManager.interceptNewFile(f.getName(), path)) {
+            File outDir = Filepaths.getGradedDir();
+            mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, false, true,
+                    entry.lutPath, entry.lutName,
+                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
+        } else if (shouldQueuePhotos()) {
+            if (processingQueueManager != null) {
+                processingQueueManager.add(entry);
             }
+            isProcessing = false;
+            updateMainHUD();
+            maybeAutoProcessQueuedPhotos();
+        } else {
+            File outDir = Filepaths.getGradedDir();
+            mProcessor.processJpeg(path, outDir.getAbsolutePath(), entry.qualityIndex, entry.jpegQuality, entry.profile, entry.applyCrop, false,
+                    entry.lutPath, entry.lutName,
+                    scannerStartedMs, detectedMs, stableMs, scannerAttempts);
         }
     }
 
@@ -791,12 +786,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             final int token = ++captureWriteToken;
             uiHandler.postDelayed(new Runnable() {
                 @Override public void run() {
-                    if (token == captureWriteToken && mScanner != null && mScanner.isPolling) {
+                    if (token == captureWriteToken && !isProcessing && pendingShotSnapshot != null) {
+                        pendingShotSnapshot = null;
                         captureWritePending = false;
                         updateMainHUD();
                     }
                 }
-            }, (PHOTO_READY_MAX_RETRIES + 2) * PHOTO_READY_RETRY_MS);
+            }, SCANNER_ARM_TIMEOUT_MS);
         }
     }
 
