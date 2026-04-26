@@ -45,6 +45,14 @@ public class ProcessingQueueManager {
         return entries.get(0);
     }
 
+    public synchronized ArrayList<Entry> getEntries() {
+        ArrayList<Entry> copy = new ArrayList<Entry>();
+        for (int i = 0; i < entries.size(); i++) {
+            copy.add(copyEntry(entries.get(i)));
+        }
+        return copy;
+    }
+
     public synchronized void add(Entry entry) {
         if (entry == null || entry.originalPath == null || entry.originalPath.length() == 0) return;
         entries.add(copyEntry(entry));
@@ -61,6 +69,25 @@ public class ProcessingQueueManager {
     public synchronized void clear() {
         entries.clear();
         save();
+    }
+
+    public synchronized int moveSelectedToFront(boolean[] selected) {
+        if (selected == null || selected.length == 0 || entries.isEmpty()) return 0;
+
+        ArrayList<Entry> selectedEntries = new ArrayList<Entry>();
+        ArrayList<Entry> remainingEntries = new ArrayList<Entry>();
+        for (int i = 0; i < entries.size(); i++) {
+            Entry copy = copyEntry(entries.get(i));
+            if (i < selected.length && selected[i]) selectedEntries.add(copy);
+            else remainingEntries.add(copy);
+        }
+
+        if (selectedEntries.isEmpty()) return 0;
+        entries.clear();
+        entries.addAll(selectedEntries);
+        entries.addAll(remainingEntries);
+        save();
+        return selectedEntries.size();
     }
 
     private void load() {

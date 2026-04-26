@@ -1,6 +1,7 @@
 package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.hardware.Camera;
@@ -33,6 +34,8 @@ public class MenuController {
 
     /** Character set used for on-camera name entry (menu AND HUD naming modes). */
     public static final String CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
+    private static final int PROCESSING_FREQUENCY_MANUAL = -1;
+    private static final int MANUAL_QUEUE_PAGE_SIZE = 5;
 
     // --- NEW: Caches the physical files so their indexes match the menu ---
     public static java.util.List<File> grainTextureFiles = new java.util.ArrayList<File>();
@@ -121,6 +124,8 @@ public class MenuController {
         int     getPrefJpegQuality();
         int     getProcessingFrequency();
         int     getQueuedPhotoCount();
+        List<ProcessingQueueManager.Entry> getQueuedPhotoEntries();
+        String  getProcessingEstimateText(int photoCount);
 
         // Preferences — write
         void setPrefFocusMeter(boolean v);
@@ -130,6 +135,8 @@ public class MenuController {
         void setPrefJpegQuality(int v);
         void setProcessingFrequency(int v);
         void forceProcessQueuedPhotos();
+        void processSelectedQueuedPhotos(boolean[] selected);
+        void clearQueuedPhotos();
 
         // UI coordination
         FrameLayout getMainUIContainer();
@@ -172,11 +179,15 @@ public class MenuController {
     private final LinearLayout[] rows   = new LinearLayout[8];
     private final TextView[]     labels = new TextView[8];
     private final TextView[]     values = new TextView[8];
+    private final ImageView[]    thumbs = new ImageView[8];
     private final TextView       tvTabRTL, tvTabSettings, tvTabNetwork, tvTabSupport;
     private final TextView       tvSubtitle;
     private final LinearLayout   supportContainer;
 
     private final HostCallback host;
+    private boolean manualQueueOpen = false;
+    private boolean[] manualSelected = new boolean[0];
+    private int manualQueueOffset = 0;
 
     // -----------------------------------------------------------------------
     // Constructor — builds the full menu view tree
@@ -254,6 +265,12 @@ public class MenuController {
             rows[i].setGravity(Gravity.CENTER_VERTICAL);
             rows[i].setPadding(10, 0, 10, 0);
             container.addView(rows[i], new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            thumbs[i] = new ImageView(ctx);
+            thumbs[i].setScaleType(ImageView.ScaleType.CENTER_CROP);
+            thumbs[i].setVisibility(View.GONE);
+            LinearLayout.LayoutParams thumbLp = new LinearLayout.LayoutParams(86, 56);
+            thumbLp.setMargins(0, 0, 10, 0);
+            rows[i].addView(thumbs[i], thumbLp);
             labels[i] = new TextView(ctx); labels[i].setTextSize(18); labels[i].setTypeface(Typeface.DEFAULT_BOLD);
             values[i] = new TextView(ctx); values[i].setTextSize(18); values[i].setGravity(Gravity.RIGHT);
             rows[i].addView(labels[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
@@ -302,6 +319,10 @@ public class MenuController {
 
     /** Contextual Back: Cancels any active editing state and returns true if successful. */
     public boolean cancelAction() {
+        if (manualQueueOpen) {
+            closeManualQueue();
+            return true;
+        }
         if (isEditing || isNaming || isConfirmingDelete) {
             isEditing = false;
             isNaming = false;
@@ -339,6 +360,7 @@ public class MenuController {
         // but we leave currentMainTab, currentPage, and selection alone!
         isEditing   = false;
         isNaming    = false;
+        manualQueueOpen = false;
         
         container.setVisibility(View.VISIBLE);
         host.getMainUIContainer().setVisibility(View.GONE);
@@ -350,6 +372,7 @@ public class MenuController {
         isOpen             = false;
         isNaming           = false;
         isConfirmingDelete = false;
+        manualQueueOpen    = false;
         host.closeHud();
         container.setVisibility(View.GONE);
         host.getMainUIContainer().setVisibility(
@@ -367,6 +390,13 @@ public class MenuController {
         if (!isOpen) return false;
         if (isNaming) { handleNamingChange(1); return true; }
         if (isEditing) { handleMenuChange(1); return true; }
+        if (manualQueueOpen) {
+            if (itemCount <= 0) return true;
+            if (selection <= 0) selection = itemCount - 1;
+            else selection--;
+            render();
+            return true;
+        }
         if (selection == 0)           selection = -2;
         else if (selection == -2)     { selection = itemCount - 1; if (selection < 0) selection = -2; }
         else                          selection--;
@@ -378,6 +408,13 @@ public class MenuController {
         if (!isOpen) return false;
         if (isNaming) { handleNamingChange(-1); return true; }
         if (isEditing) { handleMenuChange(-1); return true; }
+        if (manualQueueOpen) {
+            if (itemCount <= 0) return true;
+            if (selection >= itemCount - 1) selection = 0;
+            else selection++;
+            render();
+            return true;
+        }
         if (selection == -2)                    { selection = 0; if (itemCount == 0) selection = -2; }
         else if (selection == itemCount - 1)    selection = -2;
         else                                    selection++;
@@ -387,6 +424,13 @@ public class MenuController {
 
     public boolean handleLeft() {
         if (!isOpen) return false;
+        if (manualQueueOpen) {
+            manualQueueOffset -= MANUAL_QUEUE_PAGE_SIZE;
+            if (manualQueueOffset < 0) manualQueueOffset = 0;
+            selection = 0;
+            render();
+            return true;
+        }
         if (selection == -2) {
             currentMainTab--;
             if (currentMainTab < 0) currentMainTab = 3;
@@ -409,6 +453,14 @@ public class MenuController {
 
     public boolean handleRight() {
         if (!isOpen) return false;
+        if (manualQueueOpen) {
+            int count = host.getQueuedPhotoCount();
+            manualQueueOffset += MANUAL_QUEUE_PAGE_SIZE;
+            if (manualQueueOffset >= count) manualQueueOffset = Math.max(0, count - MANUAL_QUEUE_PAGE_SIZE);
+            selection = 0;
+            render();
+            return true;
+        }
         if (selection == -2) {
             currentMainTab++;
             if (currentMainTab > 3) currentMainTab = 0;
@@ -448,11 +500,14 @@ public class MenuController {
     /** ENTER while menu is open: toggle editing, launch HUDs, or handle connection page. */
     public boolean handleEnter() {
         if (!isOpen) return false;
+        if (manualQueueOpen) return handleManualQueueEnter();
         if (currentPage == 8) { handleConnectionAction(); return true; }
         if (selection == -2) return true; // Tab level — enter does nothing
         if (selection < 0)   return true; // Subtitle row — enter does nothing
         if (currentPage == 6 && selection == 6) {
-            if (host.getQueuedPhotoCount() > 0) {
+            if (host.getProcessingFrequency() == PROCESSING_FREQUENCY_MANUAL) {
+                openManualQueue();
+            } else if (host.getQueuedPhotoCount() > 0) {
                 host.forceProcessQueuedPhotos();
                 close();
             }
@@ -461,6 +516,85 @@ public class MenuController {
         isEditing = !isEditing;
         render();
         return true;
+    }
+
+    private void openManualQueue() {
+        manualQueueOpen = true;
+        isEditing = false;
+        isNaming = false;
+        manualQueueOffset = 0;
+        ensureManualSelectionSize(host.getQueuedPhotoCount());
+        selection = 0;
+        render();
+    }
+
+    private void closeManualQueue() {
+        manualQueueOpen = false;
+        isEditing = false;
+        isNaming = false;
+        currentMainTab = 1;
+        currentPage = 6;
+        selection = 6;
+        render();
+    }
+
+    private boolean handleManualQueueEnter() {
+        int queueCount = host.getQueuedPhotoCount();
+        ensureManualSelectionSize(queueCount);
+        int photoRows = getManualVisiblePhotoCount(queueCount);
+        int processRow = photoRows;
+        int clearRow = processRow + 1;
+        int backRow = clearRow + 1;
+
+        if (selection < photoRows) {
+            int idx = manualQueueOffset + selection;
+            if (idx >= 0 && idx < manualSelected.length) manualSelected[idx] = !manualSelected[idx];
+            render();
+            return true;
+        }
+        if (selection == processRow) {
+            if (getManualSelectedCount() > 0) {
+                host.processSelectedQueuedPhotos(manualSelected);
+                close();
+            }
+            return true;
+        }
+        if (selection == clearRow) {
+            host.clearQueuedPhotos();
+            manualSelected = new boolean[0];
+            manualQueueOffset = 0;
+            selection = 0;
+            render();
+            return true;
+        }
+        if (selection == backRow) {
+            closeManualQueue();
+            return true;
+        }
+        return true;
+    }
+
+    private int getManualVisiblePhotoCount(int queueCount) {
+        int remaining = queueCount - manualQueueOffset;
+        if (remaining < 0) remaining = 0;
+        return Math.min(MANUAL_QUEUE_PAGE_SIZE, remaining);
+    }
+
+    private void ensureManualSelectionSize(int count) {
+        if (count < 0) count = 0;
+        if (manualSelected.length == count) return;
+        boolean[] next = new boolean[count];
+        int copyLen = Math.min(count, manualSelected.length);
+        for (int i = 0; i < copyLen; i++) next[i] = manualSelected[i];
+        manualSelected = next;
+    }
+
+    private int getManualSelectedCount() {
+        int count = 0;
+        for (int i = 0; i < manualSelected.length; i++) {
+            if (manualSelected[i]) count++;
+        }
+        return count;
     }
 
     /** Launch HUD modes from menu — called from onEnterPressed page/selection dispatch. */
@@ -629,10 +763,11 @@ public class MenuController {
     }
 
     private int nextProcessingFrequency(int current, int dir) {
-        int idx = current == 3 ? 1 : (current == 5 ? 2 : 0);
-        idx = (idx + (dir >= 0 ? 1 : -1) + 3) % 3;
+        int idx = current == 3 ? 1 : (current == 5 ? 2 : (current == PROCESSING_FREQUENCY_MANUAL ? 3 : 0));
+        idx = (idx + (dir >= 0 ? 1 : -1) + 4) % 4;
         if (idx == 1) return 3;
         if (idx == 2) return 5;
+        if (idx == 3) return PROCESSING_FREQUENCY_MANUAL;
         return 1;
     }
 
@@ -677,8 +812,17 @@ public class MenuController {
             tvSubtitle.setText(subtitles[currentPage]); 
         }
 
-        for (int i = 0; i < 8; i++) rows[i].setVisibility(View.GONE);
+        for (int i = 0; i < 8; i++) {
+            rows[i].setVisibility(View.GONE);
+            thumbs[i].setVisibility(View.GONE);
+            thumbs[i].setImageBitmap(null);
+        }
         supportContainer.setVisibility(View.GONE);
+
+        if (manualQueueOpen) {
+            renderManualQueue(orange);
+            return;
+        }
 
         if (currentPage == 9) { supportContainer.setVisibility(View.VISIBLE); itemCount = 0; return; }
 
@@ -763,7 +907,7 @@ public class MenuController {
             if (host.isPrefCinemaMattes()) creativeMode = "XPAN CROP";
             else if (host.isPrefDiptych()) creativeMode = "DIPTYCH";
             int freq = host.getProcessingFrequency();
-            String frequencyLabel = freq <= 1 ? "INSTANT" : (freq + " SHOTS");
+            String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
             int queueCount = host.getQueuedPhotoCount();
             
             setRow(0, "SW Global Resolution", qLbls[rm.getQualityIndex()]);
@@ -772,7 +916,8 @@ public class MenuController {
             setRow(3, "Rule of Thirds Grid",   host.isPrefGridLines()    ? "ON" : "OFF");
             setRow(4, "SW JPEG Quality",       String.valueOf(host.getPrefJpegQuality()));
             setRow(5, "Processing Frequency",  frequencyLabel);
-            setRow(6, "Process Queued Photos", queueCount > 0 ? (queueCount + " WAITING") : "EMPTY");
+            setRow(6, freq == PROCESSING_FREQUENCY_MANUAL ? "Manual Queue" : "Process Queued Photos",
+                    freq == PROCESSING_FREQUENCY_MANUAL ? (queueCount + " WAITING") : (queueCount > 0 ? (queueCount + " WAITING") : "EMPTY"));
         } else if (currentPage == 7) {
             ic = 5;
             String[] btnLbls = {"OFF", "ISO MENU", "FOCUS MAGNIFIER", "TOGGLE FOCUS METER", "CYCLE CREATIVE MODES", "TOGGLE GRID LINES"};
@@ -788,9 +933,50 @@ public class MenuController {
             setRow(2, "Stop Networking","");
         }
 
-        // Row highlight pass
+        highlightRows(ic, orange);
+        itemCount = ic;
+    }
+
+    private void renderManualQueue(int orange) {
+        List<ProcessingQueueManager.Entry> entries = host.getQueuedPhotoEntries();
+        int queueCount = entries != null ? entries.size() : 0;
+        ensureManualSelectionSize(queueCount);
+        if (manualQueueOffset >= queueCount) manualQueueOffset = Math.max(0, queueCount - MANUAL_QUEUE_PAGE_SIZE);
+
+        int end = Math.min(queueCount, manualQueueOffset + MANUAL_QUEUE_PAGE_SIZE);
+        if (queueCount > 0) {
+            tvSubtitle.setText("Manual Queue " + (manualQueueOffset + 1) + "-" + end + "/" + queueCount);
+        } else {
+            tvSubtitle.setText("Manual Queue (EMPTY)");
+        }
+        tvSubtitle.setBackgroundColor(Color.TRANSPARENT);
+
+        int row = 0;
+        for (int i = manualQueueOffset; i < end; i++) {
+            ProcessingQueueManager.Entry entry = entries.get(i);
+            String marker = i < manualSelected.length && manualSelected[i] ? "[X] " : "[ ] ";
+            setQueueRow(row, marker + queueDisplayName(entry), queueRecipeName(entry), entry.originalPath);
+            row++;
+        }
+        if (queueCount == 0) {
+            setRow(row++, "No Queued Photos", "");
+        }
+
+        int selected = getManualSelectedCount();
+        setRow(row++, "Process Selected", selected > 0 ? (selected + " | " + host.getProcessingEstimateText(selected)) : "NONE");
+        setRow(row++, "Clear Queue List", queueCount > 0 ? (queueCount + " ITEMS") : "EMPTY");
+        setRow(row++, "Back", "SETTINGS");
+
+        itemCount = row;
+        if (selection >= itemCount) selection = itemCount - 1;
+        if (selection < 0) selection = 0;
+        highlightRows(row, orange);
+    }
+
+    private void highlightRows(int ic, int orange) {
+        RTLProfile p = host.getRecipeManager().getCurrentProfile();
         for (int i = 0; i < ic; i++) {
-            boolean active = isRowActive(p, i);
+            boolean active = manualQueueOpen || isRowActive(p, i);
             String plain = labels[i].getText().toString().replace("> ", "").replace("  ", "");
             if (i == selection) {
                 labels[i].setText("> " + plain);
@@ -804,13 +990,40 @@ public class MenuController {
                 values[i].setTextColor (active ? Color.WHITE : Color.DKGRAY);
             }
         }
-        itemCount = ic;
     }
 
     private void setRow(int i, String label, String value) {
         labels[i].setText(label);
         values[i].setText(value);
+        thumbs[i].setVisibility(View.GONE);
+        thumbs[i].setImageBitmap(null);
         rows[i].setVisibility(View.VISIBLE);
+    }
+
+    private void setQueueRow(int i, String label, String value, String imagePath) {
+        setRow(i, label, value);
+        thumbs[i].setVisibility(View.VISIBLE);
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 32;
+            thumbs[i].setImageBitmap(BitmapFactory.decodeFile(imagePath, opts));
+        } catch (Exception ignored) {
+            thumbs[i].setImageBitmap(null);
+        }
+    }
+
+    private String queueDisplayName(ProcessingQueueManager.Entry entry) {
+        if (entry == null || entry.originalPath == null) return "PHOTO";
+        String name = new File(entry.originalPath).getName();
+        if (name.length() > 12) name = name.substring(0, 9) + "...";
+        return name;
+    }
+
+    private String queueRecipeName(ProcessingQueueManager.Entry entry) {
+        String name = entry != null && entry.profile != null ? entry.profile.profileName : "";
+        if (name == null || name.length() == 0) name = "RECIPE";
+        if (name.length() > 12) name = name.substring(0, 12);
+        return name.toUpperCase();
     }
 
     private boolean isRowActive(RTLProfile p, int i) {
@@ -823,7 +1036,7 @@ public class MenuController {
             if (i == 1) return p.lutIndex > 0;
             if (i == 3) return p.grain > 0; // <--- RESTORED: Grays out Type if Amount is OFF
         }
-        if (currentPage == 6 && i == 6) return host.getQueuedPhotoCount() > 0;
+        if (currentPage == 6 && i == 6) return host.getProcessingFrequency() == PROCESSING_FREQUENCY_MANUAL || host.getQueuedPhotoCount() > 0;
         return true;
     }
 

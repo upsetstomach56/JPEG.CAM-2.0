@@ -49,6 +49,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     // Set to true to see diagnostic Toasts, false for clean public release
     public static final boolean DEBUG_MODE = false;
     private static final int PHOTO_READY_RETRY_MS = 75;
+    private static final int PHOTO_READY_MAX_RETRIES = 67;
+    private static final int PHOTO_READY_STABLE_CHECKS = 1;
+    private static final long QUEUE_FALLBACK_PROCESS_MS = 14000;
+    private static final int PROCESSING_FREQUENCY_MANUAL = -1;
 
     private SonyCameraManager cameraManager;
     private InputManager inputManager;
@@ -67,6 +71,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private boolean processingQueueActive = false;
     private boolean manualQueueProcessRequested = false;
     private int processingQueueTotal = 0;
+    private int processingQueueCompleted = 0;
+    private long processingQueueStartedMs = 0;
+    private long processingQueueAverageMs = 0;
+    private boolean captureWritePending = false;
+    private int captureWriteToken = 0;
+    private int pendingQueueProcessTargetCount = 0;
 
     private SurfaceView mSurfaceView;
     private boolean hasSurface = false;
@@ -361,7 +371,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
             @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(false); else maybeAutoProcessQueuedPhotos(); } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(false, pendingQueueProcessTargetCount); else maybeAutoProcessQueuedPhotos(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText(getProcessingStatusText()); tvTopStatus.setTextColor(Color.YELLOW); } } }); }
         @Override public void onProcessFinished(String res) { 
             if (processingQueueActive) {
@@ -416,12 +426,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private int normalizeProcessingFrequency(int value) {
+        if (value == PROCESSING_FREQUENCY_MANUAL) return PROCESSING_FREQUENCY_MANUAL;
         if (value == 3 || value == 5) return value;
         return 1;
     }
 
     private boolean shouldQueuePhotos() {
-        return processingFrequency > 1 && (diptychManager == null || !diptychManager.isEnabled());
+        return (processingFrequency == PROCESSING_FREQUENCY_MANUAL || processingFrequency > 1)
+                && (diptychManager == null || !diptychManager.isEnabled());
     }
 
     private ProcessingQueueManager.Entry createCurrentQueueEntry() {
@@ -462,12 +474,32 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private String getProcessingStatusText() {
         if (processingQueueActive && processingQueueTotal > 0 && processingQueueManager != null) {
-            int current = processingQueueTotal - processingQueueManager.getCount() + 1;
+            int current = processingQueueCompleted + 1;
             if (current < 1) current = 1;
             if (current > processingQueueTotal) current = processingQueueTotal;
-            return "PROCESSING QUEUE " + current + "/" + processingQueueTotal;
+            return "PROCESSING QUEUE " + current + "/" + processingQueueTotal
+                    + "\n" + formatQueueEta(current);
         }
         return "PROCESSING...";
+    }
+
+    private String formatQueueEta(int current) {
+        int remaining = processingQueueTotal - current + 1;
+        if (remaining < 1) remaining = 1;
+        return formatProcessingEstimateForCount(remaining) + " LEFT";
+    }
+
+    private String formatProcessingEstimateForCount(int count) {
+        if (count < 1) count = 1;
+        long perPhotoMs = processingQueueAverageMs > 0 ? processingQueueAverageMs : QUEUE_FALLBACK_PROCESS_MS;
+        long totalSeconds = (perPhotoMs * count + 500) / 1000;
+        if (totalSeconds < 1) totalSeconds = 1;
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
+        if (minutes > 0) {
+            return "~" + minutes + "M " + seconds + "S";
+        }
+        return "~" + seconds + "S";
     }
 
     private void maybeAutoProcessQueuedPhotos() {
@@ -478,15 +510,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void startQueuedProcessing(boolean manual) {
+        startQueuedProcessing(manual, 0);
+    }
+
+    private void startQueuedProcessing(boolean manual, int targetCount) {
         if (manual) manualQueueProcessRequested = true;
         if (mProcessor == null || processingQueueManager == null || processingQueueManager.getCount() == 0) {
             manualQueueProcessRequested = false;
+            pendingQueueProcessTargetCount = 0;
             return;
         }
+        if (manual && targetCount > 0) pendingQueueProcessTargetCount = targetCount;
         if (isProcessing || processingQueueActive || !isReady) return;
         manualQueueProcessRequested = false;
+        if (targetCount <= 0) targetCount = pendingQueueProcessTargetCount;
+        pendingQueueProcessTargetCount = 0;
         processingQueueActive = true;
-        processingQueueTotal = processingQueueManager.getCount();
+        int queuedCount = processingQueueManager.getCount();
+        processingQueueTotal = (targetCount > 0 && targetCount < queuedCount) ? targetCount : queuedCount;
+        processingQueueCompleted = 0;
+        processingQueueStartedMs = System.currentTimeMillis();
+        processingQueueAverageMs = 0;
         isProcessing = true;
         processNextQueuedPhoto();
     }
@@ -518,7 +562,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         boolean success = result != null && result.toUpperCase().indexOf("SAVED") >= 0;
         if (success && processingQueueManager != null) {
             processingQueueManager.removeFirst();
-            if (processingQueueManager.getCount() > 0) {
+            processingQueueCompleted++;
+            if (processingQueueCompleted > 0 && processingQueueStartedMs > 0) {
+                processingQueueAverageMs = (System.currentTimeMillis() - processingQueueStartedMs) / processingQueueCompleted;
+            }
+            if (processingQueueCompleted < processingQueueTotal && processingQueueManager.getCount() > 0) {
                 processNextQueuedPhoto();
                 return;
             }
@@ -527,6 +575,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             processingQueueActive = false;
             activeQueueEntry = null;
             processingQueueTotal = 0;
+            processingQueueCompleted = 0;
+            processingQueueStartedMs = 0;
+            processingQueueAverageMs = 0;
+            pendingQueueProcessTargetCount = 0;
             isProcessing = false;
             runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(Color.WHITE); } updateMainHUD(); } });
         }
@@ -536,6 +588,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         processingQueueActive = false;
         activeQueueEntry = null;
         processingQueueTotal = 0;
+        processingQueueCompleted = 0;
+        processingQueueStartedMs = 0;
+        processingQueueAverageMs = 0;
+        pendingQueueProcessTargetCount = 0;
         isProcessing = false;
         triggerLutPreload();
         applyHardwareRecipe();
@@ -565,18 +621,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         
         final long[] lastSize = {-1};
         final int[] retries = {0};
+        final int[] stableChecks = {0};
         
         Runnable checker = new Runnable() {
             @Override
             public void run() {
                 if (!f.exists()) {
+                    pendingShotSnapshot = null;
+                    captureWritePending = false;
                     isProcessing = false;
                     updateMainHUD();
                     return;
                 }
                 
                 long currentSize = f.length();
-                if (currentSize > 0 && (hasJpegEndMarker(f, currentSize) || currentSize == lastSize[0])) {
+                if (currentSize > 0 && currentSize == lastSize[0]) {
+                    stableChecks[0]++;
+                } else {
+                    stableChecks[0] = 0;
+                }
+
+                if (currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS
+                        && hasJpegEndMarker(f, currentSize)) {
+                    captureWritePending = false;
                     long stableMs = System.currentTimeMillis();
                     ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     // --- DIPTYCH INTERCEPT ---
@@ -598,11 +665,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                                 entry.lutPath, entry.lutName,
                                 scannerStartedMs, detectedMs, stableMs, scannerAttempts);
                     }
-                } else if (retries[0] < 30) {
+                } else if (retries[0] < PHOTO_READY_MAX_RETRIES) {
                     lastSize[0] = currentSize;
                     retries[0]++;
                     uiHandler.postDelayed(this, PHOTO_READY_RETRY_MS);
                 } else {
+                    pendingShotSnapshot = null;
+                    captureWritePending = false;
                     isProcessing = false;
                     updateMainHUD();
                 }
@@ -626,6 +695,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 try { raf.close(); } catch (Exception ignored) {}
             }
         }
+    }
+
+    private boolean isShutterInput(int sc, int keyCode) {
+        return sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
+                keyCode == ScalarInput.ISV_KEY_S1_1 || keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
+    }
+
+    private boolean isFullShutterInput(int sc, int keyCode) {
+        return sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
+                keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
+    }
+
+    private boolean shouldBlockShutterInput() {
+        return isProcessing || captureWritePending;
     }
 
     private void triggerLutPreload() {
@@ -668,7 +751,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
         if (playbackController.isActive()) { playbackController.exit(); return; }
         if (menuController.isOpen()) { menuController.close(); return; }
-        if (isProcessing) return; 
+        if (shouldBlockShutterInput()) return;
         
         // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
         
@@ -705,6 +788,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (mScanner != null) {
             pendingShotSnapshot = createCurrentQueueEntry();
             mScanner.start();
+            final int token = ++captureWriteToken;
+            uiHandler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (token == captureWriteToken && mScanner != null && mScanner.isPolling) {
+                        captureWritePending = false;
+                        updateMainHUD();
+                    }
+                }
+            }, (PHOTO_READY_MAX_RETRIES + 2) * PHOTO_READY_RETRY_MS);
         }
     }
 
@@ -1588,8 +1680,8 @@ public void onEnterPressed() {
             return true; // Prevents the OS from force-closing the app
         }
        
-        if (isProcessing && (sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
-                             k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true;
+        if (shouldBlockShutterInput() && isShutterInput(sc, k)) return true;
+        if (isFullShutterInput(sc, k)) captureWritePending = true;
 
         // --- FIXED: Added standard Android keycode ---
 
@@ -1613,8 +1705,7 @@ public void onEnterPressed() {
         }
         
         // Protect shutter inputs while processing
-        if (isProcessing && (sc == ScalarInput.ISV_KEY_S1_1 || sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2 ||
-                             k == ScalarInput.ISV_KEY_S1_1 || k == ScalarInput.ISV_KEY_S1_2 || k == ScalarInput.ISV_KEY_S2)) return true; 
+        if (isProcessing && isShutterInput(sc, k)) return true;
 
         // --- CRITICAL: Swallow the release event so the Sony OS does nothing ---
         if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {
@@ -1788,7 +1879,9 @@ public void onEnterPressed() {
                 int slotNum = recipeManager.getCurrentSlot() + 1;
                 String readyText = isReady ? "READY" : "LOADING..";
                 int queued = processingQueueManager != null ? processingQueueManager.getCount() : 0;
-                if (processingFrequency > 1) {
+                if (processingFrequency == PROCESSING_FREQUENCY_MANUAL) {
+                    readyText += " | MANUAL " + queued + " QUEUED";
+                } else if (processingFrequency > 1) {
                     int left = processingFrequency - queued;
                     if (left < 0) left = 0;
                     readyText += " | " + left + "/" + processingFrequency + " LEFT";
@@ -2088,6 +2181,13 @@ public void onEnterPressed() {
     @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
     @Override public int     getProcessingFrequency() { return processingFrequency; }
     @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCount() : 0; }
+    @Override public List<ProcessingQueueManager.Entry> getQueuedPhotoEntries() {
+        if (processingQueueManager == null) return new ArrayList<ProcessingQueueManager.Entry>();
+        return processingQueueManager.getEntries();
+    }
+    @Override public String getProcessingEstimateText(int photoCount) {
+        return formatProcessingEstimateForCount(photoCount);
+    }
     @Override public void    setPrefFocusMeter(boolean v)   { prefShowFocusMeter   = v; }
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
@@ -2099,6 +2199,16 @@ public void onEnterPressed() {
     }
     @Override public void forceProcessQueuedPhotos() {
         startQueuedProcessing(true);
+    }
+    @Override public void processSelectedQueuedPhotos(boolean[] selected) {
+        if (processingQueueManager == null) return;
+        int selectedCount = processingQueueManager.moveSelectedToFront(selected);
+        updateMainHUD();
+        if (selectedCount > 0) startQueuedProcessing(true, selectedCount);
+    }
+    @Override public void clearQueuedPhotos() {
+        if (processingQueueManager != null) processingQueueManager.clear();
+        updateMainHUD();
     }
     
 
