@@ -1175,6 +1175,10 @@ public void onEnterPressed() {
             mDialMode = DIAL_MODE_EXPOSURE;
             updateMainHUD();
             return true;
+        } else if (action == 9) { // RECIPE SELECTION
+            mDialMode = DIAL_MODE_RTL;
+            updateMainHUD();
+            return true;
         }
 
         return false;

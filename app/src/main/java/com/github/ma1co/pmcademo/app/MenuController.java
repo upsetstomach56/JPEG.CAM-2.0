@@ -54,7 +54,8 @@ public class MenuController {
             "TOGGLE GRID LINES",
             "SHUTTER SPEED",
             "APERTURE",
-            "EXPOSURE COMP"
+            "EXPOSURE COMP",
+            "RECIPE SELECTION"
     };
     private static final int CUSTOM_BUTTON_ACTION_MAX = CUSTOM_BUTTON_LABELS.length - 1;
 
@@ -574,7 +575,8 @@ public class MenuController {
         int queueCount = host.getQueuedPhotoCount();
         ensureManualSelectionSize(queueCount);
         int photoRows = getManualVisiblePhotoCount(queueCount);
-        int processRow = photoRows;
+        int actionStartRow = photoRows + (queueCount == 0 ? 1 : 0);
+        int processRow = actionStartRow;
         int clearRow = processRow + 1;
         int backRow = clearRow + 1;
 
