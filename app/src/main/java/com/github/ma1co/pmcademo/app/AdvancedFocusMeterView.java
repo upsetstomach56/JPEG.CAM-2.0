@@ -36,7 +36,10 @@ public class AdvancedFocusMeterView extends View {
         trackPaint.setStrokeWidth(4);
 
         dofPaint = new Paint();
-        dofPaint.setColor(UiTheme.tint(UiTheme.ACCENT, 190));
+        dofPaint.setColor(Color.argb(190,
+                Color.red(UiTheme.ACCENT),
+                Color.green(UiTheme.ACCENT),
+                Color.blue(UiTheme.ACCENT)));
         dofPaint.setStrokeWidth(12);
         dofPaint.setStrokeCap(Paint.Cap.ROUND);
 
