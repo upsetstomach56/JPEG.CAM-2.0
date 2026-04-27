@@ -208,6 +208,7 @@ public class MenuController {
     private final View[]         rowDividers = new View[7];
     private final LinearLayout   homeContainer;
     private final TextView[]     homeTiles = new TextView[4];
+    private final TextView       homeQuickTitle;
     private final TextView       homeProcessingFrequency;
     private final TextView       homeQueueAction;
     private final LinearLayout   tabRow;
@@ -270,11 +271,18 @@ public class MenuController {
         homeContainer.addView(tileRowTop, new LinearLayout.LayoutParams(-1, 0, 1.0f));
         homeContainer.addView(tileRowBottom, new LinearLayout.LayoutParams(-1, 0, 1.0f));
 
+        LinearLayout queueRow = new LinearLayout(ctx);
+        queueRow.setOrientation(LinearLayout.VERTICAL);
+        queueRow.setPadding(5, 10, 5, 0);
+        homeQuickTitle = new TextView(ctx);
+        homeQuickTitle.setText("PROCESSING");
+        homeQuickTitle.setTextColor(UiTheme.TEXT_MUTED);
+        homeQuickTitle.setTextSize(12);
+        homeQuickTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        homeQuickTitle.setPadding(4, 0, 0, 6);
+        queueRow.addView(homeQuickTitle, new LinearLayout.LayoutParams(-1, -2));
         homeProcessingFrequency = makeHomeAction(ctx);
         homeQueueAction = makeHomeAction(ctx);
-        LinearLayout queueRow = new LinearLayout(ctx);
-        queueRow.setOrientation(LinearLayout.HORIZONTAL);
-        queueRow.setPadding(0, 10, 0, 0);
         queueRow.addView(homeProcessingFrequency);
         queueRow.addView(homeQueueAction);
         homeContainer.addView(queueRow, new LinearLayout.LayoutParams(-1, -2));
@@ -497,9 +505,15 @@ public class MenuController {
         if (isNaming) { handleNamingChange(1); return true; }
         if (isEditing) { handleMenuChange(1); return true; }
         if (manualQueueOpen) {
-            if (itemCount <= 0) return true;
-            if (selection <= 0) selection = itemCount - 1;
-            else selection--;
+            if (itemCount <= 0) {
+                selection = -2;
+            } else if (selection == -2) {
+                selection = itemCount - 1;
+            } else if (selection <= 0) {
+                selection = -2;
+            } else {
+                selection--;
+            }
             render();
             return true;
         }
@@ -520,9 +534,15 @@ public class MenuController {
         if (isNaming) { handleNamingChange(-1); return true; }
         if (isEditing) { handleMenuChange(-1); return true; }
         if (manualQueueOpen) {
-            if (itemCount <= 0) return true;
-            if (selection >= itemCount - 1) selection = 0;
-            else selection++;
+            if (itemCount <= 0) {
+                selection = -2;
+            } else if (selection == -2) {
+                selection = 0;
+            } else if (selection >= itemCount - 1) {
+                selection = -2;
+            } else {
+                selection++;
+            }
             render();
             return true;
         }
@@ -543,7 +563,7 @@ public class MenuController {
         if (manualQueueOpen) {
             manualQueueOffset -= MANUAL_QUEUE_PAGE_SIZE;
             if (manualQueueOffset < 0) manualQueueOffset = 0;
-            selection = 0;
+            selection = selection == -2 ? -2 : 0;
             render();
             return true;
         }
@@ -577,7 +597,7 @@ public class MenuController {
             int count = host.getQueuedPhotoCount();
             manualQueueOffset += MANUAL_QUEUE_PAGE_SIZE;
             if (manualQueueOffset >= count) manualQueueOffset = Math.max(0, count - MANUAL_QUEUE_PAGE_SIZE);
-            selection = 0;
+            selection = selection == -2 ? -2 : 0;
             render();
             return true;
         }
@@ -661,13 +681,16 @@ public class MenuController {
     }
 
     private boolean handleManualQueueEnter() {
+        if (selection == -2) {
+            closeManualQueue();
+            return true;
+        }
         int queueCount = host.getQueuedPhotoCount();
         ensureManualSelectionSize(queueCount);
         int photoRows = getManualVisiblePhotoCount(queueCount);
         int actionStartRow = photoRows + (queueCount == 0 ? 1 : 0);
         int processRow = actionStartRow;
         int clearRow = processRow + 1;
-        int backRow = clearRow + 1;
 
         if (selection < photoRows) {
             int idx = manualQueueOffset + selection;
@@ -689,10 +712,6 @@ public class MenuController {
             selection = 0;
             clearThumbnailCache();
             render();
-            return true;
-        }
-        if (selection == backRow) {
-            closeManualQueue();
             return true;
         }
         return true;
@@ -940,14 +959,15 @@ public class MenuController {
         }
 
         homeContainer.setVisibility(View.GONE);
-        tabRow.setVisibility(manualQueueOpen ? View.GONE : View.VISIBLE);
+        tabRow.setVisibility(View.VISIBLE);
         tvSubtitle.setVisibility(View.VISIBLE);
         pageDivider.setVisibility(View.VISIBLE);
         supportContainer.setVisibility(View.GONE);
 
         // Detail page tabs
-        int accent = currentTabAccent();
-        configurePageTabs(accent);
+        int accent = manualQueueOpen ? UiTheme.ACCENT : currentTabAccent();
+        if (manualQueueOpen) configureBackOnlyHeader(accent);
+        else configurePageTabs(accent);
 
         // Subtitle
         if (selection == -1) UiTheme.selected(tvSubtitle, accent);
@@ -966,7 +986,7 @@ public class MenuController {
         }
 
         if (manualQueueOpen) {
-            renderManualQueue(UiTheme.ACCENT_SETTINGS);
+            renderManualQueue(accent);
             return;
         }
 
@@ -1113,11 +1133,11 @@ public class MenuController {
         int selected = getManualSelectedCount();
         setRow(row++, "Process Selected", selected > 0 ? (selected + " | " + host.getProcessingEstimateText(selected)) : "NONE");
         setRow(row++, "Clear Queue List", queueCount > 0 ? (queueCount + " ITEMS") : "EMPTY");
-        setRow(row++, "Back", "MENU");
 
         itemCount = row;
         if (selection >= itemCount) selection = itemCount - 1;
-        if (selection < 0) selection = 0;
+        if (selection < -2) selection = 0;
+        if (selection < 0 && selection != -2) selection = 0;
         highlightRows(row, accent);
     }
 
@@ -1520,7 +1540,7 @@ public class MenuController {
         String[] labels = categoryPageLabels(currentMainTab);
         int[] pages = categoryPages(currentMainTab);
 
-        UiTheme.tabPanel(tvBack, accent, selection == -2 && headerSelection == 0, false);
+        UiTheme.pageTabPanel(tvBack, accent, selection == -2 && headerSelection == 0, false);
         tvBack.setTextColor(selection == -2 && headerSelection == 0 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
 
         for (int i = 0; i < pageTabs.length; i++) {
@@ -1533,8 +1553,17 @@ public class MenuController {
             tab.setText(labels[i]);
             boolean active = currentPage == pages[i];
             boolean selected = selection == -2 && headerSelection == i + 1;
-            UiTheme.tabPanel(tab, accent, selected, active);
+            UiTheme.pageTabPanel(tab, accent, selected, active);
             tab.setTextColor(active || selected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        }
+    }
+
+    private void configureBackOnlyHeader(int accent) {
+        UiTheme.pageTabPanel(tvBack, accent, selection == -2, false);
+        tvBack.setTextColor(selection == -2 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        tvBack.setVisibility(View.VISIBLE);
+        for (int i = 0; i < pageTabs.length; i++) {
+            pageTabs[i].setVisibility(View.GONE);
         }
     }
 
@@ -1561,10 +1590,10 @@ public class MenuController {
         int freq = host.getProcessingFrequency();
         String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
         int queueCount = host.getQueuedPhotoCount();
-        styleHomeAction(homeProcessingFrequency, "Processing Frequency\n" + frequencyLabel,
+        styleHomeAction(homeProcessingFrequency, "PROCESSING FREQUENCY\n" + frequencyLabel,
                 UiTheme.ACCENT_SETTINGS, selection == 4, true, isEditing && selection == 4);
 
-        String queueLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "Manual Queue" : "Process Queue";
+        String queueLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL QUEUE" : "PROCESS QUEUE";
         String queueValue = queueCount > 0 ? (queueCount + " WAITING") : "EMPTY";
         boolean queueActive = freq == PROCESSING_FREQUENCY_MANUAL || queueCount > 0;
         styleHomeAction(homeQueueAction, queueLabel + "\n" + queueValue,
@@ -1575,14 +1604,14 @@ public class MenuController {
     private void styleHomeTile(int index, String text, int accent, boolean selected) {
         TextView tile = homeTiles[index];
         tile.setText(text);
-        UiTheme.tabPanel(tile, accent, selected, true);
+        UiTheme.tilePanel(tile, accent, selected);
         tile.setTextColor(UiTheme.TEXT);
         tile.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
     }
 
     private void styleHomeAction(TextView view, String text, int accent, boolean selected, boolean active, boolean editing) {
         view.setText(text);
-        UiTheme.tabPanel(view, accent, selected, active);
+        UiTheme.actionPanel(view, accent, selected, active);
         if (!active) {
             UiTheme.dimText(view);
         } else {
@@ -1618,8 +1647,8 @@ public class MenuController {
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(false);
         tv.setPadding(8, 10, 8, 10);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
-        lp.setMargins(5, 0, 5, 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, 0, 0, 6);
         tv.setLayoutParams(lp);
         UiTheme.softPanel(tv);
         return tv;

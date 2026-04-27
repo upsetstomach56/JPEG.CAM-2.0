@@ -841,7 +841,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     @Override
 public void onEnterPressed() {
-    if (playbackController.isActive()) { playbackController.exit(); return; }
+    if (playbackController.isActive()) { playbackController.select(); return; }
     if (isProcessing) return;
 
     if (hudController.isActive()) {
@@ -961,6 +961,8 @@ public void onEnterPressed() {
             return true;
         }
 
+        if (playbackController.isActive()) { playbackController.navigate(-2); return true; }
+
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();
             int pos = menuController.getNameCursorPos();
@@ -991,6 +993,8 @@ public void onEnterPressed() {
             cameraManager.movePreviewMagnification(0, 1);
             return true;
         }
+
+        if (playbackController.isActive()) { playbackController.navigate(2); return true; }
 
         if (hudController.isActive() && (hudController.getMode() == 0 || hudController.getMode() == 10) && menuController.isNamingMode()) {
             char[] buf = menuController.getNameBuffer();

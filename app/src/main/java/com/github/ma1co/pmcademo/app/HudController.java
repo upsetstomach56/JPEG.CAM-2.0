@@ -57,6 +57,10 @@ public class HudController {
     private int      selection           = 0;
     private int      mode                = 0;
     private boolean  updatePending       = false;
+    private boolean  flashVisible        = true;
+    private long     adjustingUntilMs    = 0L;
+    private static final int FLASH_INTERVAL_MS = 420;
+    private static final int ADJUST_CONFIRM_MS = 650;
 
     // Matrix scrolling helpers
     private boolean  isScrollingMatrices = false;
@@ -79,6 +83,20 @@ public class HudController {
     private final TextView       wbValueText;
 
     private final HostCallback host;
+    private final Runnable flashRunnable = new Runnable() {
+        @Override public void run() {
+            if (!active) return;
+            if (isAdjustingNow()) {
+                flashVisible = true;
+                refresh();
+                host.getUiHandler().postDelayed(this, 120);
+                return;
+            }
+            flashVisible = !flashVisible;
+            refresh();
+            host.getUiHandler().postDelayed(this, FLASH_INTERVAL_MS);
+        }
+    };
 
     // -----------------------------------------------------------------------
     // Constructor — builds HUD view tree and injects into mainUIContainer
@@ -158,7 +176,7 @@ public class HudController {
     public boolean isActive()    { return active; }
     public int     getMode()     { return mode; }
     public int     getSelection(){ return selection; }
-    public void    setSelection(int sel) { selection = sel; }
+    public void    setSelection(int sel) { selection = sel; markNavigating(); }
 
     /** Public immediate refresh (for use from MainActivity enter/exit logic). */
     public void update()         { refresh(); }
@@ -180,6 +198,7 @@ public class HudController {
         active    = true;
         mode      = hudMode;
         selection = defaultSel;
+        markNavigating();
         host.getMenuController().setConfirmingDelete(false);
         host.getMenuController().getContainer().setVisibility(View.GONE);
 
@@ -205,11 +224,13 @@ public class HudController {
             wbGrid.setVisibility(View.GONE);
         }
         refresh();
+        startFlash();
     }
 
     /** Close HUD cleanly, restoring menu behind it. */
     public void close() {
         active = false;
+        stopFlash();
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -219,6 +240,7 @@ public class HudController {
     /** Reset HUD state without triggering onHudClosed — used when menu opens over an active HUD. */
     public void reset() {
         active = false;
+        stopFlash();
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -226,6 +248,7 @@ public class HudController {
 
     /** Hide all HUD overlays without triggering close callback (for updateMainHUD). */
     public void hideOverlays() {
+        stopFlash();
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -261,6 +284,7 @@ public class HudController {
             }
             else                                        selection = 0;
         }
+        markNavigating();
         refresh(); return true;
     }
 
@@ -279,13 +303,14 @@ public class HudController {
             maxIdx = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
         }
         if (selection > maxIdx) selection = (mode == 0) ? -1 : 0;
+        markNavigating();
         refresh(); return true;
     }
 
     public boolean handleLeft() {
         if (!active) return false;
         if (mode == 2) { handleWbAdjustment(-1, 0); return true; }
-        selection = Math.max(0, selection - 1); refresh(); return true;
+        selection = Math.max(0, selection - 1); markNavigating(); refresh(); return true;
     }
 
     public boolean handleRight() {
@@ -301,7 +326,7 @@ public class HudController {
             String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
             maxSlots = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
         }
-        selection = Math.min(maxSlots, selection + 1); refresh(); return true;
+        selection = Math.min(maxSlots, selection + 1); markNavigating(); refresh(); return true;
     }
 
     public boolean handleDial(int dir) {
@@ -330,6 +355,7 @@ public class HudController {
         RTLProfile p = host.getRecipeManager().getCurrentProfile();
         p.wbShift   = Math.max(-7, Math.min(7, p.wbShift   + dAb));
         p.wbShiftGM = Math.max(-7, Math.min(7, p.wbShiftGM + dGm));
+        markAdjusting();
         refresh();
         host.scheduleHardwareApply();
     }
@@ -337,6 +363,7 @@ public class HudController {
     private void handleAdjustment(int dir) {
         RTLProfile p = host.getRecipeManager().getCurrentProfile();
         MatrixManager mm = host.getMatrixManager();
+        markAdjusting();
 
         if (mode == 0) {
             if (selection == -1) {
@@ -427,6 +454,8 @@ public class HudController {
             String abStr = ab==0?"0":(ab<0?"B"+Math.abs(ab):"A"+ab);
             String gmStr = gm==0?"0":(gm<0?"M"+Math.abs(gm):"G"+gm);
             wbValueText.setText(abStr + ", " + gmStr);
+            wbValueText.setTextColor(selectedHudColor());
+            wbCursor.setBackgroundColor(isAdjustingNow() ? UiTheme.WARN : UiTheme.ACCENT);
             return;
         }
 
@@ -447,7 +476,7 @@ public class HudController {
                     StringBuilder sb=new StringBuilder("NAME: "); char[] buf=mc.getNameBuffer(); int pos=mc.getNameCursorPos();
                     for(int i=0;i<buf.length;i++) { if(i==pos) sb.append("[").append(buf[i]).append("]"); else sb.append(buf[i]); }
                     tvTop.setText(sb.toString()); tvTop.setTextColor(UiTheme.WARN);
-                } else { tvTop.setText("MATRIX: "+currentName); tvTop.setTextColor(selection==-1?UiTheme.ACCENT:UiTheme.TEXT); }
+                } else { tvTop.setText("MATRIX: "+currentName); tvTop.setTextColor(selection==-1?selectedHudColor():UiTheme.TEXT); }
                 tvTop.setVisibility(View.VISIBLE);
             }
             if (selection==-1) tip="FILE: "+matrixNote+"\n"+balText;
@@ -487,14 +516,14 @@ public class HudController {
             activeCells=1;labels=new String[]{"DYNAMIC RANGE"};values[0]=p.dro!=null?p.dro.toUpperCase():"OFF";
             tip="Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         } else if (mode == 10) {
-            if(mc.isConfirmingDelete()){activeCells=2;labels=new String[]{"ARE YOU SURE?","CANCEL"};values[0]="[ CONFIRM DELETE ]";values[1]="[ GO BACK ]";if(selection==0) tip="WARNING: This will permanently delete the recipe from the SD card."; else tip="Cancel and return to the Recipe Manager.";}
+            if(mc.isConfirmingDelete()){activeCells=2;labels=new String[]{"DELETE RECIPE?","CANCEL"};values[0]="[ CONFIRM DELETE ]";values[1]="[ GO BACK ]";if(selection==0) tip="WARNING: This will permanently delete the recipe from the SD card."; else tip="Cancel and return to the Recipe Manager.";}
             else{
-                activeCells=4;labels=new String[]{"SAVE","BROWSE","RESET","DELETE"};
+                activeCells=4;labels=new String[]{"SAVE SLOT","LOAD RECIPE","RESET SLOT","DELETE FILE"};
                 vaultItems=host.getRecipeManager().getVaultItems(); if(vaultIndex>=vaultItems.size()||vaultIndex<0) vaultIndex=0;
                 String vn=(vaultItems.isEmpty()||vaultItems.get(vaultIndex).filename.equals("NONE"))?"EMPTY":vaultItems.get(vaultIndex).profileName;
                 if(vn.length()>10) vn=vn.substring(0,8)+"..";
-                values[0]="[ RENAME ]"; values[1]="< "+vn+" >"; values[2]="[ DEFAULT ]";
-                values[3]=(!vaultItems.isEmpty()&&!vaultItems.get(vaultIndex).filename.equals("NONE"))?"[ TRASH ]":"---";
+                values[0]="[ NAME + SAVE ]"; values[1]="< "+vn+" >"; values[2]="[ RESTORE ]";
+                values[3]=(!vaultItems.isEmpty()&&!vaultItems.get(vaultIndex).filename.equals("NONE"))?"[ DELETE ]":"---";
                 if(selection==0) tip="Press ENTER to RENAME and SAVE this Slot to the Vault.";
                 else if(selection==1) tip="Scroll wheel to browse. WARNING: LIVE VIEW will overwrite Slot.";
                 else if(selection==2) tip="Press ENTER to wipe this Slot back to default settings.";
@@ -503,8 +532,7 @@ public class HudController {
             if(tvTop!=null){
                 if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(UiTheme.WARN);}
                 else{
-                    // <--- CHANGED: Added the [MENU = BACK] safe escape hint
-                    tvTop.setText("RECIPE MANAGER - SLOT "+(host.getRecipeManager().getCurrentSlot()+1) + "  [MENU = BACK]");
+                    tvTop.setText("< BACK    RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1));
                     tvTop.setTextColor(UiTheme.TEXT);
                 }
                 tvTop.setVisibility(View.VISIBLE);
@@ -514,10 +542,42 @@ public class HudController {
         // Render cells
         for(int i=0;i<9;i++){
             if(i<activeCells){cells[i].setVisibility(View.VISIBLE);cellLabels[i].setText(labels[i]);cellValues[i].setText(values[i]);
-                if(i==selection){cellLabels[i].setTextColor(UiTheme.ACCENT);cellValues[i].setTextColor(UiTheme.ACCENT);}
+                if(i==selection){int color=selectedHudColor();cellLabels[i].setTextColor(color);cellValues[i].setTextColor(color);}
                 else{cellLabels[i].setTextColor(UiTheme.TEXT_MUTED);cellValues[i].setTextColor(UiTheme.TEXT);}
             } else cells[i].setVisibility(View.GONE);
         }
         if(tooltip!=null){tooltip.setText(tip);tooltip.setVisibility(tip.isEmpty()?View.GONE:View.VISIBLE);}
+    }
+
+    private boolean isAdjustingNow() {
+        return System.currentTimeMillis() < adjustingUntilMs;
+    }
+
+    private int selectedHudColor() {
+        if (isAdjustingNow()) return UiTheme.WARN;
+        return flashVisible ? UiTheme.TEXT : Color.TRANSPARENT;
+    }
+
+    private void markNavigating() {
+        adjustingUntilMs = 0L;
+        flashVisible = true;
+        if (active) startFlash();
+    }
+
+    private void markAdjusting() {
+        adjustingUntilMs = System.currentTimeMillis() + ADJUST_CONFIRM_MS;
+        flashVisible = true;
+        if (active) startFlash();
+    }
+
+    private void startFlash() {
+        host.getUiHandler().removeCallbacks(flashRunnable);
+        if (active) host.getUiHandler().postDelayed(flashRunnable, FLASH_INTERVAL_MS);
+    }
+
+    private void stopFlash() {
+        host.getUiHandler().removeCallbacks(flashRunnable);
+        flashVisible = true;
+        adjustingUntilMs = 0L;
     }
 }
