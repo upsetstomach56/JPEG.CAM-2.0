@@ -100,6 +100,10 @@ public final class UiTheme {
         }
     }
 
+    public static void titlePanel(View view, int accent) {
+        view.setBackgroundDrawable(rect(SURFACE_SOFT, tint(accent, 130), 1, 7));
+    }
+
     public static void clear(View view) {
         view.setBackgroundColor(Color.TRANSPARENT);
     }

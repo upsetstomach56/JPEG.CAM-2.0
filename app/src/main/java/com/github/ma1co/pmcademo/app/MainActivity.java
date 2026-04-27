@@ -8,7 +8,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Typeface;
 import android.hardware.Camera;
@@ -282,17 +281,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         public void onReceive(Context context, Intent intent) {
             int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
             int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
-            if (level >= 0 && scale > 0) {
-                final int pct = (level * 100) / scale;
+            int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            final int pct = normalizeBatteryPercent(level, scale, status);
+            if (pct >= 0) {
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        if (tvBattery != null) tvBattery.setText(pct + "%");
+                        if (tvBattery != null) tvBattery.setText(formatBatteryPercent(pct));
                         if (batteryIcon != null) batteryIcon.setLevel(pct);
                     }
                 });
             }
         }
     };
+
+    private int normalizeBatteryPercent(int level, int scale, int status) {
+        if (status == BatteryManager.BATTERY_STATUS_FULL) return 100;
+        if (level < 0 || scale <= 0) return -1;
+        long pct = ((long) level * 100L + (scale / 2L)) / (long) scale;
+        if (pct < 0) return 0;
+        if (pct > 100) return 100;
+        return (int) pct;
+    }
+
+    private String formatBatteryPercent(int pct) {
+        if (pct < 0) return "--%";
+        if (pct >= 100) return "100%";
+        return pct + "%";
+    }
 
     // --- FACTORY BURN SYSTEM ---
     private void factoryBurnMatrices() {
@@ -651,15 +666,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (!f.exists()) return;
 
         isProcessing = true;
-        runOnUiThread(new Runnable() {
-            public void run() {
-                if (tvTopStatus != null) {
-                    tvTopStatus.setText("SAVING TO SD...");
-                    tvTopStatus.setTextColor(UiTheme.WARN);
-                }
-                updateMainHUD();
-            }
-        });
+        showSavingToSdStatus();
 
         final long[] lastSize = {-1};
         final int[] retries = {0};
@@ -767,6 +774,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         return isProcessing || captureWritePending;
     }
 
+    private void showSavingToSdStatus() {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (mainUIContainer != null) mainUIContainer.setVisibility(View.VISIBLE);
+                if (tvTopStatus != null) {
+                    tvTopStatus.setText("SAVING TO SD...");
+                    tvTopStatus.setTextColor(UiTheme.WARN);
+                    UiTheme.softPanel(tvTopStatus);
+                    tvTopStatus.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+    }
+
     private void triggerLutPreload() {
         RTLProfile p = recipeManager.getCurrentProfile();
         if (p.lutIndex == 0) {
@@ -843,8 +864,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     public void armFileScanner() {
         if (mScanner != null) {
-            pendingShotSnapshot = createCurrentQueueEntry();
-            mScanner.start();
+            if (pendingShotSnapshot == null) pendingShotSnapshot = createCurrentQueueEntry();
+            if (mScanner.isPolling) mScanner.checkNow();
+            else mScanner.start();
             final int token = ++captureWriteToken;
             uiHandler.postDelayed(new Runnable() {
                 @Override public void run() {
@@ -1612,9 +1634,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvBattery.setTextColor(UiTheme.ACCENT);
         tvBattery.setTextSize(14);
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
+        tvBattery.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         tvBattery.setPadding(0, 0, 5, 0);
+        tvBattery.setSingleLine(true);
+        tvBattery.setMinWidth(46);
         tvBattery.setText("--%");
-        batteryArea.addView(tvBattery); // <--- THIS line was missing!
+        batteryArea.addView(tvBattery, new LinearLayout.LayoutParams(46, -2));
 
         batteryIcon = new BatteryView(this);
         batteryArea.addView(batteryIcon, new LinearLayout.LayoutParams(28, 12));
@@ -1703,7 +1728,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         else tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setTextColor(UiTheme.ACCENT);
         tv.setShadowLayer(4, 0, 0, UiTheme.SHADOW);
-        tv.setPadding(18, 0, 18, 0);
+        tv.setPadding(18, 4, 18, 4);
+        UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
         return tv;
     }
 
@@ -1721,6 +1747,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         lp.setMargins(0, 0, 0, 15);
         tv.setLayoutParams(lp);
         return tv;
+    }
+
+    private void styleLiveHudBubble(TextView tv, boolean selected, boolean editing) {
+        if (tv == null) return;
+        if (selected) {
+            UiTheme.selected(tv, UiTheme.ACCENT);
+            tv.setTextColor(editing ? UiTheme.WARN : UiTheme.TEXT);
+            tv.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+        } else {
+            UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
+            tv.setTextColor(UiTheme.ACCENT);
+            tv.setShadowLayer(3, 0, 0, UiTheme.SHADOW);
+        }
     }
 
     @Override
@@ -1776,7 +1815,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (shouldBlockShutterInput() && isShutterInput(sc, k)) return true;
-        if (isFullShutterInput(sc, k)) captureWritePending = true;
+        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
+            captureWritePending = true;
+            showSavingToSdStatus();
+            armFileScanner();
+        }
 
         // --- FIXED: Added standard Android keycode ---
 
@@ -1924,7 +1967,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void setHUDVisibility(int v) {
         if (tvTopStatus != null) {
             // FIX: If processing, FORCE visible. Otherwise, obey the display button.
-            tvTopStatus.setVisibility(isProcessing ? View.VISIBLE : v);
+            tvTopStatus.setVisibility((isProcessing || captureWritePending) ? View.VISIBLE : v);
         }
         if (llBottomBar != null) llBottomBar.setVisibility(v);
         if (tvBattery != null) tvBattery.setVisibility(v);
@@ -1954,31 +1997,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private boolean shouldPulseLiveHudSelection() {
-        return isDialLocked
-                && displayState == 0
-                && !isProcessing
-                && !liveUiSuppressed
-                && menuController != null && !menuController.isOpen()
-                && hudController != null && !hudController.isActive()
-                && playbackController != null && !playbackController.isActive();
+        return false;
     }
 
     private void updateLiveHudFlashTimer() {
-        if (shouldPulseLiveHudSelection()) {
-            if (!liveHudFlashRunning) {
-                liveHudFlashRunning = true;
-                uiHandler.postDelayed(liveHudFlashRunnable, 420);
-            }
-        } else {
-            liveHudFlashRunning = false;
-            liveHudFlashVisible = true;
-            uiHandler.removeCallbacks(liveHudFlashRunnable);
-        }
+        liveHudFlashRunning = false;
+        liveHudFlashVisible = true;
+        uiHandler.removeCallbacks(liveHudFlashRunnable);
     }
 
     public void updateMainHUD() {
         updateLiveHudFlashTimer();
-        int selectedColor = isDialLocked ? (liveHudFlashVisible ? UiTheme.TEXT : Color.TRANSPARENT) : UiTheme.WARN;
+        boolean liveControlEditing = !isDialLocked;
 
         if (cameraManager == null || cameraManager.getCamera() == null) return;
 
@@ -2018,9 +2048,11 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (!isProcessing && tvTopStatus != null) {
             if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
                 tvTopStatus.setText("SHOT 1 SAVED. [L/R] TO SWAP SIDE.");
+                UiTheme.softPanel(tvTopStatus);
                 tvTopStatus.setTextColor(UiTheme.SUCCESS);
             } else if (diptychManager != null && diptychManager.isEnabled() && diptychManager.getState() == DiptychManager.STATE_STITCHING) {
                 tvTopStatus.setText("STITCHING DIPTYCH...");
+                UiTheme.softPanel(tvTopStatus);
                 tvTopStatus.setTextColor(UiTheme.WARN);
             } else {
                 int slotNum = recipeManager.getCurrentSlot() + 1;
@@ -2038,10 +2070,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 tvTopStatus.setText("SLOT " + slotNum + ": " + customName + "\n" + readyText);
 
                 if (mDialMode == DIAL_MODE_RTL) {
-                    tvTopStatus.setTextColor(selectedColor);
+                    styleLiveHudBubble(tvTopStatus, true, liveControlEditing);
                 } else if (isReady) {
+                    UiTheme.softPanel(tvTopStatus);
                     tvTopStatus.setTextColor(UiTheme.SUCCESS);
                 } else {
+                    UiTheme.softPanel(tvTopStatus);
                     tvTopStatus.setTextColor(UiTheme.ACCENT);
                 }
             }
@@ -2073,20 +2107,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (tvValEv != null) tvValEv.setText(String.format("%+.1f", p.getExposureCompensation() * p.getExposureCompensationStep()));
 
         if (tvReview != null) {
-            if (mDialMode == DIAL_MODE_REVIEW) {
-                UiTheme.selected(tvReview);
-                tvReview.setTextColor(UiTheme.TEXT);
-            } else {
-                UiTheme.softPanel(tvReview);
-                tvReview.setTextColor(UiTheme.ACCENT);
-            }
+            styleLiveHudBubble(tvReview, mDialMode == DIAL_MODE_REVIEW, liveControlEditing);
         }
 
-        if (tvValShutter != null) tvValShutter.setTextColor(mDialMode == DIAL_MODE_SHUTTER ? selectedColor : UiTheme.ACCENT);
-        if (tvValAperture != null) tvValAperture.setTextColor(mDialMode == DIAL_MODE_APERTURE ? selectedColor : UiTheme.ACCENT);
-        if (tvValIso != null) tvValIso.setTextColor(mDialMode == DIAL_MODE_ISO ? selectedColor : UiTheme.ACCENT);
-        if (tvValEv != null) tvValEv.setTextColor(mDialMode == DIAL_MODE_EXPOSURE ? selectedColor : UiTheme.ACCENT);
-        if (tvMode != null) tvMode.setTextColor(mDialMode == DIAL_MODE_PASM ? selectedColor : UiTheme.ACCENT);
+        styleLiveHudBubble(tvValShutter, mDialMode == DIAL_MODE_SHUTTER, liveControlEditing);
+        styleLiveHudBubble(tvValAperture, mDialMode == DIAL_MODE_APERTURE, liveControlEditing);
+        styleLiveHudBubble(tvValIso, mDialMode == DIAL_MODE_ISO, liveControlEditing);
+        styleLiveHudBubble(tvValEv, mDialMode == DIAL_MODE_EXPOSURE, liveControlEditing);
+        styleLiveHudBubble(tvMode, mDialMode == DIAL_MODE_PASM, liveControlEditing);
 
         String fm = p.getFocusMode();
         cachedIsManualFocus = "manual".equals(fm);
@@ -2101,7 +2129,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             else if ("continuous-video".equals(fm) || "continuous-picture".equals(fm)) tvFocusMode.setText("AF-C");
             else tvFocusMode.setText(fm != null ? fm.toUpperCase() : "AF");
 
-            tvFocusMode.setTextColor(mDialMode == DIAL_MODE_FOCUS ? selectedColor : UiTheme.ACCENT);
+            styleLiveHudBubble(tvFocusMode, mDialMode == DIAL_MODE_FOCUS, liveControlEditing);
         }
 
         // --- 4. UPDATE FOCUS METER ---
@@ -2361,6 +2389,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         int selectedCount = processingQueueManager.moveSelectedToFrontForMode(selected, ProcessingQueueManager.MODE_MANUAL);
         updateMainHUD();
         if (selectedCount > 0) startQueuedProcessing(true, selectedCount);
+    }
+    @Override public void clearSelectedQueuedPhotos(boolean[] selected) {
+        if (processingQueueManager != null) {
+            processingQueueManager.removeSelectedForMode(selected, currentQueueMode());
+        }
+        updateMainHUD();
     }
     @Override public void clearQueuedPhotos() {
         if (processingQueueManager != null) processingQueueManager.clearForMode(currentQueueMode());

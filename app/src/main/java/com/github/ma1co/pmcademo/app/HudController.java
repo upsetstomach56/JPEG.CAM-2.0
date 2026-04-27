@@ -32,6 +32,9 @@ import java.util.List;
  *  10 - Recipe Vault Manager
  */
 public class HudController {
+    private static final int SEL_BACK = -2;
+    private static final int SEL_MATRIX_SAVED = -1;
+    private static final int SEL_MATRIX_SAVE_NEW = -3;
 
     // -----------------------------------------------------------------------
     // Host callback
@@ -81,6 +84,9 @@ public class HudController {
     private final TextView       headerBack;
     private final TextView       headerTitle;
     private final TextView       tooltip;
+    private final LinearLayout   matrixActions;
+    private final TextView       matrixSavedAction;
+    private final TextView       matrixSaveAction;
     private final FrameLayout    wbGrid;
     private final View           wbCursor;
     private final TextView       wbValueText;
@@ -164,8 +170,25 @@ public class HudController {
         UiTheme.softPanel(tooltip);
         tooltip.setVisibility(View.GONE);
         FrameLayout.LayoutParams ttLp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-        ttLp.setMargins(0, 0, 0, 130);
+        ttLp.setMargins(0, 0, 0, 188);
         mainUIContainer.addView(tooltip, ttLp);
+
+        matrixActions = new LinearLayout(ctx);
+        matrixActions.setOrientation(LinearLayout.HORIZONTAL);
+        matrixActions.setGravity(Gravity.CENTER);
+        matrixActions.setPadding(12, 0, 12, 0);
+        matrixActions.setVisibility(View.GONE);
+        matrixSavedAction = makeMatrixAction(ctx, "SAVED MATRIX\nNONE", font);
+        matrixSaveAction = makeMatrixAction(ctx, "SAVE NEW\nNAME", font);
+        LinearLayout.LayoutParams savedActionLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        savedActionLp.setMargins(5, 0, 5, 0);
+        matrixActions.addView(matrixSavedAction, savedActionLp);
+        LinearLayout.LayoutParams saveActionLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        saveActionLp.setMargins(5, 0, 5, 0);
+        matrixActions.addView(matrixSaveAction, saveActionLp);
+        FrameLayout.LayoutParams matrixActionsLp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        matrixActionsLp.setMargins(0, 0, 0, 130);
+        mainUIContainer.addView(matrixActions, matrixActionsLp);
 
         // WB grid (mode 2 — special cursor UI)
         wbGrid = new FrameLayout(ctx);
@@ -191,6 +214,20 @@ public class HudController {
 
     private TextView makeLabel(Context ctx, String text) {
         TextView tv = new TextView(ctx); tv.setText(text); tv.setTextColor(UiTheme.TEXT); return tv;
+    }
+
+    private TextView makeMatrixAction(Context ctx, String text, Typeface font) {
+        TextView tv = new TextView(ctx);
+        tv.setText(text);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(10, 7, 10, 7);
+        tv.setSingleLine(false);
+        tv.setTextColor(UiTheme.TEXT_MUTED);
+        tv.setTextSize(13);
+        tv.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+        tv.setTypeface(font != null ? font : Typeface.DEFAULT_BOLD);
+        UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
+        return tv;
     }
 
     // -----------------------------------------------------------------------
@@ -517,7 +554,7 @@ public class HudController {
         headerTitle.setText(title != null ? title : "");
         headerTitle.setTextColor(UiTheme.TEXT);
         headerTitle.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
-        UiTheme.clear(headerTitle);
+        UiTheme.titlePanel(headerTitle, UiTheme.ACCENT);
     }
 
     private void refresh() {
@@ -548,7 +585,12 @@ public class HudController {
             wbValueText.setText(abStr + ", " + gmStr);
             wbValueText.setTextColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             wbCursor.setBackgroundColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
-            UiTheme.actionPanel(wbGrid, UiTheme.ACCENT, selection == 0, true);
+            if (selection == 0) {
+                if (valueEditing) UiTheme.pageTabPanel(wbGrid, UiTheme.ACCENT, false, true);
+                else UiTheme.actionPanel(wbGrid, UiTheme.ACCENT, true, true);
+            } else {
+                UiTheme.panel(wbGrid);
+            }
             if (tvTop != null) tvTop.setVisibility(View.GONE);
             return;
         }

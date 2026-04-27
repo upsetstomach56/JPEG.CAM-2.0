@@ -159,6 +159,7 @@ public class MenuController {
         void setProcessingFrequency(int v);
         void forceProcessQueuedPhotos();
         void processSelectedQueuedPhotos(boolean[] selected);
+        void clearSelectedQueuedPhotos(boolean[] selected);
         void clearQueuedPhotos();
 
         // UI coordination
@@ -698,7 +699,8 @@ public class MenuController {
         int photoRows = getManualVisiblePhotoCount(queueCount);
         int actionStartRow = photoRows + (queueCount == 0 ? 1 : 0);
         int processRow = actionStartRow;
-        int clearRow = processRow + 1;
+        int clearSelectedRow = processRow + 1;
+        int clearAllRow = clearSelectedRow + 1;
 
         if (selection < photoRows) {
             int idx = manualQueueOffset + selection;
@@ -713,7 +715,23 @@ public class MenuController {
             }
             return true;
         }
-        if (selection == clearRow) {
+        if (selection == clearSelectedRow) {
+            if (getManualSelectedCount() > 0) {
+                host.clearSelectedQueuedPhotos(manualSelected);
+                manualSelected = new boolean[0];
+                ensureManualSelectionSize(host.getQueuedPhotoCount());
+                if (manualQueueOffset >= host.getQueuedPhotoCount()) {
+                    manualQueueOffset = Math.max(0, host.getQueuedPhotoCount() - MANUAL_QUEUE_PAGE_SIZE);
+                }
+                int newCount = host.getQueuedPhotoCount();
+                int newPhotoRows = getManualVisiblePhotoCount(newCount);
+                selection = newPhotoRows + (newCount == 0 ? 1 : 0) + 1;
+                clearThumbnailCache();
+                render();
+            }
+            return true;
+        }
+        if (selection == clearAllRow) {
             host.clearQueuedPhotos();
             manualSelected = new boolean[0];
             manualQueueOffset = 0;
@@ -1139,7 +1157,8 @@ public class MenuController {
 
         int selected = getManualSelectedCount();
         setRow(row++, "Process Selected", selected > 0 ? (selected + " | " + host.getProcessingEstimateText(selected)) : "NONE");
-        setRow(row++, "Clear Queue List", queueCount > 0 ? (queueCount + " ITEMS") : "EMPTY");
+        setRow(row++, "Clear Selected", selected > 0 ? (selected + " ITEMS") : "NONE");
+        setRow(row++, "Clear All", queueCount > 0 ? (queueCount + " ITEMS") : "EMPTY");
 
         itemCount = row;
         if (selection >= itemCount) selection = itemCount - 1;
@@ -1609,14 +1628,14 @@ public class MenuController {
         int queueCount = host.getQueuedPhotoCount();
         styleHomeAction(homeProcessingFrequency, homeProcessingLabel, homeProcessingValue,
                 "Processing Frequency", frequencyLabel,
-                UiTheme.ACCENT_RECIPES, selection == 4, true, isEditing && selection == 4);
+                UiTheme.ACCENT, selection == 4, true, isEditing && selection == 4);
 
         String queueLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL QUEUE" : "PROCESS QUEUE";
         String queueValue = queueCount > 0 ? (queueCount + " WAITING") : "EMPTY";
         boolean queueActive = freq == PROCESSING_FREQUENCY_MANUAL || queueCount > 0;
         styleHomeAction(homeQueueAction, homeQueueLabel, homeQueueValue,
                 queueLabel, queueValue,
-                UiTheme.ACCENT_RECIPES, selection == 5, queueActive, false);
+                UiTheme.ACCENT, selection == 5, queueActive, false);
         itemCount = 6;
     }
 

@@ -177,6 +177,34 @@ public class ProcessingQueueManager {
         return selectedEntries.size();
     }
 
+    public synchronized int removeSelectedForMode(boolean[] selected, int mode) {
+        if (selected == null || selected.length == 0 || entries.isEmpty()) return 0;
+
+        int removed = 0;
+        int visibleIndex = 0;
+        ArrayList<Entry> remainingEntries = new ArrayList<Entry>();
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (entryMatchesMode(entry, mode)) {
+                if (visibleIndex < selected.length && selected[visibleIndex]) {
+                    removed++;
+                } else {
+                    remainingEntries.add(copyEntry(entry));
+                }
+                visibleIndex++;
+            } else {
+                remainingEntries.add(copyEntry(entry));
+            }
+        }
+
+        if (removed > 0) {
+            entries.clear();
+            entries.addAll(remainingEntries);
+            save();
+        }
+        return removed;
+    }
+
     private boolean entryMatchesMode(Entry entry, int mode) {
         if (entry == null) return false;
         if (mode == MODE_MANUAL) return entry.queueMode == MODE_MANUAL;
