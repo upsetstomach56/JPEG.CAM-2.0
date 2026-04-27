@@ -50,7 +50,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     public static final boolean DEBUG_MODE = false;
     private static final int PHOTO_READY_RETRY_MS = 75;
     private static final int PHOTO_READY_MAX_RETRIES = 240;
-    private static final int PHOTO_READY_STABLE_CHECKS = 4;
+    private static final int PHOTO_READY_STABLE_CHECKS = 1;
+    private static final int PHOTO_READY_FALLBACK_STABLE_CHECKS = 4;
     private static final int SCANNER_ARM_TIMEOUT_MS = 6000;
     private static final long QUEUE_FALLBACK_PROCESS_MS = 14000;
     private static final int PROCESSING_FREQUENCY_MANUAL = -1;
@@ -159,6 +160,20 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private ProReticleView afOverlay;
 
     private Handler uiHandler = new Handler();
+    private boolean liveHudFlashVisible = true;
+    private boolean liveHudFlashRunning = false;
+    private final Runnable liveHudFlashRunnable = new Runnable() {
+        @Override public void run() {
+            if (shouldPulseLiveHudSelection()) {
+                liveHudFlashVisible = !liveHudFlashVisible;
+                updateMainHUD();
+                uiHandler.postDelayed(this, 420);
+            } else {
+                liveHudFlashRunning = false;
+                liveHudFlashVisible = true;
+            }
+        }
+    };
 
     private int getPreviewWindowWidth() {
         if (mSurfaceView != null && mSurfaceView.getWidth() > 0) return mSurfaceView.getWidth();
@@ -643,7 +658,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     stableChecks[0] = 0;
                 }
 
-                if (currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS) {
+                boolean stableEnough = currentSize > 0 && stableChecks[0] >= PHOTO_READY_STABLE_CHECKS;
+                boolean fallbackStable = currentSize > 0 && stableChecks[0] >= PHOTO_READY_FALLBACK_STABLE_CHECKS;
+                if ((stableEnough && hasJpegEndMarker(f)) || fallbackStable) {
                     captureWritePending = false;
                     long stableMs = System.currentTimeMillis();
                     ProcessingQueueManager.Entry entry = consumeShotSnapshot(path, scannerStartedMs, detectedMs, stableMs, scannerAttempts);
@@ -668,6 +685,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         };
 
         uiHandler.post(checker);
+    }
+
+    private boolean hasJpegEndMarker(File file) {
+        java.io.RandomAccessFile raf = null;
+        try {
+            if (file == null || file.length() < 2) return false;
+            raf = new java.io.RandomAccessFile(file, "r");
+            long len = raf.length();
+            if (len < 2) return false;
+            raf.seek(len - 2);
+            return (raf.read() & 0xFF) == 0xFF && (raf.read() & 0xFF) == 0xD9;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (raf != null) {
+                try { raf.close(); } catch (Exception ignored) {}
+            }
+        }
     }
 
     private void handleReadyPhotoFile(File f, String path, ProcessingQueueManager.Entry entry,
@@ -840,12 +875,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     @Override
-public void onEnterPressed() {
+    public void onEnterPressed() {
     if (playbackController.isActive()) { playbackController.select(); return; }
     if (isProcessing) return;
 
     if (hudController.isActive()) {
-        // --- VAULT HUD (MODE 10) ---
+        if (hudController.getSelection() == -2) {
+            menuController.setNamingMode(false);
+            menuController.setConfirmingDelete(false);
+            hudController.close();
+            return;
+        }
+
         // --- VAULT HUD (MODE 10) ---
         if (hudController.getMode() == 10) {
             if (menuController.isNamingMode()) {
@@ -877,7 +918,11 @@ public void onEnterPressed() {
                     else menuController.resetNameBuffer();
                     menuController.resetNameCursor(); hudController.update(); return;
                 } else if (hudController.getSelection() == 1) {
-                    // NEW: Explicitly force the highlighted Vault recipe to load into memory!
+                    if (!hudController.isValueEditing()) {
+                        hudController.handleEnter();
+                        return;
+                    }
+                    hudController.handleEnter();
                     if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
                         recipeManager.previewVaultToSlot(hudController.getVaultItems().get(hudController.getVaultIndex()).filename);
                         triggerLutPreload();
@@ -924,6 +969,12 @@ public void onEnterPressed() {
         }
 
         // Standard HUD exit — controller hides overlays and fires onHudClosed callback
+        if (hudController.handleEnter()) {
+            if (!hudController.isActive()) return;
+            if (!hudController.isValueEditing()) recipeManager.savePreferences();
+            return;
+        }
+
         hudController.close();
         recipeManager.savePreferences();
         return;
@@ -1761,6 +1812,8 @@ public void onEnterPressed() {
     protected void onPause() {
         super.onPause();
         uiHandler.removeCallbacksAndMessages(null);
+        liveHudFlashRunning = false;
+        liveHudFlashVisible = true;
 
         // --- NEW: Release the A7II hardware dial lock ---
         if (hardwareStateReceiver != null) {
@@ -1851,9 +1904,31 @@ public void onEnterPressed() {
         }
     }
 
+    private boolean shouldPulseLiveHudSelection() {
+        return isDialLocked
+                && displayState == 0
+                && !isProcessing
+                && menuController != null && !menuController.isOpen()
+                && hudController != null && !hudController.isActive()
+                && playbackController != null && !playbackController.isActive();
+    }
+
+    private void updateLiveHudFlashTimer() {
+        if (shouldPulseLiveHudSelection()) {
+            if (!liveHudFlashRunning) {
+                liveHudFlashRunning = true;
+                uiHandler.postDelayed(liveHudFlashRunnable, 420);
+            }
+        } else {
+            liveHudFlashRunning = false;
+            liveHudFlashVisible = true;
+            uiHandler.removeCallbacks(liveHudFlashRunnable);
+        }
+    }
+
     public void updateMainHUD() {
-        // <--- MOVED TO TOP: Declare this before any UI elements try to use it!
-        int selectedColor = isDialLocked ? UiTheme.TEXT : UiTheme.WARN;
+        updateLiveHudFlashTimer();
+        int selectedColor = isDialLocked ? (liveHudFlashVisible ? UiTheme.TEXT : Color.TRANSPARENT) : UiTheme.WARN;
 
         if (cameraManager == null || cameraManager.getCamera() == null) return;
 

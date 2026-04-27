@@ -229,17 +229,32 @@ public class PlaybackController {
             showImage(index + (direction >= 0 ? 1 : -1));
         } else {
             if (backSelected) {
-                backSelected = false;
+                if (direction == 2) backSelected = false;
                 renderGrid();
                 return;
             }
-            int pageStart = (index / GRID_PAGE_SIZE) * GRID_PAGE_SIZE;
-            if ((direction == -2 && index < pageStart + 2) || (direction == -1 && index == pageStart)) {
+
+            if (direction == -1 || direction == 1) {
+                moveGridPage(direction);
+                renderGrid();
+                return;
+            }
+
+            int pageStart = currentPage() * GRID_PAGE_SIZE;
+            int local = index - pageStart;
+            if (direction == -2 && local < 2) {
                 backSelected = true;
                 renderGrid();
                 return;
             }
-            index = wrapIndex(index + direction);
+
+            if (direction == 2 || direction == -2) {
+                int targetLocal = local + (direction > 0 ? 2 : -2);
+                int targetIndex = pageStart + targetLocal;
+                if (targetLocal >= 0 && targetLocal < GRID_PAGE_SIZE && targetIndex < files.size()) {
+                    index = targetIndex;
+                }
+            }
             renderGrid();
         }
     }
@@ -252,11 +267,11 @@ public class PlaybackController {
         imageView.setVisibility(View.GONE);
         infoText.setVisibility(View.GONE);
         gridContainer.setVisibility(View.VISIBLE);
-        titleText.setText("PHOTOS  " + (index + 1) + " / " + files.size());
+        titleText.setText("PHOTOS  < PAGE " + (currentPage() + 1) + " / " + pageCount() + " >");
         UiTheme.pageTabPanel(backText, UiTheme.ACCENT, backSelected, false);
         backText.setTextColor(backSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
 
-        int pageStart = (index / GRID_PAGE_SIZE) * GRID_PAGE_SIZE;
+        int pageStart = currentPage() * GRID_PAGE_SIZE;
         recycleGridBitmaps();
         for (int i = 0; i < GRID_PAGE_SIZE; i++) {
             int fileIndex = pageStart + i;
@@ -432,6 +447,30 @@ public class PlaybackController {
         while (idx < 0) idx += files.size();
         while (idx >= files.size()) idx -= files.size();
         return idx;
+    }
+
+    private int currentPage() {
+        if (files.isEmpty()) return 0;
+        return index / GRID_PAGE_SIZE;
+    }
+
+    private int pageCount() {
+        if (files.isEmpty()) return 1;
+        return (files.size() + GRID_PAGE_SIZE - 1) / GRID_PAGE_SIZE;
+    }
+
+    private void moveGridPage(int direction) {
+        int page = currentPage();
+        int local = index - page * GRID_PAGE_SIZE;
+        int nextPage = page + (direction > 0 ? 1 : -1);
+        if (nextPage < 0) nextPage = pageCount() - 1;
+        if (nextPage >= pageCount()) nextPage = 0;
+
+        int nextStart = nextPage * GRID_PAGE_SIZE;
+        int nextIndex = nextStart + local;
+        if (nextIndex >= files.size()) nextIndex = files.size() - 1;
+        if (nextIndex < nextStart) nextIndex = nextStart;
+        index = nextIndex;
     }
 
     private void recycleCurrentBitmap() {

@@ -209,8 +209,12 @@ public class MenuController {
     private final LinearLayout   homeContainer;
     private final TextView[]     homeTiles = new TextView[4];
     private final TextView       homeQuickTitle;
-    private final TextView       homeProcessingFrequency;
-    private final TextView       homeQueueAction;
+    private final LinearLayout   homeProcessingFrequency;
+    private final LinearLayout   homeQueueAction;
+    private final TextView       homeProcessingLabel;
+    private final TextView       homeProcessingValue;
+    private final TextView       homeQueueLabel;
+    private final TextView       homeQueueValue;
     private final LinearLayout   tabRow;
     private final TextView       tvBack, tvTabRTL, tvTabSettings, tvTabNetwork, tvTabSupport, tvTabExtra;
     private final TextView[]     pageTabs = new TextView[5];
@@ -281,8 +285,12 @@ public class MenuController {
         homeQuickTitle.setTypeface(Typeface.DEFAULT_BOLD);
         homeQuickTitle.setPadding(4, 0, 0, 6);
         queueRow.addView(homeQuickTitle, new LinearLayout.LayoutParams(-1, -2));
-        homeProcessingFrequency = makeHomeAction(ctx);
-        homeQueueAction = makeHomeAction(ctx);
+        homeProcessingFrequency = makeHomeActionRow(ctx);
+        homeProcessingLabel = (TextView) homeProcessingFrequency.getChildAt(0);
+        homeProcessingValue = (TextView) homeProcessingFrequency.getChildAt(1);
+        homeQueueAction = makeHomeActionRow(ctx);
+        homeQueueLabel = (TextView) homeQueueAction.getChildAt(0);
+        homeQueueValue = (TextView) homeQueueAction.getChildAt(1);
         queueRow.addView(homeProcessingFrequency);
         queueRow.addView(homeQueueAction);
         homeContainer.addView(queueRow, new LinearLayout.LayoutParams(-1, -2));
@@ -937,7 +945,7 @@ public class MenuController {
         } else if (selection == 1) {
             wifiStatus = "Connecting...";
             if (host.getConnectivityManager() != null) { host.getConnectivityManager().startHomeWifi(); host.onSetAutoPowerOffMode(false); }
-        } else if (selection == 3) {
+        } else if (selection == 2) {
             hotspotStatus = "Press ENTER";
             wifiStatus    = "Press ENTER";
             if (host.getConnectivityManager() != null) { host.getConnectivityManager().stopNetworking(); host.onSetAutoPowerOffMode(true); }
@@ -972,7 +980,7 @@ public class MenuController {
         // Subtitle
         if (selection == -1) UiTheme.selected(tvSubtitle, accent);
         else UiTheme.clear(tvSubtitle);
-        String[] subtitles = {"","RECIPES 1/5 - Identity & Base","RECIPES 2/5 - Color Engine","RECIPES 3/5 - Effects & Shading","RECIPES 4/5 - LUTs & Grain","RECIPES 5/5 - Analog Physics","SETTINGS 1/2 - App Preferences","SETTINGS 2/2 - Custom Buttons","NETWORK - Web Dashboard","SUPPORT - Resources"};
+        String[] subtitles = {"","RECIPES - Identity & Base","RECIPES - Color Engine","RECIPES - Effects & Shading","RECIPES - LUTs & Grain","RECIPES - Analog Physics","SETTINGS - App Preferences","SETTINGS - Custom Buttons","NETWORK - Web Dashboard","SUPPORT - Resources"};
         if (currentPage >= 1 && currentPage <= 9) {
             tvSubtitle.setText(subtitles[currentPage]);
         }
@@ -1091,11 +1099,10 @@ public class MenuController {
             setRow(3, "AEL Button",    customButtonLabel(rm.getPrefAel()));
             setRow(4, "FN Button",     customButtonLabel(rm.getPrefFn()));
         } else if (currentPage == 8) {
-            ic = 4;
+            ic = 3;
             setRow(0, "Camera Hotspot", hotspotStatus);
             setRow(1, "Home Wi-Fi",     wifiStatus);
-            setRow(2, "Browser Name",   HttpServer.friendlyUrl());
-            setRow(3, "Stop Networking","");
+            setRow(2, "Stop Networking","");
         }
 
         highlightRows(ic, accent);
@@ -1436,7 +1443,7 @@ public class MenuController {
         currentMainTab = tab;
         currentPage = tabToFirstPage(tab);
         headerSelection = activeHeaderSelection();
-        selection = tab == 3 ? -2 : 0;
+        selection = -2;
         render();
     }
 
@@ -1512,7 +1519,7 @@ public class MenuController {
         currentPage = pages[pageTabIndex];
         currentMainTab = pageToTab(currentPage);
         headerSelection = pageTabIndex + 1;
-        selection = currentPage == 9 ? -2 : 0;
+        selection = -2;
         isEditing = false;
         isNaming = false;
         render();
@@ -1531,7 +1538,7 @@ public class MenuController {
         idx = (idx + dir + pages.length) % pages.length;
         currentPage = pages[idx];
         headerSelection = idx + 1;
-        selection = currentPage == 9 ? -2 : 0;
+        selection = -2;
         isEditing = false;
         isNaming = false;
     }
@@ -1582,22 +1589,24 @@ public class MenuController {
             if (i < rowDividers.length && rowDividers[i] != null) rowDividers[i].setVisibility(View.GONE);
         }
 
-        styleHomeTile(0, "RECIPES\nLook + Grain", UiTheme.ACCENT_RECIPES, selection == 0);
-        styleHomeTile(1, "SETTINGS\nApp + Buttons", UiTheme.ACCENT_SETTINGS, selection == 1);
-        styleHomeTile(2, "NETWORK\nDashboard", UiTheme.ACCENT_NETWORK, selection == 2);
-        styleHomeTile(3, "SUPPORT\nResources", UiTheme.ACCENT_SUPPORT, selection == 3);
+        styleHomeTile(0, "RECIPES", UiTheme.ACCENT_RECIPES, selection == 0);
+        styleHomeTile(1, "SETTINGS", UiTheme.ACCENT_SETTINGS, selection == 1);
+        styleHomeTile(2, "NETWORK", UiTheme.ACCENT_NETWORK, selection == 2);
+        styleHomeTile(3, "SUPPORT", UiTheme.ACCENT_SUPPORT, selection == 3);
 
         int freq = host.getProcessingFrequency();
         String frequencyLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL" : (freq <= 1 ? "INSTANT" : (freq + " SHOTS"));
         int queueCount = host.getQueuedPhotoCount();
-        styleHomeAction(homeProcessingFrequency, "PROCESSING FREQUENCY\n" + frequencyLabel,
-                UiTheme.ACCENT_SETTINGS, selection == 4, true, isEditing && selection == 4);
+        styleHomeAction(homeProcessingFrequency, homeProcessingLabel, homeProcessingValue,
+                "Processing Frequency", frequencyLabel,
+                UiTheme.ACCENT_RECIPES, selection == 4, true, isEditing && selection == 4);
 
         String queueLabel = freq == PROCESSING_FREQUENCY_MANUAL ? "MANUAL QUEUE" : "PROCESS QUEUE";
         String queueValue = queueCount > 0 ? (queueCount + " WAITING") : "EMPTY";
         boolean queueActive = freq == PROCESSING_FREQUENCY_MANUAL || queueCount > 0;
-        styleHomeAction(homeQueueAction, queueLabel + "\n" + queueValue,
-                UiTheme.ACCENT_SETTINGS, selection == 5, queueActive, false);
+        styleHomeAction(homeQueueAction, homeQueueLabel, homeQueueValue,
+                queueLabel, queueValue,
+                UiTheme.ACCENT_RECIPES, selection == 5, queueActive, false);
         itemCount = 6;
     }
 
@@ -1609,14 +1618,19 @@ public class MenuController {
         tile.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
     }
 
-    private void styleHomeAction(TextView view, String text, int accent, boolean selected, boolean active, boolean editing) {
-        view.setText(text);
+    private void styleHomeAction(LinearLayout view, TextView label, TextView value, String labelText, String valueText,
+                                 int accent, boolean selected, boolean active, boolean editing) {
+        label.setText(labelText.toUpperCase());
+        value.setText(valueText.toUpperCase());
         UiTheme.actionPanel(view, accent, selected, active);
         if (!active) {
-            UiTheme.dimText(view);
+            UiTheme.dimText(label);
+            UiTheme.dimText(value);
         } else {
-            view.setTextColor(editing ? accent : UiTheme.TEXT);
-            view.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
+            label.setTextColor(selected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+            label.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
+            value.setTextColor(editing ? UiTheme.WARN : UiTheme.TEXT);
+            value.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
         }
     }
 
@@ -1628,7 +1642,7 @@ public class MenuController {
 
     private TextView makeHomeTile(Context ctx) {
         TextView tv = new TextView(ctx);
-        tv.setTextSize(18);
+        tv.setTextSize(20);
         tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setGravity(Gravity.CENTER);
         tv.setSingleLine(false);
@@ -1640,18 +1654,30 @@ public class MenuController {
         return tv;
     }
 
-    private TextView makeHomeAction(Context ctx) {
-        TextView tv = new TextView(ctx);
-        tv.setTextSize(15);
-        tv.setTypeface(Typeface.DEFAULT_BOLD);
-        tv.setGravity(Gravity.CENTER);
-        tv.setSingleLine(false);
-        tv.setPadding(8, 10, 8, 10);
+    private LinearLayout makeHomeActionRow(Context ctx) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(12, 9, 12, 9);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.setMargins(0, 0, 0, 6);
-        tv.setLayoutParams(lp);
-        UiTheme.softPanel(tv);
-        return tv;
+        row.setLayoutParams(lp);
+
+        TextView label = new TextView(ctx);
+        label.setTextSize(14);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setGravity(Gravity.CENTER_VERTICAL);
+        label.setSingleLine(true);
+        TextView value = new TextView(ctx);
+        value.setTextSize(14);
+        value.setTypeface(Typeface.DEFAULT_BOLD);
+        value.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+        value.setSingleLine(true);
+
+        row.addView(label, new LinearLayout.LayoutParams(0, -2, 1.0f));
+        row.addView(value, new LinearLayout.LayoutParams(0, -2, 0.72f));
+        UiTheme.softPanel(row);
+        return row;
     }
 
     private TextView makeTabHeader(Context ctx, String text) {

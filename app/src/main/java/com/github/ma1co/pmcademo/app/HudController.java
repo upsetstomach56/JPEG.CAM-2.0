@@ -57,6 +57,7 @@ public class HudController {
     private int      selection           = 0;
     private int      mode                = 0;
     private boolean  updatePending       = false;
+    private boolean  valueEditing        = false;
     private boolean  flashVisible        = true;
     private long     adjustingUntilMs    = 0L;
     private static final int FLASH_INTERVAL_MS = 420;
@@ -177,6 +178,7 @@ public class HudController {
     public int     getMode()     { return mode; }
     public int     getSelection(){ return selection; }
     public void    setSelection(int sel) { selection = sel; markNavigating(); }
+    public boolean isValueEditing() { return valueEditing; }
 
     /** Public immediate refresh (for use from MainActivity enter/exit logic). */
     public void update()         { refresh(); }
@@ -198,6 +200,7 @@ public class HudController {
         active    = true;
         mode      = hudMode;
         selection = defaultSel;
+        valueEditing = false;
         markNavigating();
         host.getMenuController().setConfirmingDelete(false);
         host.getMenuController().getContainer().setVisibility(View.GONE);
@@ -230,6 +233,7 @@ public class HudController {
     /** Close HUD cleanly, restoring menu behind it. */
     public void close() {
         active = false;
+        valueEditing = false;
         stopFlash();
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
@@ -240,6 +244,7 @@ public class HudController {
     /** Reset HUD state without triggering onHudClosed — used when menu opens over an active HUD. */
     public void reset() {
         active = false;
+        valueEditing = false;
         stopFlash();
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
@@ -269,70 +274,104 @@ public class HudController {
     // -----------------------------------------------------------------------
     public boolean handleUp() {
         if (!active) return false;
-        if (mode == 2) { handleWbAdjustment(0, 1); return true; }
-        selection--;
-        int minIdx = (mode == 0) ? -1 : 0;
-        if (selection < minIdx) {
-            if      (mode == 0)                         selection = 8;
-            else if (mode == 1)                         selection = 5;
-            else if (mode == 3)                         selection = 2;
-            else if (mode == 10)                        selection = 3;
-            else if (mode == 4 || mode == 6)            selection = 1;
-            else if (mode == 5) {
-                String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
-                selection = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
-            }
-            else                                        selection = 0;
+        if (valueEditing) {
+            if (mode == 2) handleWbAdjustment(0, 1);
+            else handleAdjustment(1);
+            return true;
         }
-        markNavigating();
-        refresh(); return true;
+        moveSelection(-1);
+        return true;
     }
 
     public boolean handleDown() {
         if (!active) return false;
-        if (mode == 2) { handleWbAdjustment(0, -1); return true; }
-        selection++;
-        int maxIdx = 0;
-        if      (mode == 0)                         maxIdx = 8;
-        else if (mode == 1)                         maxIdx = 5;
-        else if (mode == 3)                         maxIdx = 2;
-        else if (mode == 10)                        maxIdx = 3;
-        else if (mode == 4 || mode == 6)            maxIdx = 1;
-        else if (mode == 5) {
-            String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
-            maxIdx = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+        if (valueEditing) {
+            if (mode == 2) handleWbAdjustment(0, -1);
+            else handleAdjustment(-1);
+            return true;
         }
-        if (selection > maxIdx) selection = (mode == 0) ? -1 : 0;
-        markNavigating();
-        refresh(); return true;
+        moveSelection(1);
+        return true;
     }
 
     public boolean handleLeft() {
         if (!active) return false;
-        if (mode == 2) { handleWbAdjustment(-1, 0); return true; }
-        selection = Math.max(0, selection - 1); markNavigating(); refresh(); return true;
+        if (valueEditing) {
+            if (mode == 2) handleWbAdjustment(-1, 0);
+            else handleAdjustment(-1);
+            return true;
+        }
+        moveSelection(-1);
+        return true;
     }
 
     public boolean handleRight() {
         if (!active) return false;
-        if (mode == 2) { handleWbAdjustment(1, 0); return true; }
-        int maxSlots = 0;
-        if      (mode == 0)                                        maxSlots = 8;
-        else if (mode == 1)                                        maxSlots = 5;
-        else if (mode == 3)                                        maxSlots = 2;
-        else if (mode == 10)                                       maxSlots = 3;
-        else if (mode == 4 || mode == 6)                           maxSlots = 1;
-        else if (mode == 5) {
-            String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
-            maxSlots = (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+        if (valueEditing) {
+            if (mode == 2) handleWbAdjustment(1, 0);
+            else handleAdjustment(1);
+            return true;
         }
-        selection = Math.min(maxSlots, selection + 1); markNavigating(); refresh(); return true;
+        moveSelection(1);
+        return true;
     }
 
     public boolean handleDial(int dir) {
         if (!active) return false;
+        if (!valueEditing) {
+            moveSelection(dir > 0 ? 1 : -1);
+            return true;
+        }
         if (mode == 2) { handleWbAdjustment(dir, 0); return true; }
         handleAdjustment(dir); return true;
+    }
+
+    public boolean handleEnter() {
+        if (!active) return false;
+        if (selection == -2) {
+            close();
+            return true;
+        }
+        if (mode == 0 && selection == -1) return false;
+        if (mode == 10 && selection != 1) return false;
+        valueEditing = !valueEditing;
+        if (valueEditing) markEditing();
+        else {
+            markNavigating();
+            host.scheduleHardwareApply();
+        }
+        refresh();
+        return true;
+    }
+
+    private void moveSelection(int delta) {
+        int maxIdx = maxSelectionForMode();
+        if (mode == 0) {
+            selection += delta;
+            if (selection < -2) selection = maxIdx;
+            if (selection > maxIdx) selection = -2;
+        } else if (selection == -2) {
+            selection = delta > 0 ? 0 : maxIdx;
+        } else {
+            selection += delta;
+            if (selection < 0) selection = -2;
+            if (selection > maxIdx) selection = -2;
+        }
+        markNavigating();
+        refresh();
+    }
+
+    private int maxSelectionForMode() {
+        if      (mode == 0)                         return 8;
+        else if (mode == 1)                         return 5;
+        else if (mode == 3)                         return 2;
+        else if (mode == 10)                        return 3;
+        else if (mode == 4 || mode == 6)            return 1;
+        else if (mode == 5) {
+            String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
+            return (eff != null && eff.equals("toy-camera")) ? 1 : 0;
+        }
+        return 0;
     }
 
     /** Save the current advMatrix to SD card under the given name. */
@@ -447,6 +486,11 @@ public class HudController {
 
         // --- MODE 2: WB GRID ---
         if (mode == 2) {
+            if (tvTop != null) {
+                tvTop.setText("< BACK    WHITE BALANCE SHIFT");
+                tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
+                tvTop.setVisibility(View.VISIBLE);
+            }
             int ab = p.wbShift; int gm = p.wbShiftGM;
             FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) wbCursor.getLayoutParams();
             cp.setMargins(153 + ab * 20, 153 - gm * 20, 0, 0);
@@ -454,9 +498,15 @@ public class HudController {
             String abStr = ab==0?"0":(ab<0?"B"+Math.abs(ab):"A"+ab);
             String gmStr = gm==0?"0":(gm<0?"M"+Math.abs(gm):"G"+gm);
             wbValueText.setText(abStr + ", " + gmStr);
-            wbValueText.setTextColor(selectedHudColor());
-            wbCursor.setBackgroundColor(isAdjustingNow() ? UiTheme.WARN : UiTheme.ACCENT);
+            wbValueText.setTextColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
+            wbCursor.setBackgroundColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             return;
+        }
+
+        if (tvTop != null && mode != 0 && mode != 10) {
+            tvTop.setText("< BACK    " + hudTitle());
+            tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
+            tvTop.setVisibility(View.VISIBLE);
         }
 
         if (mode == 0) {
@@ -476,7 +526,10 @@ public class HudController {
                     StringBuilder sb=new StringBuilder("NAME: "); char[] buf=mc.getNameBuffer(); int pos=mc.getNameCursorPos();
                     for(int i=0;i<buf.length;i++) { if(i==pos) sb.append("[").append(buf[i]).append("]"); else sb.append(buf[i]); }
                     tvTop.setText(sb.toString()); tvTop.setTextColor(UiTheme.WARN);
-                } else { tvTop.setText("MATRIX: "+currentName); tvTop.setTextColor(selection==-1?selectedHudColor():UiTheme.TEXT); }
+                } else {
+                    tvTop.setText("< BACK    MATRIX: " + currentName);
+                    tvTop.setTextColor(selection == -2 || selection == -1 ? selectedNavigationColor() : UiTheme.TEXT);
+                }
                 tvTop.setVisibility(View.VISIBLE);
             }
             if (selection==-1) tip="FILE: "+matrixNote+"\n"+balText;
@@ -533,7 +586,7 @@ public class HudController {
                 if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(UiTheme.WARN);}
                 else{
                     tvTop.setText("< BACK    RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1));
-                    tvTop.setTextColor(UiTheme.TEXT);
+                    tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
                 }
                 tvTop.setVisibility(View.VISIBLE);
             }
@@ -542,7 +595,10 @@ public class HudController {
         // Render cells
         for(int i=0;i<9;i++){
             if(i<activeCells){cells[i].setVisibility(View.VISIBLE);cellLabels[i].setText(labels[i]);cellValues[i].setText(values[i]);
-                if(i==selection){int color=selectedHudColor();cellLabels[i].setTextColor(color);cellValues[i].setTextColor(color);}
+                if(i==selection){
+                    cellLabels[i].setTextColor(UiTheme.TEXT);
+                    cellValues[i].setTextColor(selectedValueColor());
+                }
                 else{cellLabels[i].setTextColor(UiTheme.TEXT_MUTED);cellValues[i].setTextColor(UiTheme.TEXT);}
             } else cells[i].setVisibility(View.GONE);
         }
@@ -553,21 +609,32 @@ public class HudController {
         return System.currentTimeMillis() < adjustingUntilMs;
     }
 
-    private int selectedHudColor() {
-        if (isAdjustingNow()) return UiTheme.WARN;
+    private int selectedNavigationColor() {
+        return flashVisible ? UiTheme.TEXT : Color.TRANSPARENT;
+    }
+
+    private int selectedValueColor() {
+        if (valueEditing || isAdjustingNow()) return UiTheme.WARN;
         return flashVisible ? UiTheme.TEXT : Color.TRANSPARENT;
     }
 
     private void markNavigating() {
+        valueEditing = false;
         adjustingUntilMs = 0L;
         flashVisible = true;
         if (active) startFlash();
     }
 
-    private void markAdjusting() {
-        adjustingUntilMs = System.currentTimeMillis() + ADJUST_CONFIRM_MS;
+    private void markEditing() {
+        adjustingUntilMs = 0L;
         flashVisible = true;
-        if (active) startFlash();
+        host.getUiHandler().removeCallbacks(flashRunnable);
+    }
+
+    private void markAdjusting() {
+        adjustingUntilMs = valueEditing ? 0L : System.currentTimeMillis() + ADJUST_CONFIRM_MS;
+        flashVisible = true;
+        if (active && !valueEditing) startFlash();
     }
 
     private void startFlash() {
@@ -579,5 +646,18 @@ public class HudController {
         host.getUiHandler().removeCallbacks(flashRunnable);
         flashVisible = true;
         adjustingUntilMs = 0L;
+        valueEditing = false;
+    }
+
+    private String hudTitle() {
+        if      (mode == 1)  return "COLOR DEPTH";
+        else if (mode == 3)  return "TONE & STYLE";
+        else if (mode == 4)  return "EDGE SHADING";
+        else if (mode == 5)  return "EFFECT TWEAKER";
+        else if (mode == 6)  return "FOUNDATION BASE";
+        else if (mode == 7)  return "WHITE BALANCE";
+        else if (mode == 8)  return "PICTURE EFFECT";
+        else if (mode == 9)  return "DYNAMIC RANGE";
+        return "SETTINGS";
     }
 }

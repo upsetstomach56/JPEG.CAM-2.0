@@ -21,7 +21,6 @@ public class ConnectivityManager {
     private android.net.ConnectivityManager connManager;
     private DirectManager directManager;
     private HttpServer server;
-    private MdnsResponder mdnsResponder;
 
     private BroadcastReceiver hardwareBootReceiver;
     private BroadcastReceiver directStateReceiver;
@@ -50,7 +49,6 @@ public class ConnectivityManager {
         this.connManager = (android.net.ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         this.server = new HttpServer(context);
-        this.mdnsResponder = new MdnsResponder(context);
         ensureServerRunning();
     }
 
@@ -73,8 +71,6 @@ public class ConnectivityManager {
 
     private String buildNetworkStatus(String ipAddress) {
         if (!ensureServerRunning()) return "Server Error: Restart App";
-        if (mdnsResponder == null) mdnsResponder = new MdnsResponder(context);
-        mdnsResponder.start(ipAddress);
         return HttpServer.urlFor(ipAddress);
     }
 
@@ -377,8 +373,6 @@ public class ConnectivityManager {
     }
 
     public void stopNetworking() {
-        if (mdnsResponder != null) mdnsResponder.stop();
-
         if (wifiPollHandler != null && wifiPollRunnable != null) {
             wifiPollHandler.removeCallbacks(wifiPollRunnable);
             wifiPollHandler = null;
