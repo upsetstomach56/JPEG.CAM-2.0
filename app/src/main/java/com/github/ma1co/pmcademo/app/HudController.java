@@ -1,7 +1,6 @@
 package com.github.ma1co.pmcademo.app;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.view.Gravity;
 import android.graphics.Typeface;
 import android.os.Handler;
@@ -78,6 +77,9 @@ public class HudController {
     private final LinearLayout[] cells  = new LinearLayout[9];
     private final TextView[]     cellLabels = new TextView[9];
     private final TextView[]     cellValues = new TextView[9];
+    private final LinearLayout   header;
+    private final TextView       headerBack;
+    private final TextView       headerTitle;
     private final TextView       tooltip;
     private final FrameLayout    wbGrid;
     private final View           wbCursor;
@@ -106,6 +108,31 @@ public class HudController {
         this.host = host;
         Typeface font = host.getDigitalFont();
 
+        header = new LinearLayout(ctx);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(10, 8, 10, 0);
+        header.setVisibility(View.GONE);
+
+        headerBack = new TextView(ctx);
+        headerBack.setText("BACK");
+        headerBack.setGravity(Gravity.CENTER);
+        headerBack.setPadding(14, 7, 14, 7);
+        UiTheme.applyStatusText(headerBack, 13, font);
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(96, -2);
+        backLp.setMargins(0, 0, 12, 0);
+        header.addView(headerBack, backLp);
+
+        headerTitle = new TextView(ctx);
+        headerTitle.setGravity(Gravity.CENTER_VERTICAL);
+        headerTitle.setPadding(8, 7, 8, 7);
+        UiTheme.applyStatusText(headerTitle, 15, font);
+        header.addView(headerTitle, new LinearLayout.LayoutParams(0, -2, 1.0f));
+
+        FrameLayout.LayoutParams headerLp = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        headerLp.setMargins(8, 8, 8, 0);
+        mainUIContainer.addView(header, headerLp);
+
         // 9-cell horizontal overlay (pinned to bottom)
         overlay = new LinearLayout(ctx);
         overlay.setOrientation(LinearLayout.HORIZONTAL);
@@ -116,13 +143,15 @@ public class HudController {
             cells[i] = new LinearLayout(ctx);
             cells[i].setOrientation(LinearLayout.VERTICAL);
             cells[i].setGravity(Gravity.CENTER);
-            cells[i].setPadding(3, 0, 3, 0);
+            cells[i].setPadding(6, 8, 6, 8);
             cellLabels[i] = new TextView(ctx); cellLabels[i].setTextColor(UiTheme.TEXT_MUTED); cellLabels[i].setTextSize(13);
             if (font != null) cellLabels[i].setTypeface(font); else cellLabels[i].setTypeface(Typeface.DEFAULT_BOLD);
             cellValues[i] = new TextView(ctx); cellValues[i].setTextColor(UiTheme.TEXT); cellValues[i].setTextSize(18);
             if (font != null) cellValues[i].setTypeface(font); else cellValues[i].setTypeface(Typeface.DEFAULT_BOLD);
             cells[i].addView(cellLabels[i]); cells[i].addView(cellValues[i]);
-            overlay.addView(cells[i], new LinearLayout.LayoutParams(0, -2, 1.0f));
+            LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+            cellLp.setMargins(3, 0, 3, 0);
+            overlay.addView(cells[i], cellLp);
         }
         FrameLayout.LayoutParams overlayLp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         overlayLp.setMargins(0, 0, 0, 25);
@@ -169,6 +198,7 @@ public class HudController {
     // -----------------------------------------------------------------------
     /** View accessors — used by MainActivity for visibility coordination. */
     public LinearLayout getOverlay()    { return overlay; }
+    public LinearLayout getHeader()     { return header; }
     public FrameLayout  getWbGrid()     { return wbGrid; }
     public View         getWbCursor()   { return wbCursor; }
     public TextView     getWbValueText(){ return wbValueText; }
@@ -204,6 +234,8 @@ public class HudController {
         markNavigating();
         host.getMenuController().setConfirmingDelete(false);
         host.getMenuController().getContainer().setVisibility(View.GONE);
+        if (host.getTvTopStatus() != null) host.getTvTopStatus().setVisibility(View.GONE);
+        header.setVisibility(View.VISIBLE);
 
         // NEW: Sync the vault cursor to your currently active recipe
         if (hudMode == 10) {
@@ -235,6 +267,7 @@ public class HudController {
         active = false;
         valueEditing = false;
         stopFlash();
+        header.setVisibility(View.GONE);
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -246,6 +279,7 @@ public class HudController {
         active = false;
         valueEditing = false;
         stopFlash();
+        header.setVisibility(View.GONE);
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -254,6 +288,7 @@ public class HudController {
     /** Hide all HUD overlays without triggering close callback (for updateMainHUD). */
     public void hideOverlays() {
         stopFlash();
+        header.setVisibility(View.GONE);
         overlay.setVisibility(View.GONE);
         if (tooltip != null) tooltip.setVisibility(View.GONE);
         wbGrid.setVisibility(View.GONE);
@@ -474,11 +509,23 @@ public class HudController {
     // -----------------------------------------------------------------------
     // Private — rendering
     // -----------------------------------------------------------------------
+    private void renderHeader(String title) {
+        header.setVisibility(View.VISIBLE);
+        UiTheme.pageTabPanel(headerBack, UiTheme.ACCENT, selection == -2, false);
+        headerBack.setTextColor(selection == -2 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        headerBack.setText("BACK");
+        headerTitle.setText(title != null ? title : "");
+        headerTitle.setTextColor(UiTheme.TEXT);
+        headerTitle.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+        UiTheme.clear(headerTitle);
+    }
+
     private void refresh() {
         if (!active) return; // Never render when HUD is not open
         RTLProfile p   = host.getRecipeManager().getCurrentProfile();
         MatrixManager mm = host.getMatrixManager();
         TextView tvTop = host.getTvTopStatus();
+        if (tvTop != null) tvTop.setVisibility(View.GONE);
         MenuController mc = host.getMenuController();
         String tip = "";
         int activeCells = 0;
@@ -486,6 +533,7 @@ public class HudController {
 
         // --- MODE 2: WB GRID ---
         if (mode == 2) {
+            renderHeader("WHITE BALANCE SHIFT");
             if (tvTop != null) {
                 tvTop.setText("< BACK    WHITE BALANCE SHIFT");
                 tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
@@ -500,9 +548,12 @@ public class HudController {
             wbValueText.setText(abStr + ", " + gmStr);
             wbValueText.setTextColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             wbCursor.setBackgroundColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
+            UiTheme.actionPanel(wbGrid, UiTheme.ACCENT, selection == 0, true);
+            if (tvTop != null) tvTop.setVisibility(View.GONE);
             return;
         }
 
+        if (mode != 0 && mode != 10) renderHeader(hudTitle());
         if (tvTop != null && mode != 0 && mode != 10) {
             tvTop.setText("< BACK    " + hudTitle());
             tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
@@ -520,6 +571,14 @@ public class HudController {
             if (mm != null && mm.getCount() > 0) {
                 if (isScrollingMatrices) { currentName=mm.getNames().get(activeMatrixIndex); matrixNote=mm.getNote(activeMatrixIndex);
                 } else { for(int f=0;f<mm.getCount();f++){ int[] ld=mm.getValues(f); boolean m=true; for(int i=0;i<9;i++) if(p.advMatrix[i]!=ld[i]){m=false;break;} if(m){activeMatrixIndex=f;currentName=mm.getNames().get(f);matrixNote=mm.getNote(f);break;} } }
+            }
+            if (mc.isNamingMode()) {
+                StringBuilder sb=new StringBuilder("NAME: "); char[] buf=mc.getNameBuffer(); int pos=mc.getNameCursorPos();
+                for(int i=0;i<buf.length;i++) { if(i==pos) sb.append("[").append(buf[i]).append("]"); else sb.append(buf[i]); }
+                renderHeader(sb.toString());
+                headerTitle.setTextColor(UiTheme.WARN);
+            } else {
+                renderHeader("MATRIX: " + currentName);
             }
             if (tvTop != null) {
                 if (mc.isNamingMode()) {
@@ -582,6 +641,13 @@ public class HudController {
                 else if(selection==2) tip="Press ENTER to wipe this Slot back to default settings.";
                 else if(selection==3) tip="Permanently delete the currently selected Vault recipe.";
             }
+            if(mc.isNamingMode()){
+                StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}
+                renderHeader(sb.toString());
+                headerTitle.setTextColor(UiTheme.WARN);
+            } else {
+                renderHeader("RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1));
+            }
             if(tvTop!=null){
                 if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(UiTheme.WARN);}
                 else{
@@ -595,14 +661,31 @@ public class HudController {
         // Render cells
         for(int i=0;i<9;i++){
             if(i<activeCells){cells[i].setVisibility(View.VISIBLE);cellLabels[i].setText(labels[i]);cellValues[i].setText(values[i]);
+                UiTheme.actionPanel(cells[i], UiTheme.ACCENT, i==selection, true);
                 if(i==selection){
                     cellLabels[i].setTextColor(UiTheme.TEXT);
                     cellValues[i].setTextColor(selectedValueColor());
                 }
                 else{cellLabels[i].setTextColor(UiTheme.TEXT_MUTED);cellValues[i].setTextColor(UiTheme.TEXT);}
-            } else cells[i].setVisibility(View.GONE);
+            } else {
+                cells[i].setVisibility(View.GONE);
+                UiTheme.clear(cells[i]);
+            }
         }
-        if(tooltip!=null){tooltip.setText(tip);tooltip.setVisibility(tip.isEmpty()?View.GONE:View.VISIBLE);}
+        if(tooltip!=null){
+            tooltip.setText(tip);
+            tooltip.setVisibility(tip.isEmpty()?View.GONE:View.VISIBLE);
+            if(!tip.isEmpty()){
+                if(selection == -1){
+                    UiTheme.actionPanel(tooltip, UiTheme.ACCENT, true, true);
+                    tooltip.setTextColor(UiTheme.TEXT);
+                } else {
+                    UiTheme.softPanel(tooltip);
+                    tooltip.setTextColor(UiTheme.TEXT_MUTED);
+                }
+            }
+        }
+        if (tvTop != null) tvTop.setVisibility(View.GONE);
     }
 
     private boolean isAdjustingNow() {
@@ -610,12 +693,12 @@ public class HudController {
     }
 
     private int selectedNavigationColor() {
-        return flashVisible ? UiTheme.TEXT : Color.TRANSPARENT;
+        return UiTheme.TEXT;
     }
 
     private int selectedValueColor() {
         if (valueEditing || isAdjustingNow()) return UiTheme.WARN;
-        return flashVisible ? UiTheme.TEXT : Color.TRANSPARENT;
+        return UiTheme.TEXT;
     }
 
     private void markNavigating() {

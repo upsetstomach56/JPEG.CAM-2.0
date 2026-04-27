@@ -72,6 +72,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private ProcessingQueueManager.Entry activeQueueEntry;
     private boolean processingQueueActive = false;
     private boolean manualQueueProcessRequested = false;
+    private int activeQueueMode = ProcessingQueueManager.MODE_AUTO;
     private int processingQueueTotal = 0;
     private int processingQueueCompleted = 0;
     private long processingQueueStartedMs = 0;
@@ -162,6 +163,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private Handler uiHandler = new Handler();
     private boolean liveHudFlashVisible = true;
     private boolean liveHudFlashRunning = false;
+    private boolean liveUiSuppressed = false;
+    private boolean batteryReceiverRegistered = false;
     private final Runnable liveHudFlashRunnable = new Runnable() {
         @Override public void run() {
             if (shouldPulseLiveHudSelection()) {
@@ -262,7 +265,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                             afOverlay.stopFocus(cameraManager.getCamera());
                             requestHudUpdate();
                         }
-                        if (tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
+                        if (!liveUiSuppressed && tvTopStatus != null && tvTopStatus.getVisibility() != View.VISIBLE) {
                             if (!calibController.isActive()) {
                                 setHUDVisibility(View.VISIBLE);
                             }
@@ -382,12 +385,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (prefShowDiptych && diptychManager != null) diptychManager.setEnabled(true);
         setupEngines();
         registerReceiver(sonyCameraReceiver, new IntentFilter("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED"));
+        registerBatteryReceiver();
+    }
+
+    private void registerBatteryReceiver() {
+        if (batteryReceiverRegistered) return;
+        try {
+            registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            batteryReceiverRegistered = true;
+        } catch (Exception e) {
+            batteryReceiverRegistered = false;
+        }
     }
 
     private void setupEngines() {
         mProcessor = new ImageProcessor(this, new ImageProcessor.ProcessorCallback() {
             @Override public void onPreloadStarted() { isReady = false; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); } }); }
-            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(false, pendingQueueProcessTargetCount); else maybeAutoProcessQueuedPhotos(); } }); }
+            @Override public void onPreloadFinished(boolean success) { isReady = true; runOnUiThread(new Runnable() { public void run() { updateMainHUD(); if (manualQueueProcessRequested) startQueuedProcessing(true, pendingQueueProcessTargetCount); else maybeAutoProcessQueuedPhotos(); } }); }
             @Override public void onProcessStarted() { runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setText(getProcessingStatusText()); tvTopStatus.setTextColor(UiTheme.WARN); } } }); }
         @Override public void onProcessFinished(String res) {
             if (processingQueueActive) {
@@ -452,6 +466,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 && (diptychManager == null || !diptychManager.isEnabled());
     }
 
+    private int currentQueueMode() {
+        return processingFrequency == PROCESSING_FREQUENCY_MANUAL
+                ? ProcessingQueueManager.MODE_MANUAL
+                : ProcessingQueueManager.MODE_AUTO;
+    }
+
     private ProcessingQueueManager.Entry createCurrentQueueEntry() {
         ProcessingQueueManager.Entry entry = new ProcessingQueueManager.Entry();
         entry.profile = ProcessingQueueManager.copyProfile(recipeManager.getCurrentProfile());
@@ -460,6 +480,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         entry.applyCrop = prefShowCinemaMattes;
         entry.isDiptych = false;
         entry.outDirPath = Filepaths.getGradedDir().getAbsolutePath();
+        entry.queueMode = currentQueueMode();
 
         int lutIndex = entry.profile != null ? entry.profile.lutIndex : 0;
         ArrayList<String> paths = recipeManager.getRecipePaths();
@@ -521,7 +542,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void maybeAutoProcessQueuedPhotos() {
         if (processingFrequency > 1 && processingQueueManager != null &&
-                processingQueueManager.getCount() >= processingFrequency && !isProcessing && isReady) {
+                processingQueueManager.getCountForMode(ProcessingQueueManager.MODE_AUTO) >= processingFrequency && !isProcessing && isReady) {
             startQueuedProcessing(false);
         }
     }
@@ -531,8 +552,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     }
 
     private void startQueuedProcessing(boolean manual, int targetCount) {
+        int requestedMode = manual ? ProcessingQueueManager.MODE_MANUAL : ProcessingQueueManager.MODE_AUTO;
         if (manual) manualQueueProcessRequested = true;
-        if (mProcessor == null || processingQueueManager == null || processingQueueManager.getCount() == 0) {
+        if (mProcessor == null || processingQueueManager == null || processingQueueManager.getCountForMode(requestedMode) == 0) {
             manualQueueProcessRequested = false;
             pendingQueueProcessTargetCount = 0;
             return;
@@ -543,7 +565,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (targetCount <= 0) targetCount = pendingQueueProcessTargetCount;
         pendingQueueProcessTargetCount = 0;
         processingQueueActive = true;
-        int queuedCount = processingQueueManager.getCount();
+        activeQueueMode = requestedMode;
+        int queuedCount = processingQueueManager.getCountForMode(activeQueueMode);
         processingQueueTotal = (targetCount > 0 && targetCount < queuedCount) ? targetCount : queuedCount;
         processingQueueCompleted = 0;
         processingQueueStartedMs = System.currentTimeMillis();
@@ -554,7 +577,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private void processNextQueuedPhoto() {
         if (processingQueueManager == null) return;
-        activeQueueEntry = processingQueueManager.peek();
+        activeQueueEntry = processingQueueManager.peekForMode(activeQueueMode);
         if (activeQueueEntry == null) {
             finishQueuedProcessing();
             return;
@@ -578,12 +601,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     private void handleQueuedProcessFinished(String result) {
         boolean success = result != null && result.toUpperCase().indexOf("SAVED") >= 0;
         if (success && processingQueueManager != null) {
-            processingQueueManager.removeFirst();
+            processingQueueManager.removeFirstForMode(activeQueueMode);
             processingQueueCompleted++;
             if (processingQueueCompleted > 0 && processingQueueStartedMs > 0) {
                 processingQueueAverageMs = (System.currentTimeMillis() - processingQueueStartedMs) / processingQueueCompleted;
             }
-            if (processingQueueCompleted < processingQueueTotal && processingQueueManager.getCount() > 0) {
+            if (processingQueueCompleted < processingQueueTotal && processingQueueManager.getCountForMode(activeQueueMode) > 0) {
                 processNextQueuedPhoto();
                 return;
             }
@@ -596,6 +619,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             processingQueueStartedMs = 0;
             processingQueueAverageMs = 0;
             pendingQueueProcessTargetCount = 0;
+            activeQueueMode = ProcessingQueueManager.MODE_AUTO;
             isProcessing = false;
             runOnUiThread(new Runnable() { public void run() { if (tvTopStatus != null) { tvTopStatus.setTextColor(UiTheme.TEXT); } updateMainHUD(); } });
         }
@@ -609,6 +633,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         processingQueueStartedMs = 0;
         processingQueueAverageMs = 0;
         pendingQueueProcessTargetCount = 0;
+        activeQueueMode = ProcessingQueueManager.MODE_AUTO;
         isProcessing = false;
         triggerLutPreload();
         applyHardwareRecipe();
@@ -786,7 +811,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // mDialMode = DIAL_MODE_RTL; <-- DELETED. Cursor memory is now permanent!
 
-        if (displayState == 0 && !menuController.isOpen()) setHUDVisibility(View.GONE);
+        if (displayState == 0 && !menuController.isOpen()) setLiveUiSuppressed(true);
         // Diptych mode: shift AF bracket to the active (open) side before focusing
         if (afOverlay != null && diptychManager != null && diptychManager.isEnabled()) {
             if (diptychManager.getState() == DiptychManager.STATE_NEED_SECOND) {
@@ -803,15 +828,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (cameraManager != null && cameraManager.getCamera() != null && !cachedIsManualFocus) {
             if (afOverlay != null) afOverlay.startFocus(cameraManager.getCamera());
         }
+        if (displayState == 0 && !menuController.isOpen()) hideLiveViewOverlays();
     }
 
     @Override
     public void onShutterHalfReleased() {
-        if (displayState == 0 && !menuController.isOpen() && !playbackController.isActive()) setHUDVisibility(View.VISIBLE);
         if (afOverlay != null && cameraManager != null && cameraManager.getCamera() != null) {
             afOverlay.stopFocus(cameraManager.getCamera());
             afOverlay.setDiptychCenterX(-1);
         }
+        if (displayState == 0 && !menuController.isOpen() && !playbackController.isActive()) setLiveUiSuppressed(false);
         armFileScanner();
     }
 
@@ -1587,6 +1613,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         tvBattery.setTextSize(14);
         tvBattery.setTypeface(Typeface.DEFAULT_BOLD);
         tvBattery.setPadding(0, 0, 5, 0);
+        tvBattery.setText("--%");
         batteryArea.addView(tvBattery); // <--- THIS line was missing!
 
         batteryIcon = new BatteryView(this);
@@ -1789,6 +1816,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     protected void onResume() {
         super.onResume();
         // REMOVED: cameraManager.start() which was causing the build error!
+        registerBatteryReceiver();
 
         // --- PREVENT PASM DIAL CRASH ON A7II ---
         // Register a receiver to swallow Sony's internal hardware state broadcasts
@@ -1867,8 +1895,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         if (cameraManager != null) cameraManager.close();
         try {
             unregisterReceiver(sonyCameraReceiver);
-            unregisterReceiver(batteryReceiver);
         } catch (Exception e) {}
+        if (batteryReceiverRegistered) {
+            try {
+                unregisterReceiver(batteryReceiver);
+            } catch (Exception e) {}
+            batteryReceiverRegistered = false;
+        }
 
         if (connectivityManager != null) connectivityManager.stopNetworking();
         if (recipeManager != null) recipeManager.savePreferences();
@@ -1904,10 +1937,27 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    private void hideLiveViewOverlays() {
+        setHUDVisibility(View.GONE);
+        if (gridLines != null) gridLines.setVisibility(View.GONE);
+        if (cinemaMattes != null) cinemaMattes.setVisibility(View.GONE);
+        if (focusMeter != null) focusMeter.setVisibility(View.GONE);
+        if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
+        if (afOverlay != null) afOverlay.setVisibility(View.GONE);
+        if (hudController != null) hudController.hideOverlays();
+    }
+
+    private void setLiveUiSuppressed(boolean suppressed) {
+        liveUiSuppressed = suppressed;
+        if (suppressed) hideLiveViewOverlays();
+        else updateMainHUD();
+    }
+
     private boolean shouldPulseLiveHudSelection() {
         return isDialLocked
                 && displayState == 0
                 && !isProcessing
+                && !liveUiSuppressed
                 && menuController != null && !menuController.isOpen()
                 && hudController != null && !hudController.isActive()
                 && playbackController != null && !playbackController.isActive();
@@ -1932,11 +1982,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         if (cameraManager == null || cameraManager.getCamera() == null) return;
 
+        if (liveUiSuppressed && !isProcessing) {
+            hideLiveViewOverlays();
+            return;
+        }
+
         // --- 1. CLEAN DISPLAY CHECK ---
         if (hudController.isActive()) {
-            // Hide the bottom bars and icons, but keep the Top Status bar for Preset names
+            // Hide the live-view bars and let HudController own its own header.
             setHUDVisibility(View.GONE);
-            if (tvTopStatus != null) tvTopStatus.setVisibility(View.VISIBLE);
+            if (tvTopStatus != null) tvTopStatus.setVisibility(View.GONE);
 
             if (focusMeter != null) focusMeter.setVisibility(View.GONE);
             if (tvCalibrationPrompt != null) tvCalibrationPrompt.setVisibility(View.GONE);
@@ -1970,7 +2025,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             } else {
                 int slotNum = recipeManager.getCurrentSlot() + 1;
                 String readyText = isReady ? "READY" : "LOADING..";
-                int queued = processingQueueManager != null ? processingQueueManager.getCount() : 0;
+                int queued = processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0;
                 if (processingFrequency == PROCESSING_FREQUENCY_MANUAL) {
                     readyText += " | MANUAL " + queued + " QUEUED";
                 } else if (processingFrequency > 1) {
@@ -2277,14 +2332,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override public int     getPrefJpegQuality() { return prefJpegQuality; }
     @Override public boolean isPrefDiptych()      { return diptychManager != null && diptychManager.isEnabled(); } // <--- ADDED
     @Override public int     getProcessingFrequency() { return processingFrequency; }
-    @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCount() : 0; }
+    @Override public int     getQueuedPhotoCount() { return processingQueueManager != null ? processingQueueManager.getCountForMode(currentQueueMode()) : 0; }
     @Override public List<ProcessingQueueManager.Entry> getQueuedPhotoEntries() {
         if (processingQueueManager == null) return new ArrayList<ProcessingQueueManager.Entry>();
-        return processingQueueManager.getEntries();
+        return processingQueueManager.getEntriesForMode(currentQueueMode());
     }
     @Override public ProcessingQueueManager.Entry getQueuedPhotoEntry(int index) {
         if (processingQueueManager == null) return null;
-        return processingQueueManager.getEntry(index);
+        return processingQueueManager.getEntryForMode(index, currentQueueMode());
     }
     @Override public String getProcessingEstimateText(int photoCount) {
         return formatProcessingEstimateForCount(photoCount);
@@ -2293,22 +2348,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
     @Override public void    setPrefCinemaMattes(boolean v) { prefShowCinemaMattes = v; }
     @Override public void    setPrefGridLines(boolean v)    { prefShowGridLines    = v; }
     @Override public void    setPrefJpegQuality(int v)      { prefJpegQuality      = v; }
-    @Override public void    setProcessingFrequency(int v)   { processingFrequency = normalizeProcessingFrequency(v); saveAppPreferences(); updateMainHUD(); maybeAutoProcessQueuedPhotos(); }
+    @Override public void    setProcessingFrequency(int v)   { processingFrequency = normalizeProcessingFrequency(v); saveAppPreferences(); updateMainHUD(); }
     @Override public void    setPrefDiptych(boolean v)      {
         if (diptychManager != null) diptychManager.setEnabled(v);
         updateMainHUD();
     }
     @Override public void forceProcessQueuedPhotos() {
-        startQueuedProcessing(true);
+        startQueuedProcessing(processingFrequency == PROCESSING_FREQUENCY_MANUAL);
     }
     @Override public void processSelectedQueuedPhotos(boolean[] selected) {
         if (processingQueueManager == null) return;
-        int selectedCount = processingQueueManager.moveSelectedToFront(selected);
+        int selectedCount = processingQueueManager.moveSelectedToFrontForMode(selected, ProcessingQueueManager.MODE_MANUAL);
         updateMainHUD();
         if (selectedCount > 0) startQueuedProcessing(true, selectedCount);
     }
     @Override public void clearQueuedPhotos() {
-        if (processingQueueManager != null) processingQueueManager.clear();
+        if (processingQueueManager != null) processingQueueManager.clearForMode(currentQueueMode());
         updateMainHUD();
     }
 

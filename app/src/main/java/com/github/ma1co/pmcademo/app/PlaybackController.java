@@ -229,31 +229,45 @@ public class PlaybackController {
             showImage(index + (direction >= 0 ? 1 : -1));
         } else {
             if (backSelected) {
-                if (direction == 2) backSelected = false;
-                renderGrid();
-                return;
-            }
-
-            if (direction == -1 || direction == 1) {
-                moveGridPage(direction);
+                if (direction == 2 || direction == 1 || direction == -1) backSelected = false;
                 renderGrid();
                 return;
             }
 
             int pageStart = currentPage() * GRID_PAGE_SIZE;
             int local = index - pageStart;
-            if (direction == -2 && local < 2) {
-                backSelected = true;
-                renderGrid();
-                return;
+            int targetLocal = local;
+
+            if (direction == -2) {
+                if (local < 2) {
+                    backSelected = true;
+                    renderGrid();
+                    return;
+                }
+                targetLocal = local - 2;
+            } else if (direction == 2) {
+                targetLocal = local + 2;
+            } else if (direction == -1) {
+                if ((local % 2) == 1) {
+                    targetLocal = local - 1;
+                } else {
+                    moveGridPage(-1);
+                    renderGrid();
+                    return;
+                }
+            } else if (direction == 1) {
+                if ((local % 2) == 0 && local + 1 < GRID_PAGE_SIZE && pageStart + local + 1 < files.size()) {
+                    targetLocal = local + 1;
+                } else {
+                    moveGridPage(1);
+                    renderGrid();
+                    return;
+                }
             }
 
-            if (direction == 2 || direction == -2) {
-                int targetLocal = local + (direction > 0 ? 2 : -2);
-                int targetIndex = pageStart + targetLocal;
-                if (targetLocal >= 0 && targetLocal < GRID_PAGE_SIZE && targetIndex < files.size()) {
-                    index = targetIndex;
-                }
+            int targetIndex = pageStart + targetLocal;
+            if (targetLocal >= 0 && targetLocal < GRID_PAGE_SIZE && targetIndex < files.size()) {
+                index = targetIndex;
             }
             renderGrid();
         }

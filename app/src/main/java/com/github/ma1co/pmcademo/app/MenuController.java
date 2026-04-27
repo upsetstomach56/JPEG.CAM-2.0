@@ -299,9 +299,9 @@ public class MenuController {
         // Detail header row: Back plus category page tabs
         tabRow = new LinearLayout(ctx);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
-        tabRow.setGravity(Gravity.CENTER);
+        tabRow.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         tabRow.setPadding(0, 0, 0, 12);
-        tvBack        = makeTabHeader(ctx, "< BACK");
+        tvBack        = makeTabHeader(ctx, "BACK");
         tvTabRTL      = makeTabHeader(ctx, "BASE");
         tvTabSettings = makeTabHeader(ctx, "COLOR");
         tvTabNetwork  = makeTabHeader(ctx, "FX");
@@ -1153,9 +1153,9 @@ public class MenuController {
         RTLProfile p = host.getRecipeManager().getCurrentProfile();
         for (int i = 0; i < ic; i++) {
             boolean active = manualQueueOpen || isRowActive(p, i);
-            String plain = labels[i].getText().toString().replace("> ", "").replace("  ", "");
+            String plain = stripRowPrefix(labels[i].getText().toString());
             if (i == selection) {
-                labels[i].setText("> " + plain);
+                labels[i].setText(plain);
                 if (!active) {
                     UiTheme.clear(rows[i]);
                     UiTheme.dimText(labels[i]);
@@ -1171,7 +1171,7 @@ public class MenuController {
                     UiTheme.selectedText(values[i]);
                 }
             } else {
-                labels[i].setText("  " + plain);
+                labels[i].setText(plain);
                 UiTheme.clear(rows[i]);
                 if (active) {
                     labels[i].setTextColor(UiTheme.TEXT);
@@ -1182,6 +1182,12 @@ public class MenuController {
                 }
             }
         }
+    }
+
+    private String stripRowPrefix(String text) {
+        if (text == null) return "";
+        if (text.startsWith("> ") || text.startsWith("  ")) return text.substring(2);
+        return text;
     }
 
     private void setRow(int i, String label, String value) {
@@ -1547,6 +1553,8 @@ public class MenuController {
         String[] labels = categoryPageLabels(currentMainTab);
         int[] pages = categoryPages(currentMainTab);
 
+        tabRow.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        tvBack.setText("BACK");
         UiTheme.pageTabPanel(tvBack, accent, selection == -2 && headerSelection == 0, false);
         tvBack.setTextColor(selection == -2 && headerSelection == 0 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
 
@@ -1566,6 +1574,8 @@ public class MenuController {
     }
 
     private void configureBackOnlyHeader(int accent) {
+        tabRow.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        tvBack.setText("BACK");
         UiTheme.pageTabPanel(tvBack, accent, selection == -2, false);
         tvBack.setTextColor(selection == -2 ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
         tvBack.setVisibility(View.VISIBLE);

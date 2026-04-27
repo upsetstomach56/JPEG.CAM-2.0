@@ -12,6 +12,8 @@ import java.util.ArrayList;
 
 public class ProcessingQueueManager {
     private static final String TAG = "JPEG.CAM_QUEUE";
+    public static final int MODE_AUTO = 0;
+    public static final int MODE_MANUAL = -1;
     private final File queueFile;
     private final ArrayList<Entry> entries = new ArrayList<Entry>();
 
@@ -28,6 +30,7 @@ public class ProcessingQueueManager {
         public long detectedMs;
         public long stableMs;
         public int scannerAttempts;
+        public int queueMode = MODE_MANUAL;
         public RTLProfile profile;
     }
 
@@ -40,9 +43,25 @@ public class ProcessingQueueManager {
         return entries.size();
     }
 
+    public synchronized int getCountForMode(int mode) {
+        int count = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            if (entryMatchesMode(entries.get(i), mode)) count++;
+        }
+        return count;
+    }
+
     public synchronized Entry peek() {
         if (entries.isEmpty()) return null;
         return entries.get(0);
+    }
+
+    public synchronized Entry peekForMode(int mode) {
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (entryMatchesMode(entry, mode)) return entry;
+        }
+        return null;
     }
 
     public synchronized ArrayList<Entry> getEntries() {
@@ -53,9 +72,30 @@ public class ProcessingQueueManager {
         return copy;
     }
 
+    public synchronized ArrayList<Entry> getEntriesForMode(int mode) {
+        ArrayList<Entry> copy = new ArrayList<Entry>();
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (entryMatchesMode(entry, mode)) copy.add(copyEntry(entry));
+        }
+        return copy;
+    }
+
     public synchronized Entry getEntry(int index) {
         if (index < 0 || index >= entries.size()) return null;
         return copyEntry(entries.get(index));
+    }
+
+    public synchronized Entry getEntryForMode(int index, int mode) {
+        if (index < 0) return null;
+        int visible = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (!entryMatchesMode(entry, mode)) continue;
+            if (visible == index) return copyEntry(entry);
+            visible++;
+        }
+        return null;
     }
 
     public synchronized void add(Entry entry) {
@@ -71,8 +111,25 @@ public class ProcessingQueueManager {
         }
     }
 
+    public synchronized void removeFirstForMode(int mode) {
+        for (int i = 0; i < entries.size(); i++) {
+            if (entryMatchesMode(entries.get(i), mode)) {
+                entries.remove(i);
+                save();
+                return;
+            }
+        }
+    }
+
     public synchronized void clear() {
         entries.clear();
+        save();
+    }
+
+    public synchronized void clearForMode(int mode) {
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            if (entryMatchesMode(entries.get(i), mode)) entries.remove(i);
+        }
         save();
     }
 
@@ -93,6 +150,37 @@ public class ProcessingQueueManager {
         entries.addAll(remainingEntries);
         save();
         return selectedEntries.size();
+    }
+
+    public synchronized int moveSelectedToFrontForMode(boolean[] selected, int mode) {
+        if (selected == null || selected.length == 0 || entries.isEmpty()) return 0;
+
+        ArrayList<Entry> selectedEntries = new ArrayList<Entry>();
+        ArrayList<Entry> remainingEntries = new ArrayList<Entry>();
+        int visibleIndex = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            Entry copy = copyEntry(entries.get(i));
+            if (entryMatchesMode(copy, mode)) {
+                if (visibleIndex < selected.length && selected[visibleIndex]) selectedEntries.add(copy);
+                else remainingEntries.add(copy);
+                visibleIndex++;
+            } else {
+                remainingEntries.add(copy);
+            }
+        }
+
+        if (selectedEntries.isEmpty()) return 0;
+        entries.clear();
+        entries.addAll(selectedEntries);
+        entries.addAll(remainingEntries);
+        save();
+        return selectedEntries.size();
+    }
+
+    private boolean entryMatchesMode(Entry entry, int mode) {
+        if (entry == null) return false;
+        if (mode == MODE_MANUAL) return entry.queueMode == MODE_MANUAL;
+        return entry.queueMode != MODE_MANUAL;
     }
 
     private void load() {
@@ -167,6 +255,7 @@ public class ProcessingQueueManager {
         obj.put("detectedMs", entry.detectedMs);
         obj.put("stableMs", entry.stableMs);
         obj.put("scannerAttempts", entry.scannerAttempts);
+        obj.put("queueMode", entry.queueMode);
         obj.put("profile", profileToJson(entry.profile));
         return obj;
     }
@@ -186,6 +275,7 @@ public class ProcessingQueueManager {
         entry.detectedMs = obj.optLong("detectedMs", 0);
         entry.stableMs = obj.optLong("stableMs", 0);
         entry.scannerAttempts = obj.optInt("scannerAttempts", 0);
+        entry.queueMode = obj.has("queueMode") ? obj.optInt("queueMode", MODE_MANUAL) : MODE_MANUAL;
         entry.profile = profileFromJson(obj.optJSONObject("profile"));
         return entry;
     }
@@ -298,6 +388,7 @@ public class ProcessingQueueManager {
         copy.detectedMs = source.detectedMs;
         copy.stableMs = source.stableMs;
         copy.scannerAttempts = source.scannerAttempts;
+        copy.queueMode = source.queueMode;
         copy.profile = copyProfile(source.profile);
         return copy;
     }
