@@ -447,12 +447,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         mScanner = new SonyFileScanner(this, new SonyFileScanner.ScannerCallback() {
             @Override
             public boolean isReadyToProcess() {
-                RTLProfile p = (pendingShotSnapshot != null && pendingShotSnapshot.profile != null)
-                        ? pendingShotSnapshot.profile
-                        : recipeManager.getCurrentProfile();
-                boolean readyForQueue = shouldQueuePhotos();
-                return (isReady || readyForQueue) && !isProcessing && !calibController.isCalibrating() &&
-                       ((diptychManager != null && diptychManager.isEnabled()) || hasSoftwareEffects(p));
+                return !isProcessing && !calibController.isCalibrating();
             }
             @Override
             public void onNewPhotoDetected(final String path, final long scannerStartedMs, final long detectedMs, final int attempts) {
