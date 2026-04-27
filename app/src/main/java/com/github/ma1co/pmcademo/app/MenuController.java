@@ -1651,15 +1651,22 @@ public class MenuController {
                                  int accent, boolean selected, boolean active, boolean editing) {
         label.setText(labelText.toUpperCase());
         value.setText(valueText.toUpperCase());
-        UiTheme.actionPanel(view, accent, selected, active);
-        if (!active) {
+        if (selected) {
+            UiTheme.selected(view, accent);
+            label.setTextColor(UiTheme.TEXT);
+            label.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+            value.setTextColor(editing ? UiTheme.WARN : UiTheme.TEXT);
+            value.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
+        } else if (!active) {
+            UiTheme.actionPanel(view, accent, false, false);
             UiTheme.dimText(label);
             UiTheme.dimText(value);
         } else {
-            label.setTextColor(selected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
-            label.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
-            value.setTextColor(editing ? UiTheme.WARN : UiTheme.TEXT);
-            value.setShadowLayer(selected ? 2 : 0, 0, 0, UiTheme.SHADOW);
+            UiTheme.actionPanel(view, accent, false, true);
+            label.setTextColor(UiTheme.TEXT_MUTED);
+            label.setShadowLayer(0, 0, 0, UiTheme.SHADOW);
+            value.setTextColor(UiTheme.TEXT);
+            value.setShadowLayer(0, 0, 0, UiTheme.SHADOW);
         }
     }
 

@@ -770,6 +770,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
     }
 
+    private boolean isFullShutterScanCode(int sc) {
+        return sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2;
+    }
+
     private boolean shouldBlockShutterInput() {
         return isProcessing || captureWritePending;
     }
@@ -929,6 +933,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     if (hudController.isActive()) {
         if (hudController.getSelection() == -2) {
+            if (hudController.getMode() == 10 && menuController.isConfirmingDelete()) {
+                menuController.setConfirmingDelete(false);
+                hudController.setSelection(hudController.getRecipeBrowserSelectedVaultIndex());
+                hudController.update();
+                return;
+            }
+            if (hudController.getMode() == 10 && hudController.isRecipeLoadBrowser()) {
+                hudController.closeRecipeLoadBrowser();
+                return;
+            }
             menuController.setNamingMode(false);
             menuController.setConfirmingDelete(false);
             hudController.close();
@@ -940,6 +954,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             if (menuController.isNamingMode()) {
                 menuController.setNamingMode(false);
                 String finalName = new String(menuController.getNameBuffer()).trim();
+                if (finalName.isEmpty()) finalName = "CUSTOM";
                 recipeManager.saveSlotToVault(finalName);
                 hudController.refreshVaultItems();
                 for (int i = 0; i < hudController.getVaultItems().size(); i++) {
@@ -948,14 +963,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 hudController.update(); return;
             } else if (menuController.isConfirmingDelete()) {
                 if (hudController.getSelection() == 0) {
-                    recipeManager.deleteVaultItem(hudController.getVaultIndex()); hudController.setVaultIndex(0);
-                    hudController.refreshVaultItems();
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(0).filename.equals("NONE")) recipeManager.previewVaultToSlot(hudController.getVaultItems().get(0).filename);
-                    else recipeManager.resetCurrentSlot();
-                    triggerLutPreload(); applyHardwareRecipe();
-                    menuController.setConfirmingDelete(false); hudController.setSelection(1); hudController.update(); return;
+                    int deleteIndex = hudController.getRecipeBrowserSelectedVaultIndex();
+                    if (deleteIndex >= 0) recipeManager.deleteVaultItem(deleteIndex);
+                    menuController.setConfirmingDelete(false);
+                    hudController.refreshRecipeBrowserAfterDelete();
+                    return;
                 } else if (hudController.getSelection() == 1) {
-                    menuController.setConfirmingDelete(false); hudController.setSelection(0); hudController.update(); return;
+                    menuController.setConfirmingDelete(false);
+                    hudController.setSelection(hudController.getRecipeBrowserSelectedVaultIndex());
+                    hudController.update();
+                    return;
+                }
+            } else if (hudController.isRecipeLoadBrowser()) {
+                if (hudController.isRecipeBrowserDeleteAction()) {
+                    if (hudController.getRecipeBrowserSelectedVaultIndex() >= 0) {
+                        menuController.setConfirmingDelete(true);
+                        hudController.beginRecipeDeleteConfirm();
+                    }
+                    return;
+                }
+                int loadIndex = hudController.getRecipeBrowserSelectedVaultIndex();
+                if (loadIndex >= 0 && loadIndex < hudController.getVaultItems().size()) {
+                    RecipeManager.VaultItem item = hudController.getVaultItems().get(loadIndex);
+                    if (item != null && item.filename != null && !item.filename.equals("NONE")) {
+                        recipeManager.previewVaultToSlot(item.filename);
+                        triggerLutPreload();
+                        applyHardwareRecipe();
+                        recipeManager.savePreferences();
+                        hudController.close();
+                    }
+                    return;
                 }
             } else {
                 if (hudController.getSelection() == 0) {
@@ -966,18 +1003,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     else menuController.resetNameBuffer();
                     menuController.resetNameCursor(); hudController.update(); return;
                 } else if (hudController.getSelection() == 1) {
-                    if (!hudController.isValueEditing()) {
-                        hudController.handleEnter();
-                        return;
-                    }
-                    hudController.handleEnter();
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
-                        recipeManager.previewVaultToSlot(hudController.getVaultItems().get(hudController.getVaultIndex()).filename);
-                        triggerLutPreload();
-                        applyHardwareRecipe();
-                    }
-                    recipeManager.savePreferences();
-                    hudController.close();
+                    hudController.openRecipeLoadBrowser();
                     return;
                 } else if (hudController.getSelection() == 2) {
                     recipeManager.resetCurrentSlot();
@@ -985,10 +1011,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     applyHardwareRecipe();
                     hudController.close(); // NEW: Exit HUD immediately after reset
                     return;
-                } else if (hudController.getSelection() == 3) {
-                    if (!hudController.getVaultItems().isEmpty() && !hudController.getVaultItems().get(hudController.getVaultIndex()).filename.equals("NONE")) {
-                        menuController.setConfirmingDelete(true); hudController.setSelection(1); hudController.update(); return;
-                    }
                 }
             }
 
@@ -1001,7 +1023,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             return;
         }
 
-        if (hudController.getMode() == 0 && hudController.getSelection() == -1) {
+        if (hudController.isMatrixSaveAction()) {
             RTLProfile p = recipeManager.getCurrentProfile();
             if (!menuController.isNamingMode()) {
                 for (int i = 0; i < matrixManager.getCount(); i++) {
@@ -1674,16 +1696,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         llBottomBar = new LinearLayout(this);
         llBottomBar.setOrientation(LinearLayout.HORIZONTAL);
         llBottomBar.setGravity(Gravity.CENTER);
+        llBottomBar.setPadding(8, 0, 8, 0);
 
         tvValShutter = createBottomText();
         tvValAperture = createBottomText();
         tvValIso = createBottomText();
         tvValEv = createBottomText();
 
-        llBottomBar.addView(tvValShutter);
-        llBottomBar.addView(tvValAperture);
-        llBottomBar.addView(tvValIso);
-        llBottomBar.addView(tvValEv);
+        addBottomHudBubble(tvValShutter);
+        addBottomHudBubble(tvValAperture);
+        addBottomHudBubble(tvValIso);
+        addBottomHudBubble(tvValEv);
 
         FrameLayout.LayoutParams botParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         botParams.setMargins(0, 0, 0, 25);
@@ -1723,14 +1746,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
     private TextView createBottomText() {
         TextView tv = new TextView(this);
-        tv.setTextSize(24);
+        tv.setTextSize(21);
         if (digitalFont != null) tv.setTypeface(digitalFont);
         else tv.setTypeface(Typeface.DEFAULT_BOLD);
         tv.setTextColor(UiTheme.ACCENT);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
         tv.setShadowLayer(4, 0, 0, UiTheme.SHADOW);
-        tv.setPadding(18, 4, 18, 4);
+        tv.setPadding(8, 4, 8, 4);
         UiTheme.actionPanel(tv, UiTheme.ACCENT, false, true);
         return tv;
+    }
+
+    private void addBottomHudBubble(TextView tv) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1.0f);
+        lp.setMargins(4, 0, 4, 0);
+        llBottomBar.addView(tv, lp);
     }
 
     private TextView createSideTextIcon(String text) {
@@ -1815,7 +1846,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (shouldBlockShutterInput() && isShutterInput(sc, k)) return true;
-        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
+        if (isFullShutterScanCode(sc) && (e == null || e.getRepeatCount() == 0)) {
             captureWritePending = true;
             showSavingToSdStatus();
             armFileScanner();

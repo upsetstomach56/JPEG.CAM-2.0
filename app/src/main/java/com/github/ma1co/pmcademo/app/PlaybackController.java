@@ -32,9 +32,11 @@ public class PlaybackController {
     }
 
     private static final String TAG = "JPEG.CAM";
-    private static final int GRID_PAGE_SIZE = 4;
-    private static final int THUMB_REQ_WIDTH = 220;
-    private static final int THUMB_REQ_HEIGHT = 124;
+    private static final int GRID_COLUMNS = 3;
+    private static final int GRID_ROWS = 2;
+    private static final int GRID_PAGE_SIZE = GRID_COLUMNS * GRID_ROWS;
+    private static final int THUMB_REQ_WIDTH = 150;
+    private static final int THUMB_REQ_HEIGHT = 84;
 
     private final Context      context;
     private final HostCallback host;
@@ -44,12 +46,15 @@ public class PlaybackController {
     private boolean active        = false;
     private boolean photoOpen     = false;
     private boolean backSelected  = false;
+    private boolean deleteSelected = false;
+    private boolean confirmDelete = false;
     private Bitmap  currentBitmap = null;
 
     private final FrameLayout  container;
     private final ImageView    imageView;
     private final TextView     infoText;
     private final TextView     backText;
+    private final TextView     deleteText;
     private final TextView     titleText;
     private final LinearLayout gridContainer;
     private final LinearLayout[] gridTiles  = new LinearLayout[GRID_PAGE_SIZE];
@@ -101,6 +106,15 @@ public class PlaybackController {
         titleText.setShadowLayer(2, 0, 0, UiTheme.SHADOW);
         header.addView(titleText, new LinearLayout.LayoutParams(0, dp(40), 1f));
 
+        deleteText = new TextView(context);
+        deleteText.setText("DELETE");
+        deleteText.setTextSize(14);
+        deleteText.setTypeface(Typeface.DEFAULT_BOLD);
+        deleteText.setGravity(Gravity.CENTER);
+        deleteText.setPadding(dp(10), dp(7), dp(10), dp(7));
+        UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, false, false);
+        header.addView(deleteText, new LinearLayout.LayoutParams(dp(118), dp(40)));
+
         gridContainer = new LinearLayout(context);
         gridContainer.setOrientation(LinearLayout.VERTICAL);
         gridContainer.setPadding(dp(14), dp(62), dp(14), dp(10));
@@ -109,15 +123,15 @@ public class PlaybackController {
                 FrameLayout.LayoutParams.MATCH_PARENT);
         container.addView(gridContainer, gridParams);
 
-        for (int r = 0; r < 2; r++) {
+        for (int r = 0; r < GRID_ROWS; r++) {
             LinearLayout row = new LinearLayout(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
             gridContainer.addView(row, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     0,
                     1f));
-            for (int c = 0; c < 2; c++) {
-                int tileIndex = r * 2 + c;
+            for (int c = 0; c < GRID_COLUMNS; c++) {
+                int tileIndex = r * GRID_COLUMNS + c;
                 LinearLayout tile = new LinearLayout(context);
                 tile.setOrientation(LinearLayout.VERTICAL);
                 tile.setPadding(dp(8), dp(8), dp(8), dp(6));
@@ -192,6 +206,8 @@ public class PlaybackController {
         active = true;
         photoOpen = false;
         backSelected = false;
+        deleteSelected = false;
+        confirmDelete = false;
         index = 0;
         host.getMainUIContainer().setVisibility(View.GONE);
         container.setVisibility(View.VISIBLE);
@@ -202,6 +218,8 @@ public class PlaybackController {
         active = false;
         photoOpen = false;
         backSelected = false;
+        deleteSelected = false;
+        confirmDelete = false;
         container.setVisibility(View.GONE);
         host.getMainUIContainer().setVisibility(host.getDisplayState() == 0 ? View.VISIBLE : View.GONE);
         imageView.setImageDrawable(null);
@@ -215,9 +233,17 @@ public class PlaybackController {
         if (photoOpen) {
             photoOpen = false;
             backSelected = false;
+            deleteSelected = false;
+            confirmDelete = false;
             renderGrid();
         } else if (backSelected) {
             exit();
+        } else if (deleteSelected) {
+            if (confirmDelete) deleteSelectedPhoto();
+            else {
+                confirmDelete = true;
+                renderGrid();
+            }
         } else {
             showImage(index);
         }
@@ -225,11 +251,33 @@ public class PlaybackController {
 
     public void navigate(int direction) {
         if (!active || files.isEmpty()) return;
+        if (confirmDelete) {
+            confirmDelete = false;
+            renderGrid();
+            return;
+        }
         if (photoOpen) {
             showImage(index + (direction >= 0 ? 1 : -1));
         } else {
             if (backSelected) {
-                if (direction == 2 || direction == 1 || direction == -1) backSelected = false;
+                if (direction == 1) {
+                    backSelected = false;
+                    deleteSelected = true;
+                } else if (direction == 2 || direction == -1) {
+                    backSelected = false;
+                    deleteSelected = false;
+                }
+                renderGrid();
+                return;
+            }
+            if (deleteSelected) {
+                if (direction == -1) {
+                    deleteSelected = false;
+                    backSelected = true;
+                } else if (direction == 2 || direction == 1) {
+                    deleteSelected = false;
+                    backSelected = false;
+                }
                 renderGrid();
                 return;
             }
@@ -237,18 +285,21 @@ public class PlaybackController {
             int pageStart = currentPage() * GRID_PAGE_SIZE;
             int local = index - pageStart;
             int targetLocal = local;
+            int row = local / GRID_COLUMNS;
+            int column = local % GRID_COLUMNS;
 
             if (direction == -2) {
-                if (local < 2) {
-                    backSelected = true;
+                if (row == 0) {
+                    backSelected = column == 0;
+                    deleteSelected = column != 0;
                     renderGrid();
                     return;
                 }
-                targetLocal = local - 2;
+                targetLocal = local - GRID_COLUMNS;
             } else if (direction == 2) {
-                targetLocal = local + 2;
+                targetLocal = local + GRID_COLUMNS;
             } else if (direction == -1) {
-                if ((local % 2) == 1) {
+                if (column > 0) {
                     targetLocal = local - 1;
                 } else {
                     moveGridPage(-1);
@@ -256,7 +307,7 @@ public class PlaybackController {
                     return;
                 }
             } else if (direction == 1) {
-                if ((local % 2) == 0 && local + 1 < GRID_PAGE_SIZE && pageStart + local + 1 < files.size()) {
+                if (column < GRID_COLUMNS - 1 && local + 1 < GRID_PAGE_SIZE && pageStart + local + 1 < files.size()) {
                     targetLocal = local + 1;
                 } else {
                     moveGridPage(1);
@@ -281,9 +332,12 @@ public class PlaybackController {
         imageView.setVisibility(View.GONE);
         infoText.setVisibility(View.GONE);
         gridContainer.setVisibility(View.VISIBLE);
-        titleText.setText("PHOTOS  < PAGE " + (currentPage() + 1) + " / " + pageCount() + " >");
+        titleText.setText(confirmDelete ? "DELETE " + files.get(index).getName() + "?" : "PHOTOS  < PAGE " + (currentPage() + 1) + " / " + pageCount() + " >");
         UiTheme.pageTabPanel(backText, UiTheme.ACCENT, backSelected, false);
         backText.setTextColor(backSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        deleteText.setText(confirmDelete ? "CONFIRM?" : "DELETE");
+        UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, deleteSelected, false);
+        deleteText.setTextColor(deleteSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
 
         int pageStart = currentPage() * GRID_PAGE_SIZE;
         recycleGridBitmaps();
@@ -301,7 +355,7 @@ public class PlaybackController {
             }
 
             File file = files.get(fileIndex);
-            boolean selected = !backSelected && fileIndex == index;
+            boolean selected = !backSelected && !deleteSelected && fileIndex == index;
             tile.setVisibility(View.VISIBLE);
             UiTheme.tilePanel(tile, UiTheme.ACCENT, selected);
             label.setText(file.getName());
@@ -320,6 +374,8 @@ public class PlaybackController {
         index = idx;
         photoOpen = true;
         backSelected = false;
+        deleteSelected = false;
+        confirmDelete = false;
         File file = files.get(idx);
 
         try {
@@ -335,6 +391,9 @@ public class PlaybackController {
             titleText.setText("PHOTO  " + (idx + 1) + " / " + files.size());
             UiTheme.pageTabPanel(backText, UiTheme.ACCENT, true, false);
             backText.setTextColor(UiTheme.TEXT);
+            deleteText.setText("DELETE");
+            UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, false, false);
+            deleteText.setTextColor(UiTheme.TEXT_MUTED);
 
             if (file.length() == 0) {
                 infoText.setText((idx + 1) + "/" + files.size() + "\n[ERROR: 0-BYTE FILE]");
@@ -485,6 +544,29 @@ public class PlaybackController {
         if (nextIndex >= files.size()) nextIndex = files.size() - 1;
         if (nextIndex < nextStart) nextIndex = nextStart;
         index = nextIndex;
+    }
+
+    private void deleteSelectedPhoto() {
+        if (files.isEmpty() || index < 0 || index >= files.size()) return;
+        File file = files.get(index);
+        boolean deleted = file.exists() && file.delete();
+        confirmDelete = false;
+        deleteSelected = false;
+        backSelected = false;
+        if (!deleted) {
+            titleText.setText("DELETE FAILED: " + file.getName());
+            renderGrid();
+            return;
+        }
+        files.remove(index);
+        recycleCurrentBitmap();
+        recycleGridBitmaps();
+        if (files.isEmpty()) {
+            exit();
+            return;
+        }
+        if (index >= files.size()) index = files.size() - 1;
+        renderGrid();
     }
 
     private void recycleCurrentBitmap() {
