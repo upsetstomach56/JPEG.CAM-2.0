@@ -231,19 +231,21 @@ public class PlaybackController {
     public void select() {
         if (!active) return;
         if (photoOpen) {
-            photoOpen = false;
-            backSelected = false;
-            deleteSelected = false;
-            confirmDelete = false;
-            renderGrid();
-        } else if (backSelected) {
-            exit();
-        } else if (deleteSelected) {
-            if (confirmDelete) deleteSelectedPhoto();
-            else {
-                confirmDelete = true;
+            if (deleteSelected) {
+                if (confirmDelete) deleteSelectedPhoto();
+                else {
+                    confirmDelete = true;
+                    renderPhotoHeader();
+                }
+            } else {
+                photoOpen = false;
+                backSelected = false;
+                deleteSelected = false;
+                confirmDelete = false;
                 renderGrid();
             }
+        } else if (backSelected) {
+            exit();
         } else {
             showImage(index);
         }
@@ -253,29 +255,22 @@ public class PlaybackController {
         if (!active || files.isEmpty()) return;
         if (confirmDelete) {
             confirmDelete = false;
-            renderGrid();
+            if (photoOpen) renderPhotoHeader();
+            else renderGrid();
             return;
         }
         if (photoOpen) {
-            showImage(index + (direction >= 0 ? 1 : -1));
+            if (direction == 1 && backSelected) {
+                backSelected = false;
+                deleteSelected = true;
+            } else if (direction == -1 && deleteSelected) {
+                deleteSelected = false;
+                backSelected = true;
+            }
+            renderPhotoHeader();
         } else {
             if (backSelected) {
-                if (direction == 1) {
-                    backSelected = false;
-                    deleteSelected = true;
-                } else if (direction == 2 || direction == -1) {
-                    backSelected = false;
-                    deleteSelected = false;
-                }
-                renderGrid();
-                return;
-            }
-            if (deleteSelected) {
-                if (direction == -1) {
-                    deleteSelected = false;
-                    backSelected = true;
-                } else if (direction == 2 || direction == 1) {
-                    deleteSelected = false;
+                if (direction == 2 || direction == 1 || direction == -1) {
                     backSelected = false;
                 }
                 renderGrid();
@@ -290,8 +285,7 @@ public class PlaybackController {
 
             if (direction == -2) {
                 if (row == 0) {
-                    backSelected = column == 0;
-                    deleteSelected = column != 0;
+                    backSelected = true;
                     renderGrid();
                     return;
                 }
@@ -335,9 +329,10 @@ public class PlaybackController {
         titleText.setText(confirmDelete ? "DELETE " + files.get(index).getName() + "?" : "PHOTOS  < PAGE " + (currentPage() + 1) + " / " + pageCount() + " >");
         UiTheme.pageTabPanel(backText, UiTheme.ACCENT, backSelected, false);
         backText.setTextColor(backSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
-        deleteText.setText(confirmDelete ? "CONFIRM?" : "DELETE");
-        UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, deleteSelected, false);
-        deleteText.setTextColor(deleteSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        deleteText.setVisibility(View.GONE);
+        deleteText.setText("DELETE");
+        UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, false, false);
+        deleteText.setTextColor(UiTheme.TEXT_MUTED);
 
         int pageStart = currentPage() * GRID_PAGE_SIZE;
         recycleGridBitmaps();
@@ -355,7 +350,7 @@ public class PlaybackController {
             }
 
             File file = files.get(fileIndex);
-            boolean selected = !backSelected && !deleteSelected && fileIndex == index;
+            boolean selected = !backSelected && fileIndex == index;
             tile.setVisibility(View.VISIBLE);
             UiTheme.tilePanel(tile, UiTheme.ACCENT, selected);
             label.setText(file.getName());
@@ -373,7 +368,7 @@ public class PlaybackController {
 
         index = idx;
         photoOpen = true;
-        backSelected = false;
+        backSelected = true;
         deleteSelected = false;
         confirmDelete = false;
         File file = files.get(idx);
@@ -388,12 +383,7 @@ public class PlaybackController {
             gridContainer.setVisibility(View.GONE);
             imageView.setVisibility(View.VISIBLE);
             infoText.setVisibility(View.VISIBLE);
-            titleText.setText("PHOTO  " + (idx + 1) + " / " + files.size());
-            UiTheme.pageTabPanel(backText, UiTheme.ACCENT, true, false);
-            backText.setTextColor(UiTheme.TEXT);
-            deleteText.setText("DELETE");
-            UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, false, false);
-            deleteText.setTextColor(UiTheme.TEXT_MUTED);
+            renderPhotoHeader();
 
             if (file.length() == 0) {
                 infoText.setText((idx + 1) + "/" + files.size() + "\n[ERROR: 0-BYTE FILE]");
@@ -567,6 +557,17 @@ public class PlaybackController {
         }
         if (index >= files.size()) index = files.size() - 1;
         renderGrid();
+    }
+
+    private void renderPhotoHeader() {
+        if (files.isEmpty() || index < 0 || index >= files.size()) return;
+        titleText.setText(confirmDelete ? "DELETE " + files.get(index).getName() + "?" : "PHOTO  " + (index + 1) + " / " + files.size());
+        UiTheme.pageTabPanel(backText, UiTheme.ACCENT, backSelected, false);
+        backText.setTextColor(backSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
+        deleteText.setVisibility(View.VISIBLE);
+        deleteText.setText(confirmDelete ? "CONFIRM?" : "DELETE");
+        UiTheme.pageTabPanel(deleteText, UiTheme.ACCENT, deleteSelected, false);
+        deleteText.setTextColor(deleteSelected ? UiTheme.TEXT : UiTheme.TEXT_MUTED);
     }
 
     private void recycleCurrentBitmap() {

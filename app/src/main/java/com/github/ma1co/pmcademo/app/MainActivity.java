@@ -665,6 +665,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         final File f = new File(path);
         if (!f.exists()) return;
 
+        captureWritePending = true;
         isProcessing = true;
         showSavingToSdStatus();
 
@@ -770,10 +771,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 keyCode == ScalarInput.ISV_KEY_S1_2 || keyCode == ScalarInput.ISV_KEY_S2;
     }
 
-    private boolean isFullShutterScanCode(int sc) {
-        return sc == ScalarInput.ISV_KEY_S1_2 || sc == ScalarInput.ISV_KEY_S2;
-    }
-
     private boolean shouldBlockShutterInput() {
         return isProcessing || captureWritePending;
     }
@@ -863,7 +860,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
             afOverlay.setDiptychCenterX(-1);
         }
         if (displayState == 0 && !menuController.isOpen() && !playbackController.isActive()) setLiveUiSuppressed(false);
-        armFileScanner();
     }
 
     public void armFileScanner() {
@@ -943,6 +939,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                 hudController.closeRecipeLoadBrowser();
                 return;
             }
+            if (hudController.getMode() == 10 && hudController.isRecipeDeleteBrowser()) {
+                hudController.closeRecipeDeleteBrowser();
+                return;
+            }
             menuController.setNamingMode(false);
             menuController.setConfirmingDelete(false);
             hudController.close();
@@ -975,13 +975,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     return;
                 }
             } else if (hudController.isRecipeLoadBrowser()) {
-                if (hudController.isRecipeBrowserDeleteAction()) {
-                    if (hudController.getRecipeBrowserSelectedVaultIndex() >= 0) {
-                        menuController.setConfirmingDelete(true);
-                        hudController.beginRecipeDeleteConfirm();
-                    }
-                    return;
-                }
                 int loadIndex = hudController.getRecipeBrowserSelectedVaultIndex();
                 if (loadIndex >= 0 && loadIndex < hudController.getVaultItems().size()) {
                     RecipeManager.VaultItem item = hudController.getVaultItems().get(loadIndex);
@@ -994,6 +987,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     }
                     return;
                 }
+            } else if (hudController.isRecipeDeleteBrowser()) {
+                if (hudController.getRecipeBrowserSelectedVaultIndex() >= 0) {
+                    menuController.setConfirmingDelete(true);
+                    hudController.beginRecipeDeleteConfirm();
+                }
+                return;
             } else {
                 if (hudController.getSelection() == 0) {
                     menuController.setNamingMode(true);
@@ -1010,6 +1009,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
                     triggerLutPreload(); // Ensure the hardware actually clears the current LUT
                     applyHardwareRecipe();
                     hudController.close(); // NEW: Exit HUD immediately after reset
+                    return;
+                } else if (hudController.getSelection() == 3) {
+                    hudController.openRecipeDeleteBrowser();
                     return;
                 }
             }
@@ -1846,9 +1848,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         }
 
         if (shouldBlockShutterInput() && isShutterInput(sc, k)) return true;
-        if (isFullShutterScanCode(sc) && (e == null || e.getRepeatCount() == 0)) {
-            captureWritePending = true;
-            showSavingToSdStatus();
+        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
             armFileScanner();
         }
 
@@ -1875,6 +1875,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
 
         // Protect shutter inputs while processing
         if (isProcessing && isShutterInput(sc, k)) return true;
+
+        if (isFullShutterInput(sc, k) && (e == null || e.getRepeatCount() == 0)) {
+            armFileScanner();
+        }
 
         // --- CRITICAL: Swallow the release event so the Sony OS does nothing ---
         if (k == ScalarInput.ISV_KEY_PLAY || k == android.view.KeyEvent.KEYCODE_MEDIA_PLAY) {

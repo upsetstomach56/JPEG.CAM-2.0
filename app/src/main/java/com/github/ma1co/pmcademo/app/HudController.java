@@ -73,6 +73,7 @@ public class HudController {
     private List<RecipeManager.VaultItem> vaultItems = new ArrayList<>();
     private int      vaultIndex          = 0;
     private boolean  recipeLoadBrowser   = false;
+    private boolean  recipeDeleteBrowser = false;
     private int      recipeListOffset    = 0;
 
     // -----------------------------------------------------------------------
@@ -263,6 +264,7 @@ public class HudController {
     }
 
     public boolean isRecipeLoadBrowser() { return recipeLoadBrowser; }
+    public boolean isRecipeDeleteBrowser() { return recipeDeleteBrowser; }
 
     public int getVaultRecipeCount() {
         if (vaultItems == null || vaultItems.isEmpty()) refreshVaultItems();
@@ -283,12 +285,9 @@ public class HudController {
         return 0;
     }
 
-    public boolean isRecipeBrowserDeleteAction() {
-        return recipeLoadBrowser && getVaultRecipeCount() > 0 && selection == getVaultRecipeCount();
-    }
-
     public void openRecipeLoadBrowser() {
         recipeLoadBrowser = true;
+        recipeDeleteBrowser = false;
         valueEditing = false;
         refreshVaultItems();
         selection = getVaultRecipeCount() > 0 ? Math.max(0, Math.min(vaultIndex, getVaultRecipeCount() - 1)) : 0;
@@ -307,10 +306,30 @@ public class HudController {
         refresh();
     }
 
+    public void openRecipeDeleteBrowser() {
+        recipeDeleteBrowser = true;
+        recipeLoadBrowser = false;
+        valueEditing = false;
+        refreshVaultItems();
+        selection = getVaultRecipeCount() > 0 ? Math.max(0, Math.min(vaultIndex, getVaultRecipeCount() - 1)) : 0;
+        recipeListOffset = 0;
+        clampRecipeBrowserWindow();
+        markNavigating();
+        refresh();
+    }
+
+    public void closeRecipeDeleteBrowser() {
+        recipeDeleteBrowser = false;
+        valueEditing = false;
+        selection = 3;
+        markNavigating();
+        refresh();
+    }
+
     public void beginRecipeDeleteConfirm() {
         int idx = getRecipeBrowserSelectedVaultIndex();
         if (idx >= 0) vaultIndex = idx;
-        selection = 1;
+        selection = 0;
         valueEditing = false;
         markNavigating();
         refresh();
@@ -328,7 +347,7 @@ public class HudController {
             if (vaultIndex < 0) vaultIndex = 0;
             selection = vaultIndex;
             clampRecipeBrowserWindow();
-            previewRecipeBrowserSelection();
+            if (recipeLoadBrowser) previewRecipeBrowserSelection();
         }
         markNavigating();
         refresh();
@@ -344,6 +363,7 @@ public class HudController {
         selection = defaultSel;
         valueEditing = false;
         recipeLoadBrowser = false;
+        recipeDeleteBrowser = false;
         recipeListOffset = 0;
         markNavigating();
         host.getMenuController().setConfirmingDelete(false);
@@ -381,6 +401,7 @@ public class HudController {
         active = false;
         valueEditing = false;
         recipeLoadBrowser = false;
+        recipeDeleteBrowser = false;
         recipeListOffset = 0;
         stopFlash();
         header.setVisibility(View.GONE);
@@ -396,6 +417,7 @@ public class HudController {
         active = false;
         valueEditing = false;
         recipeLoadBrowser = false;
+        recipeDeleteBrowser = false;
         recipeListOffset = 0;
         stopFlash();
         header.setVisibility(View.GONE);
@@ -514,6 +536,8 @@ public class HudController {
         if (mode == 10 && recipeLoadBrowser) {
             clampRecipeBrowserWindow();
             previewRecipeBrowserSelection();
+        } else if (mode == 10 && recipeDeleteBrowser) {
+            clampRecipeBrowserWindow();
         }
         markNavigating();
         refresh();
@@ -539,7 +563,7 @@ public class HudController {
         if      (mode == 0)                         return 8;
         else if (mode == 1)                         return 5;
         else if (mode == 3)                         return 2;
-        else if (mode == 10)                        return recipeLoadBrowser ? Math.max(0, getVaultRecipeCount()) : 2;
+        else if (mode == 10)                        return (recipeLoadBrowser || recipeDeleteBrowser) ? Math.max(0, getVaultRecipeCount() - 1) : 3;
         else if (mode == 4 || mode == 6)            return 1;
         else if (mode == 5) {
             String eff = host.getRecipeManager().getCurrentProfile().pictureEffect;
@@ -663,12 +687,6 @@ public class HudController {
             if (selection == 0) { String[] eff={"off","toy-camera","pop-color","posterization","retro-photo","soft-high-key","part-color","rough-mono","soft-focus","hdr-art","richtone-mono","miniature","watercolor","illust"}; int idx=0; for(int i=0;i<eff.length;i++) if(eff[i].equals(p.pictureEffect)) idx=i; p.pictureEffect=eff[(idx+dir+eff.length)%eff.length]; }
         } else if (mode == 9) {
             if (selection == 0) { String[] dro={"OFF","AUTO","LVL 1","LVL 2","LVL 3","LVL 4","LVL 5"}; int idx=0; for(int i=0;i<dro.length;i++) if(dro[i].equalsIgnoreCase(p.dro)) idx=i; p.dro=dro[(idx+dir+dro.length)%dro.length]; }
-        } else if (mode == 10) {
-            if (selection == 1 && !vaultItems.isEmpty() && !vaultItems.get(0).filename.equals("NONE")) {
-                vaultIndex = (vaultIndex + dir + vaultItems.size()) % vaultItems.size();
-                host.getRecipeManager().previewVaultToSlot(vaultItems.get(vaultIndex).filename);
-                host.onLutPreloadNeeded();
-            }
         }
         refresh();
         host.scheduleHardwareApply();
@@ -718,8 +736,10 @@ public class HudController {
             wbValueText.setText(abStr + ", " + gmStr);
             wbValueText.setTextColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             wbCursor.setBackgroundColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
-            if (selection == 0) {
+            if (selection == 0 && valueEditing) {
                 UiTheme.pageTabPanel(wbGrid, UiTheme.ACCENT, false, true);
+            } else if (selection == 0) {
+                UiTheme.pageTabPanel(wbGrid, UiTheme.ACCENT, true, true);
             } else {
                 UiTheme.panel(wbGrid);
             }
@@ -811,7 +831,7 @@ public class HudController {
             tip="Dynamic Range Optimizer: Recovers shadow detail in high-contrast scenes";
         } else if (mode == 10) {
             if(mc.isConfirmingDelete()){activeCells=2;labels=new String[]{"DELETE RECIPE?","CANCEL"};values[0]="[ CONFIRM DELETE ]";values[1]="[ GO BACK ]";if(selection==0) tip="WARNING: This will permanently delete the recipe from the SD card."; else tip="Cancel and return to the recipe list.";}
-            else if(recipeLoadBrowser){
+            else if(recipeLoadBrowser || recipeDeleteBrowser){
                 refreshVaultItems();
                 int count = getVaultRecipeCount();
                 if(count<=0){
@@ -826,37 +846,33 @@ public class HudController {
                         labels[i]="RECIPE "+(idx+1);
                         values[i]=name;
                     }
-                    int deleteCell = visible;
-                    activeCells = visible + 1;
-                    labels[deleteCell]="DELETE SELECTED";
-                    String deleteName = (vaultIndex>=0&&vaultIndex<count&&vaultItems.get(vaultIndex).profileName!=null)?vaultItems.get(vaultIndex).profileName:"RECIPE";
-                    if(deleteName.length()>12) deleteName=deleteName.substring(0,10)+"..";
-                    values[deleteCell]=deleteName;
-                    selectedCell = selection == count ? deleteCell : selection - recipeListOffset;
+                    activeCells = visible;
+                    selectedCell = selection - recipeListOffset;
                     if(selection == -2) selectedCell = -2;
                     else if(selectedCell < 0 || selectedCell >= activeCells) selectedCell = 0;
-                    tip = selection == count ? "Delete the highlighted saved recipe from the SD card." : "Move to preview recipes. Press ENTER to load the highlighted recipe.";
+                    tip = recipeDeleteBrowser ? "Press ENTER to confirm deleting the highlighted recipe." : "Move to preview recipes. Press ENTER to load the highlighted recipe.";
                 }
             } else{
-                activeCells=3;labels=new String[]{"SAVE + NAME","LOAD RECIPE","RESET SLOT"};
+                activeCells=4;labels=new String[]{"SAVE + NAME","LOAD RECIPE","RESET SLOT","DELETE RECIPE"};
                 refreshVaultItems();
                 int count = getVaultRecipeCount();
-                values[0]="CURRENT SLOT"; values[1]=count+" SAVED"; values[2]="DEFAULT";
+                values[0]="CURRENT SLOT"; values[1]=count+" SAVED"; values[2]="DEFAULT"; values[3]=count+" SAVED";
                 if(selection==0) tip="Name and save the current recipe settings.";
-                else if(selection==1) tip="Open saved recipes, preview them, then load or delete.";
+                else if(selection==1) tip="Open saved recipes, preview them, then load.";
                 else if(selection==2) tip="Clear the active slot and return it to default settings.";
+                else if(selection==3) tip="Open saved recipes and delete the ones you no longer want.";
             }
             if(mc.isNamingMode()){
                 StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}
                 renderHeader(sb.toString());
                 headerTitle.setTextColor(UiTheme.WARN);
             } else {
-                renderHeader(recipeLoadBrowser ? "LOAD RECIPE" : "RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1));
+                renderHeader(recipeDeleteBrowser ? "DELETE RECIPE" : (recipeLoadBrowser ? "LOAD RECIPE" : "RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1)));
             }
             if(tvTop!=null){
                 if(mc.isNamingMode()){StringBuilder sb=new StringBuilder("NAME: ");char[] buf=mc.getNameBuffer();int pos=mc.getNameCursorPos();for(int i=0;i<buf.length;i++){if(i==pos)sb.append("[").append(buf[i]).append("]");else sb.append(buf[i]);}tvTop.setText(sb.toString());tvTop.setTextColor(UiTheme.WARN);}
                 else{
-                    tvTop.setText(recipeLoadBrowser ? "< BACK    LOAD RECIPE" : "< BACK    RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1));
+                    tvTop.setText(recipeDeleteBrowser ? "< BACK    DELETE RECIPE" : (recipeLoadBrowser ? "< BACK    LOAD RECIPE" : "< BACK    RECIPE MANAGER    SLOT "+(host.getRecipeManager().getCurrentSlot()+1)));
                     tvTop.setTextColor(selection == -2 ? selectedNavigationColor() : UiTheme.TEXT);
                 }
                 tvTop.setVisibility(View.VISIBLE);
