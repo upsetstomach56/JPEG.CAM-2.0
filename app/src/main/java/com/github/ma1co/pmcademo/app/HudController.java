@@ -737,7 +737,7 @@ public class HudController {
             wbValueText.setTextColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             wbCursor.setBackgroundColor(valueEditing ? UiTheme.WARN : UiTheme.ACCENT);
             if (selection == 0 && valueEditing) {
-                UiTheme.pageTabPanel(wbGrid, UiTheme.ACCENT, false, true);
+                UiTheme.activeOutlinePanel(wbGrid, UiTheme.ACCENT);
             } else if (selection == 0) {
                 UiTheme.pageTabPanel(wbGrid, UiTheme.ACCENT, true, true);
             } else {

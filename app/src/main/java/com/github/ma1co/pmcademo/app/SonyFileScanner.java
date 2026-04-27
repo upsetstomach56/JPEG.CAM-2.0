@@ -19,9 +19,11 @@ public class SonyFileScanner {
 
     private static final int POLL_INTERVAL_MS = 75;
     private static final int MAX_SCAN_ATTEMPTS = 67;
+    private static final int MAX_DEFERRED_SCAN_ATTEMPTS = 400;
     public boolean isPolling = false;
     private int scanAttempts = 0;
     private long scanStartedMs = 0;
+    private boolean waitingForReady = false;
 
     public interface ScannerCallback {
         void onNewPhotoDetected(String filePath, long scannerStartedMs, long detectedMs, int attempts);
@@ -48,12 +50,14 @@ public class SonyFileScanner {
         isPolling = true;
         scanAttempts = 0;
         scanStartedMs = System.currentTimeMillis();
+        waitingForReady = false;
         scheduleNextPoll(0);
         Log.d("JPEG.CAM", "Scanner Woken Up: Starting 5-second window...");
     }
 
     public void stop() {
         isPolling = false;
+        waitingForReady = false;
         if (backgroundHandler != null) {
             backgroundHandler.removeCallbacksAndMessages(null);
         }
@@ -83,7 +87,8 @@ public class SonyFileScanner {
             @Override
             public void run() {
                 if (isPolling) {
-                    if (scanAttempts++ >= MAX_SCAN_ATTEMPTS) {
+                    int maxAttempts = waitingForReady ? MAX_DEFERRED_SCAN_ATTEMPTS : MAX_SCAN_ATTEMPTS;
+                    if (scanAttempts++ >= maxAttempts) {
                         stop();
                         Log.d("JPEG.CAM", "Scanner Timed Out: Going back to sleep.");
                         return;
@@ -191,9 +196,10 @@ public class SonyFileScanner {
     }
 
     private void findNewestFile(boolean triggerCallback) {
-        File dcimDir = Filepaths.getDcimDir(); 
+        File dcimDir = Filepaths.getDcimDir();
         if (!dcimDir.exists() || !dcimDir.isDirectory()) return;
 
+        boolean deferredCandidate = false;
         File[] subDirs = dcimDir.listFiles();
         if (subDirs != null) {
             for (File dir : subDirs) {
@@ -205,15 +211,21 @@ public class SonyFileScanner {
                             if (name.endsWith(".JPG") && !name.startsWith("FILM_") && !name.startsWith("PRCS")) {
                                 String currentFilePath = f.getAbsolutePath();
                                 if (!knownFiles.contains(currentFilePath)) {
-                                    
-                                    if (f.length() < 1024) continue; 
+
+                                    if (f.length() < 1024) continue;
+
+                                    if (triggerCallback && mCallback != null && !mCallback.isReadyToProcess()) {
+                                        deferredCandidate = true;
+                                        continue;
+                                    }
 
                                     knownFiles.add(currentFilePath);
-                                    
+
                                     // SUCCESS! Kill the loop immediately
-                                    isPolling = false; 
-                                    
-                                    if (triggerCallback && mCallback != null && mCallback.isReadyToProcess()) {
+                                    isPolling = false;
+                                    waitingForReady = false;
+
+                                    if (triggerCallback && mCallback != null) {
                                         final String finalPathToProcess = currentFilePath;
                                         final long startedMs = scanStartedMs > 0 ? scanStartedMs : System.currentTimeMillis();
                                         final long detectedMs = System.currentTimeMillis();
@@ -231,5 +243,6 @@ public class SonyFileScanner {
                 }
             }
         }
+        if (triggerCallback && isPolling) waitingForReady = deferredCandidate;
     }
 }

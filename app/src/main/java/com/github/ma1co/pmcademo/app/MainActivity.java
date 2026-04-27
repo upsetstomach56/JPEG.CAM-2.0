@@ -241,7 +241,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback,
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if ("com.sony.scalar.database.avindex.action.AVINDEX_DATABASE_UPDATED".equals(action)) {
-                if (mScanner != null) mScanner.checkNow();
+                armFileScanner();
             }
         }
     };

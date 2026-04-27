@@ -62,6 +62,10 @@ public final class UiTheme {
         view.setBackgroundDrawable(rect(tint(accent, 48), tint(accent, 150), 1, 6));
     }
 
+    public static void activeOutlinePanel(View view, int accent) {
+        view.setBackgroundDrawable(rect(SURFACE, accent, 2, 8));
+    }
+
     public static void tabPanel(View view, int accent, boolean selected, boolean active) {
         if (selected) {
             view.setBackgroundDrawable(rect(tint(accent, 132), accent, 1, 7));
